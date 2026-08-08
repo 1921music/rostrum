@@ -1107,7 +1107,10 @@ class OpenPanel extends FilePanel {
     super(cell);
     this.mode = "open";
     // Filter out WWW - it's a source type but not a file browser tab
-    let fileSources = Object.entries(Score.sources).filter(([key]) => key !== "url").map(([, value]) => value);
+    let isExtension = typeof chrome !== "undefined" && chrome.runtime?.id;
+    let fileSources = Object.entries(Score.sources)
+      .filter(([key]) => key !== "url" && (key !== "pcloud" || isExtension))
+      .map(([, value]) => value);
     this.tabView = new TabView(this, "Recent", ...fileSources);
     this.body.append(this.tabView.elm);
     for (let title in this.tabView.tabs) {
@@ -1162,8 +1165,9 @@ class SavePanel extends FilePanel {
     super(cell);
     this.mode = "save";
     // Filter out WWW (url source)
+    let isExtension = typeof chrome !== "undefined" && chrome.runtime?.id;
     let fileSources = Object.entries(Score.sources)
-      .filter(([key]) => key !== "url")
+      .filter(([key]) => key !== "url" && (key !== "pcloud" || isExtension))
       .map(([, value]) => value);
     this.tabView = new TabView(this, ...fileSources);
     this.body.append(this.tabView.elm);
