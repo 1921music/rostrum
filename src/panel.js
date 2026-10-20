@@ -2224,6 +2224,10 @@ class TextPanel extends PencilPanel {
     "Bravura",
     "Vercetti",
     "Patrick Hand",
+    // The only one with Japanese glyphs. Choosing it explicitly makes the
+    // canvas and the saved PDF agree; leave another font selected and score.js
+    // still falls back to this one when it has to, so the text is never lost.
+    "Noto Sans JP",
     ] ;
  
   text = helm(`<div>Abc<br>123<br></div>`);
