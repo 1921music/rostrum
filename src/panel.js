@@ -1632,6 +1632,12 @@ class LayoutPanel extends Panel {
     for (let [key, face] of Object.entries(this.faces)) if (key != cell.key) face.remove();
 
     let handler = (e, tag, value, props) => {
+      // A Fit choice discards the remembered pan-zoom: what was asked for is
+      // this fit, not the view that had been pinched into place. The buttons are
+      // redo radios, so re-tapping the fit already chosen comes through here
+      // too -- which is what makes it the way back from a pinch.
+      if (tag == "fit" && _score_ && this.cell == Layout.activeLayout?.cell)
+        return void Layout.activeLayout.refit();
       if (tag == "fit") this.cell.stash.pz = null; // reset pz-set marker so layout will use fit setting
       if (tag == "pace") return; // no rebuild required
       if (_score_ && this.cell == Layout.activeLayout.cell) {
