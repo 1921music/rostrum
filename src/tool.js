@@ -2765,10 +2765,16 @@ class Wink {
     this.recordGroup = new ButtonGroup(this.view, {
       Start: { svg: "Start", toggle: "record" },
       Stop: { svg: "Stop", toggle: "record" },
-      Mark: { svg: "Mark", radio: "mark", redo: true },
+      Mark: { svg: "Mark", radio: "mark", redo: true, disabled: true },
     }, (e, property, tag) => {
-      if (tag == "Mark") this.turner.log?.label("wink");
-      else this.turner.record(!this.turner.recording);
+      if (tag != "Mark") this.turner.record(!this.turner.recording);
+      else if (this.turner.recording) {
+        this.turner.log.label("wink");
+        // Pressing it has to answer for itself: the reader is trying to say
+        // "that one was deliberate" and cannot tell from the panel whether
+        // they said it.
+        toast(`Marked, ${this.turner.log.marked} so far.`);
+      }
       this.refresh();
     });
     this.recordGroupElm.replace(this.recordGroup.elm);
@@ -2880,6 +2886,7 @@ class Wink {
     let turner = this.turner;
     this.view.watch = turner.running || turner.status == "loading" ? "Stop" : "Start";
     this.view.record = turner.recording ? "Stop" : "Start";
+    this.recordGroup.defs.Mark.disabled = !turner.recording;
     this.watchGroup.refresh();
     this.recordGroup.refresh();
     this.turnGroup.refresh();
@@ -2931,7 +2938,7 @@ class Wink {
     this.read.textContent = sample.face
       ? `yaw ${Math.round(sample.yaw)}°  pitch ${Math.round(sample.pitch)}°`
         + `  lean ${Math.round(sample.roll)}°  ${Math.round(sample.fps)} fps`
-        + `  ${this.turner.turns} turned`
+        + `  ${this.turner.asks} winks`
       : `no face  ${Math.round(sample.fps)} fps`;
 
     this.history.push({
@@ -3016,6 +3023,7 @@ class Wink {
     turned: "Your head is turned too far to read a wink from.",
     tilted: "Your head is tilted too far to read a wink from.",
     rolled: "Your head is leaned too far to read a wink from.",
-    slow: "The model is running too slowly to time a wink.",
+      slow: "The model is running too slowly to time a wink.",
+    cooling: "Just turned a page -- waiting a moment.",
   };
 }
