@@ -41,6 +41,9 @@ Build commands such as `--podium` and `build/podium.html` keep their existing na
 - On-screen piano keyboard with assisted tuning and pitch detection.
 - Audio/video recorder with instant replay.
 - Stopwatch and clock.
+- Wink page turning: hold one eye shut to turn the page, for players whose
+  hands are both busy. The camera is read on the device and nothing it sees is
+  sent anywhere.
 
 ## Browser Extension
 
