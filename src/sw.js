@@ -4,6 +4,19 @@
 let CACHE_NAME = 'rostrum-v1.0.0';
 // Cache Storage is shared by every app on this origin; isolate each deployment.
 const CACHE_SCOPE = 'rostrum-scope:' + self.registration.scope + ':';
+// The face-landmark model and runtime that Wink page turning reads a wink
+// with: 17 MB that is only ever fetched once the reader turns the feature on,
+// and that never changes unless the pinned version does. It gets a cache of
+// its own because CACHE_NAME carries the digest of the app, so every
+// deployment of Podium renames it -- and the activate handler below drops
+// every cache but the current one. Kept together with the app, the model would
+// be thrown away and downloaded again on each release, which is the one thing
+// a player on a phone at a rehearsal cannot afford. The static-host build
+// stamps this name with the digest of the files themselves, so a new pinned
+// version does replace them.
+const ASSET_CACHE_NAME = 'rostrum-assets-v1';
+// Where those files live, relative to the deployment.
+const assetPath = /(^|\/)mediapipe\//;
 // Relative to this script, so Podium works when served from a subdirectory.
 // The packaged page is podium.html where Podium is deployed alongside the rest
 // of the site, and index.html where the deployment is Podium alone, so try both
@@ -40,7 +53,7 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames.map((cacheName) => {
-          if (cacheName.startsWith(CACHE_SCOPE) && cacheName !== CACHE_SCOPE + CACHE_NAME) {
+          if (cacheName.startsWith(CACHE_SCOPE) && cacheName !== CACHE_SCOPE + CACHE_NAME && cacheName !== CACHE_SCOPE + ASSET_CACHE_NAME) {
             console.log('Podium: Deleting old cache:', cacheName);
             return caches.delete(cacheName);
           }
@@ -77,7 +90,7 @@ self.addEventListener('fetch', (event) => {
   }
 
   event.respondWith(
-    caches.open(CACHE_SCOPE + CACHE_NAME).then(cache => cache.match(event.request))
+    caches.open(CACHE_SCOPE + (assetPath.test(new URL(event.request.url).pathname) ? ASSET_CACHE_NAME : CACHE_NAME)).then(cache => cache.match(event.request))
       .then((response) => {
         // Cache hit - return response from cache
         if (response) {
@@ -102,7 +115,8 @@ self.addEventListener('fetch', (event) => {
           // them keeps the canonical (no-query) entry set only at install time,
           // so it stays pinned until a real service worker update ships.
           if (event.request.url.startsWith(self.location.origin) && !new URL(event.request.url).search) {
-            caches.open(CACHE_SCOPE + CACHE_NAME)
+            const url = new URL(event.request.url);
+            caches.open(CACHE_SCOPE + (assetPath.test(url.pathname) ? ASSET_CACHE_NAME : CACHE_NAME))
               .then((cache) => {
                 cache.put(event.request, responseToCache);
               });
