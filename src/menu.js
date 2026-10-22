@@ -861,6 +861,7 @@ class Menu {
             yawMax: 32,
             pitchMax: 28,
             rollMax: 24,
+            sepMin: 110,
           },
         },
         volume: { name: "Volume", svgPath: iconPaths["Volume"], stash: { volume:1}, },
