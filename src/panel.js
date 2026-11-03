@@ -730,8 +730,9 @@ for more details.</p>
         <div style="font-size:1.5em;display:flex;flex-direction:column;align-items:center;gap:0.2em;">
           <div style="white-space:nowrap;">ROSTRUM: Sheet Music Studio</div>
           ${iconSvg("Podium", { size: "8em" })}
-          <div>Based on Podium ${_podiumVersion_}</div>
-          <a style="font-size:.6em;" href="https://studiop5.org/releaseNotes.html#v${_podiumVersion_}">Upstream Release Notes</a>
+          <div>Version ${_podiumVersion_}</div>
+          <div style="font-size:.6em;">Based on Podium ${_podiumUpstreamVersion_}</div>
+          <a style="font-size:.6em;" href="https://github.com/1921music/rostrum/blob/v${_podiumVersion_}/CHANGELOG.md">Release Notes</a>
           <div style="font-size:.6em;color:#888;margin-top:0.5em;">${typeof chrome !== "undefined" && chrome.runtime?.id ? "Browser Extension" : window.matchMedia("(display-mode: standalone)").matches ? "Progressive Web App" : location.protocol + "//" + location.host}</div>
           <div style="font-size:.6em;color:#888;" translate="no">Build ${_podiumBuild_}</div>
           ${this.commitLines()}

@@ -108,6 +108,8 @@ test("the About panel names the build's commit both ways", async ({ page }) => {
     text: await face.textContent(),
     commit: await page.evaluate(() => window._podiumCommit_),
   };
+  expect(shown.text).toContain("Version 1.0.0");
+  expect(shown.text).toContain("Based on Podium 2.3.1");
   const dirty = shown.commit.endsWith("-dirty");
   const hash = dirty ? shown.commit.slice(0, -6) : shown.commit;
   expect(shown.text).toContain(`Commit ${hash.slice(0, 8)}${dirty ? "-dirty" : ""}`);
@@ -284,10 +286,10 @@ test("the service worker's cache name follows everything it serves", async () =>
     if (url !== "./") hash.update(fs.readFileSync(path.join(pagesDir, url.slice(2))));
   const digest = hash.digest("hex").slice(0, 12);
 
-  expect(worker).toContain(`let CACHE_NAME = 'rostrum-v2.3.1-${digest}';`);
+  expect(worker).toContain(`let CACHE_NAME = 'rostrum-v1.0.0-${digest}';`);
   // The source must stay unstamped, or the build would have nothing to replace.
   const source = fs.readFileSync(path.join(__dirname, "..", "src", "sw.js"), "utf8");
-  expect(source).toContain("let CACHE_NAME = 'rostrum-v2.3.1';");
+  expect(source).toContain("let CACHE_NAME = 'rostrum-v1.0.0';");
   expect(source).toContain("const docToCache = [];");
 });
 
@@ -307,7 +309,7 @@ test("installing the worker really stores the guidebook", async ({ page }) => {
   });
 
   try {
-    expect(stored.name).toMatch(/^rostrum-v2\.3\.1-[0-9a-f]{12}$/);
+    expect(stored.name).toMatch(/^rostrum-scope:.*:rostrum-v1\.0\.0-[0-9a-f]{12}$/);
     expect(stored.keys).toContain("/pages/Guidebook.ja.html");
     expect(stored.keys.filter(p => p.endsWith(".webp"))).toHaveLength(62);
     expect(stored.keys.filter(p => p.endsWith(".webm"))).toEqual([]);

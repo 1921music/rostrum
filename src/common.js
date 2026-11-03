@@ -80,7 +80,8 @@ Element.prototype["replace"] = function(newElm) {
 // are distinguished using the convention of leading+trailing underscores:
 
 // window._menu_  // defined in main.js
-window._podiumVersion_ = "2.3.1";
+window._podiumVersion_ = "1.0.0";
+window._podiumUpstreamVersion_ = "2.3.1";
 // Replaced by build.py with the build's UTC timestamp. It stays "dev" when the
 // sources are served directly, and the Version panel shows it, because the
 // version alone cannot tell you whether a deployment reached a device: that

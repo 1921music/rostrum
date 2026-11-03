@@ -828,10 +828,10 @@ if args.pages:
     page_digest = digest.hexdigest()[:12]
     with open(os.path.join('src', 'sw.js'), encoding='utf-8') as f:
         worker = f.read()
-    stamp = "let CACHE_NAME = 'rostrum-v2.3.1';"
+    stamp = "let CACHE_NAME = 'rostrum-v1.0.0';"
     if worker.count(stamp) != 1:
         sys.exit(f'Error: cache name not found exactly once in src/sw.js: {stamp!r}')
-    worker = worker.replace(stamp, f"let CACHE_NAME = 'rostrum-v2.3.1-{page_digest}';")
+    worker = worker.replace(stamp, f"let CACHE_NAME = 'rostrum-v1.0.0-{page_digest}';")
     doc_stamp = 'const docToCache = [];'
     if worker.count(doc_stamp) != 1:
         sys.exit(f'Error: precache list not found exactly once in src/sw.js: {doc_stamp!r}')

@@ -3,9 +3,9 @@
 - **基準点** [studiop5/podium](https://github.com/studiop5/podium) の `v2.3.1`（`658013c`）。元の分岐点は `v2.3.0`（`da186fc`）で、独自変更をマージなしのコミット列として載せ直した。
 - **この fork** [1921music/rostrum](https://github.com/1921music/rostrum)。表示名は **Rostrum**。
 - **配備先** <https://1921music.github.io/rostrum/>（GitHub Pages、`gh-pages` ブランチ）。
-- **upstream の基準バージョン** `2.3.1`。タグは打っていない。どのビルドが動いているかは App → About の `Build` 行（UTC 時刻）と `Commit` 行（ハッシュ）で判別する。
+- **upstream の基準バージョン** `2.3.1`。Rostrum 独自のバージョンは **1.0.0**（タグ `v1.0.0`）。どのビルドが動いているかは App → About の `Build` 行（UTC 時刻）と `Commit` 行（ハッシュ）で判別する。
 
-About には Rostrum と upstream の基準バージョンを表示する。Build と Commit で配備を識別できる。
+About には Rostrum のバージョン `1.0.0` と upstream の基準バージョン `2.3.1` を分けて表示する。Build と Commit で配備を識別できる。
 
 以下のコミット番号は改名前・rebase前の調査記録。旧履歴は移行前のバックアップに残している。
 `feature/wink-page-turn` は未完成のため `main` と分けて維持する。

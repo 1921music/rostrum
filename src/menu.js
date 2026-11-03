@@ -325,7 +325,7 @@ class Menu {
         // current version.)
         delay(2, () => dialog(
           `Rostrum has been updated to version <strong>${_podiumVersion_}</strong>.<br><br>
-           <a href="https://studiop5.org/releaseNotes.html#v${_podiumVersion_}" target="_blank" rel="noopener">See what&rsquo;s new</a>`,
+           <a href="https://github.com/1921music/rostrum/blob/v${_podiumVersion_}/CHANGELOG.md" target="_blank" rel="noopener">See what&rsquo;s new</a>`,
           { Close: { svg: "Cancel" } }
         ));
       } else {
