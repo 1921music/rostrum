@@ -284,10 +284,10 @@ test("the service worker's cache name follows everything it serves", async () =>
     if (url !== "./") hash.update(fs.readFileSync(path.join(pagesDir, url.slice(2))));
   const digest = hash.digest("hex").slice(0, 12);
 
-  expect(worker).toContain(`const CACHE_NAME = 'podium-v2.3.0-${digest}';`);
+  expect(worker).toContain(`let CACHE_NAME = 'podium-v2.3.1-${digest}';`);
   // The source must stay unstamped, or the build would have nothing to replace.
   const source = fs.readFileSync(path.join(__dirname, "..", "src", "sw.js"), "utf8");
-  expect(source).toContain("const CACHE_NAME = 'podium-v2.3.0';");
+  expect(source).toContain("let CACHE_NAME = 'podium-v2.3.1';");
   expect(source).toContain("const docToCache = [];");
 });
 
