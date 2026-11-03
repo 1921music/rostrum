@@ -20,7 +20,7 @@ test("the static-host build runs from a subdirectory", async ({ page }) => {
   page.on("pageerror", error => errors.push(error.message));
 
   await page.goto("/pages/index.html");
-  await expect(page).toHaveTitle(/^Podium/);
+  await expect(page).toHaveTitle(/^Rostrum/);
   await expect.poll(() => page.evaluate(() => typeof window._FileSrc_)).toBe("function");
   expect(errors).toEqual([]);
 });
@@ -284,10 +284,10 @@ test("the service worker's cache name follows everything it serves", async () =>
     if (url !== "./") hash.update(fs.readFileSync(path.join(pagesDir, url.slice(2))));
   const digest = hash.digest("hex").slice(0, 12);
 
-  expect(worker).toContain(`let CACHE_NAME = 'podium-v2.3.1-${digest}';`);
+  expect(worker).toContain(`let CACHE_NAME = 'rostrum-v2.3.1-${digest}';`);
   // The source must stay unstamped, or the build would have nothing to replace.
   const source = fs.readFileSync(path.join(__dirname, "..", "src", "sw.js"), "utf8");
-  expect(source).toContain("let CACHE_NAME = 'podium-v2.3.1';");
+  expect(source).toContain("let CACHE_NAME = 'rostrum-v2.3.1';");
   expect(source).toContain("const docToCache = [];");
 });
 

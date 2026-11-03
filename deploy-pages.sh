@@ -16,8 +16,8 @@
 # GitHub Pages then builds it, which takes a few minutes and occasionally
 # stalls. To watch it, or to prod it:
 #
-#   gh api repos/<owner>/podium/pages/builds/latest --jq .status
-#   gh api -X POST repos/<owner>/podium/pages/builds
+#   gh api repos/1921music/rostrum/pages/builds/latest --jq .status
+#   gh api -X POST repos/1921music/rostrum/pages/builds
 #
 set -euo pipefail
 

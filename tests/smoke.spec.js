@@ -5,7 +5,7 @@ test("Podium starts without page errors", async ({ page }) => {
   page.on("pageerror", error => errors.push(error.message));
 
   await page.goto("/pod.html");
-  await expect(page).toHaveTitle(/^Podium/);
+  await expect(page).toHaveTitle(/^Rostrum/);
   await expect.poll(() => page.evaluate(() => typeof window._FileSrc_)).toBe("function");
 
   expect(errors).toEqual([]);

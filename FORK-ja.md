@@ -1,11 +1,14 @@
-# この fork が upstream の Podium に加えたもの
+# Rostrum が upstream の Podium に加えたもの
 
-- **基準点** [studiop5/podium](https://github.com/studiop5/podium) の `v2.3.0`（コミット `da186fc`）。`upstream/main` はこのタグと同一コミット。
+- **基準点** [studiop5/podium](https://github.com/studiop5/podium) の `v2.3.1`（`658013c`）。元の分岐点は `v2.3.0`（`da186fc`）で、独自変更をマージなしのコミット列として載せ直した。
 - **この fork** [yatra9/podium](https://github.com/yatra9/podium)。差分は 35 コミット。
-- **配備先** <https://yatra9.github.io/podium/>（GitHub Pages、`gh-pages` ブランチ）。
-- **バージョン** `2.3.0` のまま。タグは打っていない。どのビルドが動いているかは App → About の `Build` 行（UTC 時刻）と `Commit` 行（ハッシュ）で判別する。
+- **配備先** <https://1921music.github.io/rostrum/>（GitHub Pages、`gh-pages` ブランチ）。
+- **upstream の基準バージョン** `2.3.1`。タグは打っていない。どのビルドが動いているかは App → About の `Build` 行（UTC 時刻）と `Commit` 行（ハッシュ）で判別する。
 
-バージョン番号を上げていないので、「2.3.0」と名乗る二つの Podium が存在することになる。About の 2 行がそれを見分ける唯一の手段。
+About には Rostrum と upstream の基準バージョンを表示する。Build と Commit で配備を識別できる。
+
+以下のコミット番号は改名前・rebase前の調査記録。旧履歴は移行前のバックアップに残している。
+`feature/wink-page-turn` は未完成のため `main` と分けて維持する。
 
 ## なぜ分かれたか
 
@@ -35,7 +38,7 @@ web origin から到達できる経路を全部試し、記録した。
 
 `52759da` `4913981` `3b6e041`
 
-`build.py --pages` が `build/pages/` を書く。パッケージ済みページを `index.html` として、`manifest.webmanifest`、`sw.js`、`podauth.html`、アイコン 2 つ。**サブディレクトリから動く**ことが要件（`https://yatra9.github.io/podium/`）だったので、manifest の絶対 `start_url` と `scope: "/"`、`location.origin` から組んでいた OAuth リダイレクト URI、無条件に studiop5.org を指す canonical link を、それぞれ相対化・パラメータ化した。
+`build.py --pages` が `build/pages/` を書く。パッケージ済みページを `index.html` として、`manifest.webmanifest`、`sw.js`、`podauth.html`、アイコン 2 つ。**サブディレクトリから動く**ことが要件（`https://1921music.github.io/rostrum/`）だったので、manifest の絶対 `start_url` と `scope: "/"`、`location.origin` から組んでいた OAuth リダイレクト URI、無条件に studiop5.org を指す canonical link を、それぞれ相対化・パラメータ化した。
 
 **Service Worker のキャッシュ名にページ自身のダイジェストを埋める**（`4913981`）。これが無いと、`sw.js` がバイト単位で前回と同一な配備はブラウザから見て「新しい worker が無い」ことになり、再インストールされず、古いページが延々と出続ける。最初の PWA 配備で実際に踏んだ。
 
@@ -166,5 +169,5 @@ Playwright。この fork で 88 本。`AGENTS.md` の制約がそのまま効い
 
 ## 未着手・保留
 
-- **瞬きでのページめくり**（MediaPipe Face Landmarker）。この fork の当初の目的で、まだ着手していない。最初の一歩は、演奏姿勢のタブレットから blendshape の時系列を CSV に落とす単独の probe。
+- **瞬きでのページめくり**（MediaPipe Face Landmarker）。この fork の当初の目的で、`feature/wink-page-turn` で開発中。未完成のため `main` には含めない。
 - **ブックマークの先読み**。上記 7 のとおり、実機で「まだ待つ」と感じたときに `getOperatorList()` だけの軽い先読みを測ってから判断する。

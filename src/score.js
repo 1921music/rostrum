@@ -132,10 +132,10 @@ function confirmMissingGlyphs(characters) {
     c.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")).join(" ");
   return new Promise((accept, reject) =>
     dialog(
-      `These characters are not in any font Podium carries, so they would be
+      `These characters are not in any font Rostrum carries, so they would be
        saved as blanks:<br><br><strong style="font-size:1.4em">${shown}</strong><br><br>
        Your annotations are kept either way, so they will still be here when
-       Podium reopens this score. It is the PDF's own text that loses them.
+       Rostrum reopens this score. It is the PDF's own text that loses them.
        <br><br>Save anyway?`,
       { Save: { svg: "Save" }, Cancel: { svg: "Cancel" } },
       (_event, _prop, tag, args) => {
@@ -157,7 +157,7 @@ class Pg
 **/
 
 class Pg {
-  // Podium's custom properties on fabric objects. fabric drops unknown
+  // Rostrum's custom properties on fabric objects. fabric drops unknown
   // properties on serialize unless they're listed, so EVERY serialization
   // (toJson, and the undo snapshots) must pass this list: "flatten" (see
   // flattenObjects; toPdf relies on it), "podiumType" (the tool that made the
@@ -760,7 +760,7 @@ class Pg {
 
   static freeze(obj) {
     // Make a fabric object genuinely non-interactive. evented:false keeps it out
-    // of hit-testing, but Podium can still force-select via setActiveObject (e.g.
+    // of hit-testing, but Rostrum can still force-select via setActiveObject (e.g.
     // the edit tool's "select last object" fallback), so we also strip controls
     // and lock every transform — a frozen object can't be moved, scaled, rotated
     // or text-edited even if something makes it the active object.
@@ -1826,7 +1826,7 @@ class Score {
   }
 
   setTitle() {
-    if (!this.name) { document.title = `Podium (${_podId_})`; return; }
+    if (!this.name) { document.title = `Rostrum (${_podId_})`; return; }
     let name = this.name.replace(/\.pdf$/i, "");
     let maxLen = 30;
     if (name.length > maxLen) {
@@ -1975,9 +1975,9 @@ class Score {
         if (this.pdfInfo.Creator) dstPLibDoc.setCreator(this.pdfInfo.Creator);
         if (this.pdfInfo.CreationDate) dstPLibDoc.setCreationDate(new Date(this.pdfInfo.CreationDate));
       } else {
-        // New score created from scratch - set Podium metadata
+        // New score created from scratch - set Rostrum metadata
         dstPLibDoc.setCreationDate(now);
-        dstPLibDoc.setCreator("Podium vers." + _podiumVersion_);
+        dstPLibDoc.setCreator("Rostrum vers." + _podiumVersion_);
         dstPLibDoc.setProducer("pdf-lib v1.17.1");
       }
       if (doc) return dstPLibDoc;

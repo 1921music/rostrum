@@ -474,13 +474,13 @@ def podium_page_patches(canonical):
     # the license, in full, follows the page's own license notice:
     ('<https:/\\/www.gnu.org/licenses/>.\n-->\n',
      '<https:/\\/www.gnu.org/licenses/>.\n-->\n\n<!--\n{LICENSE}-->\n'),
-    ('    <title id="title">Podium</title>\n',
+    ('    <title id="title">Rostrum</title>\n',
      (f'    <link rel="canonical" href="{canonical}">\n' if canonical else '') +
      '    <link rel="manifest" href="manifest.webmanifest" />\n'
      '    <link rel="apple-touch-icon" href="icon192.png">\n'
      '    <meta name="apple-mobile-web-app-capable" content="yes">\n'
-     '    <meta name="apple-mobile-web-app-title" content="Podium">\n'
-     '    <title id="title">Podium</title>\n'),
+     '    <meta name="apple-mobile-web-app-title" content="Rostrum">\n'
+     '    <title id="title">Rostrum</title>\n'),
     # the libraries are included by main.js itself (see its #include's):
     ('    <script src="fabric.min.js"></script> \n', ''),
     ("    <script type=\"module\">import * as pdfjsLib from './pdf.min.mjs'; window.pdfjsLib = pdfjsLib;</script>\n", ''),
@@ -493,10 +493,10 @@ def podium_page_patches(canonical):
      "        window.addEventListener('load', () => {\n"
      "          navigator.serviceWorker.register('sw.js')\n"
      '            .then(registration => {\n'
-     "              console.log('Podium: Service Worker registered with scope:', registration.scope);\n"
+     "              console.log('Rostrum: Service Worker registered with scope:', registration.scope);\n"
      '            })\n'
      '            .catch(error => {\n'
-     "              console.log('Podium: Service Worker registration failed:', error);\n"
+     "              console.log('Rostrum: Service Worker registration failed:', error);\n"
      '            });\n'
      '        });\n'
      '      }\n'
@@ -522,7 +522,7 @@ def git_commit():
         return 'unknown'  # built outside a working tree, or without git
     return (head + '-dirty') if dirty else head
 
-def build_podium_page(outFileName, canonical="https://studiop5.org/podium"):
+def build_podium_page(outFileName, canonical="https://1921music.github.io/rostrum/"):
     with open("src/pod.html", encoding='utf-8') as f:
         page = f.read()
     with open("LICENSE", encoding='utf-8') as f:
@@ -828,10 +828,10 @@ if args.pages:
     page_digest = digest.hexdigest()[:12]
     with open(os.path.join('src', 'sw.js'), encoding='utf-8') as f:
         worker = f.read()
-    stamp = "let CACHE_NAME = 'podium-v2.3.1';"
+    stamp = "let CACHE_NAME = 'rostrum-v2.3.1';"
     if worker.count(stamp) != 1:
         sys.exit(f'Error: cache name not found exactly once in src/sw.js: {stamp!r}')
-    worker = worker.replace(stamp, f"let CACHE_NAME = 'podium-v2.3.1-{page_digest}';")
+    worker = worker.replace(stamp, f"let CACHE_NAME = 'rostrum-v2.3.1-{page_digest}';")
     doc_stamp = 'const docToCache = [];'
     if worker.count(doc_stamp) != 1:
         sys.exit(f'Error: precache list not found exactly once in src/sw.js: {doc_stamp!r}')

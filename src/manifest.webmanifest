@@ -1,6 +1,6 @@
 {
-  "name": "Podium: Sheet Music Studio",
-  "short_name": "Podium",
+  "name": "Rostrum: Sheet Music Studio",
+  "short_name": "Rostrum",
   "description": "A browser-based e-reader for music scores",
   "start_url": "./",
   "scope": "./",

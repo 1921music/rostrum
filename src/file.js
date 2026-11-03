@@ -39,7 +39,7 @@ let bytesToBase64DataUrl = async (bytes, type = "application/octet-stream") => {
 };
 
 let err = (call, msg) => {
-  console.warn(`**** Podium FileSrc error in call: ${call}`, msg);
+  console.warn(`**** Rostrum FileSrc error in call: ${call}`, msg);
   console.trace();
   throw new Error(msg, { cause: "fileSrc" });
 };
@@ -50,7 +50,7 @@ let err = (call, msg) => {
    replaced by "Details in console", which is no help on a tablet.
 **/
 let srcErr = (msg) => {
-  console.warn(`**** Podium FileSrc error: ${msg}`);
+  console.warn(`**** Rostrum FileSrc error: ${msg}`);
   throw new Error(msg, { cause: "fileSrc" });
 };
 
@@ -64,7 +64,7 @@ let errDialog = (error, msg) => {
   else if (error.cause == "security") dialog(`<em>Security Error</em><br><br><strong>${message()}</strong>`);
   else if (error.cause == "fileSrc") dialog(`<em>${msg}</em><br><br><strong>${message()}</strong>`);
   else {
-    console.error(`*** Unexpected Podium Error:`, error);
+    console.error(`*** Unexpected Rostrum Error:`, error);
     // The reason goes in the dialog, not only the console. On a tablet the
     // console costs a USB cable and a desktop machine, so "Details in console"
     // is where diagnosis stops -- which is exactly where it stopped.
@@ -168,7 +168,7 @@ let checkPath = (...args) => {
 }
 
 
-// Paths are PODIUM's own "/"-separated strings of folder names (cache keys, and what the
+// Paths are ROSTRUM's own "/"-separated strings of folder names (cache keys, and what the
 // breadcrumb shows), but Google Drive allows "/" inside a name. Within a path, such a "/"
 // is stored as U+2215 (∕, which looks the same), so a path still splits into its folders;
 // names themselves, and every provider API call (Drive uses ids), are unchanged. Dropbox
@@ -361,7 +361,7 @@ class FileSrc {
         toast("File saved.");
       } catch (error) {
         if (error.originalData) {
-          dialog(`${escapeHtml(error.message)}<br><br>Save original PDF instead (without Podium modifications)?`,
+          dialog(`${escapeHtml(error.message)}<br><br>Save original PDF instead (without Rostrum modifications)?`,
             { Save: { svg: "Save" }, Cancel: { svg: "Cancel" } }, async (e, prop, tag, args) => {
               args.close();
               if (tag == "Save") {
@@ -439,7 +439,7 @@ class LocalSrc extends FileSrc {
           suggestedName: name,
           types: [
             {
-              description: "Podium Files",
+              description: "Rostrum Files",
               accept: {
                 "application/pdf": [".pdf"],
               },
@@ -489,7 +489,7 @@ class LocalSrc extends FileSrc {
       suggestedName: name,
       types: [
         {
-          description: "Podium Files",
+          description: "Rostrum Files",
           accept: {
             "application/pdf": [".pdf"],
           },
@@ -580,7 +580,7 @@ class CachedSrc extends FileSrc {
     authUrl = null; // subclass defined
     tokenUrl = null; // subclass defined
 
-    // Resolved against the page, not the origin, so Podium works when it is
+    // Resolved against the page, not the origin, so Rostrum works when it is
     // served from a subdirectory. Each provider's console must list this exact
     // URI, so moving the directory means re-registering it. Google Drive is the
     // exception: its web path uses the GIS token client, which is authorised by
@@ -1709,7 +1709,7 @@ const PCLOUD_CLIENT_ID = "W569fmzwKBQ";
 const PCLOUD_API_HOSTS = new Set(["api.pcloud.com", "eapi.pcloud.com"]);
 
 function stylePCloudDialog(elm) {
-  // Generic Podium dialogs intentionally scale with the score UI and can
+  // Generic Rostrum dialogs intentionally scale with the score UI and can
   // become very large on desktop. Match the Open/Save panel instead.
   elm.style.fontSize = "clamp(14px, 2vmin, 20px)";
   elm.style.width = "min(28em, calc(100vw - 3em))";
@@ -1754,7 +1754,7 @@ class PCloudOAuthAuth {
 
   async authenticate() {
     if (!(window.chrome && chrome.runtime?.id && chrome.identity?.launchWebAuthFlow))
-      throw new Error("pCloud OAuth is available only in the Podium browser extension.");
+      throw new Error("pCloud OAuth is available only in the Rostrum browser extension.");
     await this.restoreSession();
     if (this.accessToken && this.apiHost) return;
 
@@ -2086,7 +2086,7 @@ class PCloudAuth {
     return new Promise((resolve, reject) => {
       let elm = dialog(
         `Connect to pCloud<br><br>
-         <small>OAuth is recommended. Podium will not receive your pCloud password.</small>`,
+         <small>OAuth is recommended. Rostrum will not receive your pCloud password.</small>`,
         {
           "Sign in with pCloud": { svg: "pCloud" },
           "Direct login": { svg: "pCloud" },
@@ -2169,11 +2169,11 @@ async function unzipSingleEntry(archive) {
   let compressedSize = view.getUint32(directory + 20, true);
   let local = view.getUint32(directory + 42, true);
   if (compressedSize === 0xffffffff || local === 0xffffffff)
-    srcErr("The pCloud archive uses Zip64 fields Podium does not read.");
+    srcErr("The pCloud archive uses Zip64 fields Rostrum does not read.");
   if (view.getUint32(local, true) !== 0x04034b50)
     srcErr("The pCloud archive's local file header is malformed.");
   if (method !== 0 && method !== 8)
-    srcErr(`The pCloud archive uses compression method ${method}, which Podium does not read.`);
+    srcErr(`The pCloud archive uses compression method ${method}, which Rostrum does not read.`);
 
   // The local header's name and extra fields may differ in length from the
   // central directory's, so the data offset must come from the local header.
@@ -2518,7 +2518,7 @@ class LocalFileView {
       toast("File saved");
     } catch (error) {
       if (error.originalData) {
-        dialog(`${escapeHtml(error.message)}<br><br>Save original PDF instead (without Podium modifications)?`,
+        dialog(`${escapeHtml(error.message)}<br><br>Save original PDF instead (without Rostrum modifications)?`,
           { Save: { svg: "Save" }, Cancel: { svg: "Cancel" } }, async (e, prop, tag, args) => {
             args.close();
             if (tag == "Save") {
@@ -3327,7 +3327,7 @@ class FileSystemView extends FileListView {
       toast("File uploaded");
     } catch (error) {
       if (error.originalData) {
-        dialog(`${escapeHtml(error.message)}<br><br>Upload original PDF instead (without Podium modifications)?`,
+        dialog(`${escapeHtml(error.message)}<br><br>Upload original PDF instead (without Rostrum modifications)?`,
           { Upload: { svg: "Upload" }, Cancel: { svg: "Cancel" } }, async (e, prop, tag, args) => {
             args.close();
             if (tag == "Upload") {

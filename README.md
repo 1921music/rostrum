@@ -1,12 +1,12 @@
-# Podium
+# Rostrum
 
 > This is a fork of [studiop5/podium](https://github.com/studiop5/podium), branched
-> at v2.3.0, for use as a music stand on an Android tablet. What it adds and why —
+> at v2.3.0 and rebased onto v2.3.1, for use as a music stand on an Android tablet. What it adds and why —
 > pCloud outside the browser extension, a static-host PWA deployment, Japanese text
 > and guidebook, movable page-number bands, bookmark targeting, faster page
 > jumps — is in [FORK-ja.md](FORK-ja.md) (Japanese).
 
-**Podium is:**
+**Rostrum is:**
 - An e-reader for music scores.
 - 100% browser-based, 100% open source, 100% free.
 - No installation, no registration, no login, no file import. Just use it!
@@ -15,6 +15,14 @@
 - Alternative to generic PDF viewers, customized for the layout and annotation of scores in PDF format.
 - Not a music library: works with PDF files stored locally or in the cloud.
 - Uses PDF annotations and embedded document metadata to store user edits.
+
+Rostrum is maintained by 1921music. `main` contains the stable fork;
+`feature/wink-page-turn` holds the unfinished wink page-turner. `gh-pages`
+contains generated deployment files and has an independent history.
+
+The upstream copyright and AGPL-3.0 license are retained. Internal `podium`
+identifiers and PDF metadata keys remain compatible with existing scores.
+Build commands such as `--podium` and `build/podium.html` keep their existing names.
 
 ## Compatibility
 
@@ -38,11 +46,12 @@ A Chrome/Edge browser extension is available for opening PDF scores directly fro
 
 ## Links
 
-- **App**: https://studiop5.org/podium
-- **Guidebook**: https://studiop5.org/Guidebook.html
-- **Release Notes**: https://studiop5.org/releaseNotes.html
-- **Privacy**: https://studiop5.org/privacy.html
-- **Terms**: https://studiop5.org/terms.html
+- **App**: https://1921music.github.io/rostrum/
+- **Guidebook (Japanese)**: https://1921music.github.io/rostrum/Guidebook.ja.html
+- **Upstream Podium**: https://github.com/studiop5/podium
+- **Upstream Release Notes**: https://studiop5.org/releaseNotes.html
+- **Upstream Privacy**: https://studiop5.org/privacy.html
+- **Upstream Terms**: https://studiop5.org/terms.html
 
 ## Development
 
@@ -165,8 +174,8 @@ no relation to the source tree, which is why the commit is built by hand. The
 remote branch is the parent, a deployment identical to the one already served is
 a no-op, and the message records the source commit (marked `+dirty` when the
 build may not match it). GitHub Pages then builds it, which takes a few minutes
-and occasionally stalls; `gh api repos/<owner>/podium/pages/builds/latest --jq
-.status` reports it and `gh api -X POST repos/<owner>/podium/pages/builds` prods
+and occasionally stalls; `gh api repos/1921music/rostrum/pages/builds/latest --jq
+.status` reports it and `gh api -X POST repos/1921music/rostrum/pages/builds` prods
 it.
 
 `--doc` derives `build/doc-assets/` from `doc/assets/`, which is 42 MB of

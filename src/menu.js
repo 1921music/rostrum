@@ -34,7 +34,7 @@ export { Menu };
 /**
 class Menu
   A circular menu that implements the entry point for all user
-  interaction with Podium.  The single instance of this class is
+  interaction with Rostrum.  The single instance of this class is
   created in main.js and accessed through the global _menu_ var.
 **/
 
@@ -324,7 +324,7 @@ class Menu {
         // (First-time users never reach here — stashDefaults carries the
         // current version.)
         delay(2, () => dialog(
-          `Podium has been updated to version <strong>${_podiumVersion_}</strong>.<br><br>
+          `Rostrum has been updated to version <strong>${_podiumVersion_}</strong>.<br><br>
            <a href="https://studiop5.org/releaseNotes.html#v${_podiumVersion_}" target="_blank" rel="noopener">See what&rsquo;s new</a>`,
           { Close: { svg: "Cancel" } }
         ));
@@ -511,7 +511,7 @@ class Menu {
             // Which edges the page-number bands sit on ("L-R" down the sides,
             // "T-B" across the ends) and whether they take a strip of their own
             // ("Inset") or lie over the pages ("Over"). One key, so that a
-            // Podium that knows nothing of it carries it through a save intact.
+            // Rostrum that knows nothing of it carries it through a save intact.
             pnBand: { axis: "L-R", place: "Inset" },
             pace: 350, // pace: animation speed in msecs/flip
             pz: null, // user pan-zoom saved with the score. When set: { left, top, fontSize, w, h }; applied only when w/h match the current viewport (see Layout.userPz)
@@ -1436,7 +1436,7 @@ class Menu {
     let version = stashJsonObj.version;
     if (!version) return;
     if (version != _podiumVersion_) {
-      console.warn("Podium version mismatch, ignoring stash");
+      console.warn("Rostrum version mismatch, ignoring stash");
       return;
     }
     for (let [ringKey, ringValue] of Object.entries(stashJsonObj)) {
@@ -1797,7 +1797,7 @@ class Menu {
                 canvas.on('mouse:up', onUp);
               }
             }
-        }, Pg.customProps); // (the copy keeps Podium's custom properties)
+        }, Pg.customProps); // (the copy keeps Rostrum's custom properties)
       }
       return;
      }
@@ -1808,7 +1808,7 @@ class Menu {
   cutCopyObject(obj, canvas, isCut) {
     if (this.cutting) return;
     this.cutting = true;
-    // (a copy must keep Podium's custom properties, or it'd no longer be, say, a rastrum)
+    // (a copy must keep Rostrum's custom properties, or it'd no longer be, say, a rastrum)
     obj.clone((clone) => { this.pasteObj = this.newlyCreated = clone; }, Pg.customProps);
     this.enableCells("ink/paste", true);
     // Animate: object image flies to paste cell icon

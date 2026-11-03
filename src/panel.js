@@ -676,12 +676,12 @@ class AboutPanel extends Panel {
   );
 
   licenseFace = helm(`<p style="padding:2em;overflow:auto;text-align:center;">
-  <br><b translate="no">PODIUM: Sheet Music Studio</b><br><br>
-  <span translate="no">Copyright 2026 Glendon Diener</span><br><br>
+  <br><b translate="no">ROSTRUM: Sheet Music Studio</b><br><br>
+  <span translate="no">Based on Podium by Glendon Diener<br>Copyright 2026 Glendon Diener</span><br><br>
 
-  Podium is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.<br><br>
+  Rostrum is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.<br><br>
 
-  Podium is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+  Rostrum is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
       <a rel="noopener noreferrer" translate="no" href="https://www.gnu.org/licenses/agpl-3.0-standalone.html">GNU Affero Public License</a>
 for more details.</p>
       `);
@@ -728,19 +728,19 @@ for more details.</p>
   versionFace = helm(
     `<div style="display:flex;flex-direction:column;align-items:center;justify-content:space-between;min-height:100%;width:100%;box-sizing:border-box;padding:2em 1em;text-align:center;">
         <div style="font-size:1.5em;display:flex;flex-direction:column;align-items:center;gap:0.2em;">
-          <div style="white-space:nowrap;">PODIUM: Sheet Music Studio</div>
+          <div style="white-space:nowrap;">ROSTRUM: Sheet Music Studio</div>
           ${iconSvg("Podium", { size: "8em" })}
-          <div>Version ${_podiumVersion_}</div>
-          <a style="font-size:.6em;" href="https://studiop5.org/releaseNotes.html#v${_podiumVersion_}">Release Notes</a>
+          <div>Based on Podium ${_podiumVersion_}</div>
+          <a style="font-size:.6em;" href="https://studiop5.org/releaseNotes.html#v${_podiumVersion_}">Upstream Release Notes</a>
           <div style="font-size:.6em;color:#888;margin-top:0.5em;">${typeof chrome !== "undefined" && chrome.runtime?.id ? "Browser Extension" : window.matchMedia("(display-mode: standalone)").matches ? "Progressive Web App" : location.protocol + "//" + location.host}</div>
           <div style="font-size:.6em;color:#888;" translate="no">Build ${_podiumBuild_}</div>
           ${this.commitLines()}
         </div>
         <div style="font-size:1.2em;text-align:center;font-variant-emoji:text;margin-top:2em;line-height:1.6em;">
-          <a href="https://studiop5.org/privacy.html">\u{1F6E1} Privacy</a>&nbsp;
-          <a href="https://studiop5.org/terms.html">\u00A7 Terms</a><br>
-          <a href="https://github.com/studiop5/podium">&lt;&sol;&gt; Source</a>&nbsp;
-          <a href="https://github.com/studiop5/podium/issues">\u2709\uFE0E Issues</a>
+          <a href="https://studiop5.org/privacy.html">Upstream Privacy</a>&nbsp;
+          <a href="https://studiop5.org/terms.html">Upstream Terms</a><br>
+          <a href="https://github.com/1921music/rostrum">&lt;&sol;&gt; Source</a>&nbsp;
+          <a href="https://github.com/1921music/rostrum/issues">\u2709\uFE0E Issues</a>
         </div>
      </div>`
   );
@@ -1291,7 +1291,7 @@ class GridPanel extends Panel {
 }
 
 class GuidePanel extends Panel {
-  // Which guidebooks exist depends on how Podium was deployed. The web app
+  // Which guidebooks exist depends on how Rostrum was deployed. The web app
   // publishes the English one beside the page, where a relative URL keeps it
   // same-origin; a static-host deployment carries whichever translations were
   // built into it; the extension and a page saved to disk carry none, and have
@@ -1383,7 +1383,7 @@ class GuidePanel extends Panel {
     this.msg = this.content.querySelector(".guide-msg");
     this.fetched = false;
 
-    // The title bar belongs to Podium, not to the iframe, so the language
+    // The title bar belongs to Rostrum, not to the iframe, so the language
     // switch goes there: the guidebook keeps its whole panel, and the control
     // is in the same place whichever document is loaded. It stays hidden until
     // resolveUrls() finds a second language to switch to.
@@ -1906,7 +1906,7 @@ class StoragePanel extends Panel {
             toast("Import buffer cleared");
           } else if (tag == "Reload") {
             let url = `${location.origin}${location.pathname}`;
-            dialog(`Confirm: restart Podium?<br><span style="font-size:0.8em;color:#333">(${escapeHtml(url)})</span><br>Any unsaved changes will be lost`,
+            dialog(`Confirm: restart Rostrum?<br><span style="font-size:0.8em;color:#333">(${escapeHtml(url)})</span><br>Any unsaved changes will be lost`,
               { Restart: { svg: "Reload" }, Cancel: { svg: "Cancel" } },
               (e, prop, tag, args) => {
                 args.close();
@@ -3282,7 +3282,7 @@ class SymbolsPanel extends Panel {
     let stash = cell.stash;
 
     // Create a Select (similar to an html <select>)
-    // Only Podium's own groups are translatable: the rest are SMuFL spec section titles,
+    // Only Rostrum's own groups are translatable: the rest are SMuFL spec section titles,
     // which are English-only and stay that way so they can be looked up in the spec.
     let select = new Select(Object.keys(smuflTable), stash.group, this, (group) => group == "Recent" || group == "Basic") ;
     this.select.replaceWith(select.elm) ;
