@@ -23,7 +23,7 @@
   translation was last brought up to date; build.py --pages reports a mismatch
   and prints the digest to paste here once the translation has caught up.
 
-  TRANSLATED-FROM: bcc4249bd79e3ae3
+  TRANSLATED-FROM: 255a12128a7d0208
 
   UI names (cell, panel, and button labels) are deliberately left in English,
   because that is what the app itself shows; the keyword index is left in
@@ -35,7 +35,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PODIUM: Sheet Music Studio ガイドブック</title>
+    <title>ROSTRUM: Sheet Music Studio ガイドブック</title>
     <style>
         * {
             margin: 0;
@@ -756,29 +756,29 @@ function closeVideo(event, container) {
 }
 </script>
 
-<h1>PODIUM: Sheet Music Studio</h1>
+<h1>ROSTRUM: Sheet Music Studio</h1>
 
 <div class="header-icon">
-    <img src="assets/podium-icon.webp" alt="Podium icon" loading="lazy">
+    <img src="assets/podium-icon.webp" alt="Rostrum icon" loading="lazy">
 </div>
 
 <div style="font-size:2em;font-weight:600;text-align:center;margin:.25em 0;">ガイドブック</div>
 <div class="version">Version 2.3.x</div>
 
-<p style="text-align: center;">Podium と並べて読むには<a href="Guidebook.ja.html" target="_blank">別ウィンドウで開いて</a>ください。 | <a href="javascript:window.print()">印刷する</a></p>
+<p style="text-align: center;">Rostrum と並べて読むには<a href="Guidebook.ja.html" target="_blank">別ウィンドウで開いて</a>ください。 | <a href="javascript:window.print()">印刷する</a></p>
 
 <nav id="toc" aria-labelledby="toc-heading">
     <h2 id="toc-heading">目次</h2>
     <ul>
         <li><a href="#overture">Overture（序章）</a></li>
         <li><a href="#chapter-1">第1章: クイックスタート</a> — <span style="color:#666">まずは基本だけ</span></li>
-        <li><a href="#chapter-2">第2章: Podium を動かす</a> — <span style="color:#666">URL から開く、またはインストールする</span>
+        <li><a href="#chapter-2">第2章: Rostrum を動かす</a> — <span style="color:#666">URL から開く、またはインストールする</span>
             <ul>
                 <li><a href="#chapter-2-extension">2.1 ブラウザ拡張</a> — <span style="color:#666">デスクトップにブラウザ拡張としてインストールする</span></li>
                 <li><a href="#chapter-2-pwa">2.2 プログレッシブ ウェブ アプリ (PWA)</a> — <span style="color:#666">どの端末にも単独のアプリとしてインストールする</span></li>
                 <li><a href="#chapter-2-compat">2.3 ブラウザ対応状況</a> — <span style="color:#666">対応するブラウザとプラットフォーム</span></li>
-                <li><a href="#chapter-2-foot-pedal">2.4 フットペダル</a> — <span style="color:#666">Bluetooth フットペダルでページをめくる</span></li>
-                <li><a href="#chapter-2-language">2.5 Podium を自分の言語で使う</a> — <span style="color:#666">ブラウザの翻訳機能で画面を訳す</span></li>
+                <li><a href="#chapter-2-foot-pedal">2.4 フットペダル</a> — <span style="color:#666">Bluetooth または USB フットペダルでページをめくる</span></li>
+                <li><a href="#chapter-2-language">2.5 Rostrum を自分の言語で使う</a> — <span style="color:#666">ブラウザの翻訳機能で画面を訳す</span></li>
             </ul>
         </li>
         <li><a href="#chapter-3">第3章: 画面操作の基本</a> — <span style="color:#666">メニュー、パネル、ジェスチャー、背景</span></li>
@@ -856,7 +856,7 @@ function closeVideo(event, container) {
 <main id="guide-content" tabindex="-1">
 <section id="overture" class="overture">
     <h2>Overture</h2>
-    <p><strong>Podium は:</strong></p>
+    <p><strong>Rostrum は:</strong></p>
     <ul>
         <li>譜面のための電子リーダーです</li>
         <li>100% ブラウザだけで動き、100% オープンソース、100% 無料です</li>
@@ -882,19 +882,19 @@ function closeVideo(event, container) {
         <li>本物そっくりのストップウォッチと時計</li>
     </ul>
     <p><strong>...url:</strong><br>
-    <a href="https://studiop5.org/podium" target="_blank">https://studiop5.org/podium</a></p>
-    <p style="font-size:.85em;color:#666;">Podium は現状のまま、いかなる保証もなく提供されます。詳しい条件は<a href="https://www.gnu.org/licenses/agpl-3.0-standalone.html" target="_blank">ライセンス</a>をご覧ください。Podium で開く譜面ファイルを使用する権利があるかどうかは、利用者の責任で確認してください。</p>
+    <a href="https://1921music.github.io/rostrum/" target="_blank">https://1921music.github.io/rostrum/</a></p>
+    <p style="font-size:.85em;color:#666;">Rostrum は現状のまま、いかなる保証もなく提供されます。詳しい条件は<a href="https://www.gnu.org/licenses/agpl-3.0-standalone.html" target="_blank">ライセンス</a>をご覧ください。Rostrum で開く譜面ファイルを使用する権利があるかどうかは、利用者の責任で確認してください。</p>
 </section>
 
 <section id="chapter-1">
     <h2>第1章: クイックスタート</h2>
 
-    <p>Podium へようこそ！この章では、使い始めるために必要なことをひととおり紹介します。それぞれの話題をさらに詳しく知りたいときは、本文中の章への参照をたどってください。</p>
+    <p>Rostrum へようこそ！この章では、使い始めるために必要なことをひととおり紹介します。それぞれの話題をさらに詳しく知りたいときは、本文中の章への参照をたどってください。</p>
 
     <h3>3 ステップではじめる</h3>
 
     <h4>1. 譜面を開く</h4>
-    <p><a href="https://studiop5.org/podium" target="_blank">https://studiop5.org/podium</a> で Podium を起動します。灰色の背景に円形メニューが表示され、Score セルが選択された状態になっています。Open セルから外へドラッグすると Open パネルが現れます。保存場所（Local、Google Drive、Dropbox、OneDrive、Recent）を選び、PDF の譜面までたどってタップすれば開きます。</p>
+    <p><a href="https://1921music.github.io/rostrum/" target="_blank">https://1921music.github.io/rostrum/</a> で Rostrum を起動します。灰色の背景に円形メニューが表示され、Score セルが選択された状態になっています。Open セルから外へドラッグすると Open パネルが現れます。保存場所（Local、Google Drive、Dropbox、OneDrive、Recent）を選び、PDF の譜面までたどってタップすれば開きます。</p>
 
     <figure>
         <div class="video-container">
@@ -1004,7 +1004,7 @@ function closeVideo(event, container) {
     <p>方位磁針の針のような小さなひし形の印が付いたセルには、そのセルを設定するためのパネルが隠れています。こうしたセルから外へドラッグするとパネルが現れます。触れて、ドラッグして、離すというこの一続きの動作で、どのパネルも開いて位置を決めるところまで一度にできます。開いたあとも、ざらついた見た目のヘッダーをドラッグすればいつでも動かせます。パネルを隠すには、ヘッダーから好きな方向へフリングします。&#x1F5D9; ボタンをタップして閉じることもできます。</p>
 
     <h4>大きさと位置を変える</h4>
-    <p>パネルがヘッダーのドラッグで動かせることは、すでに見たとおりです。さらに Podium では、メニュー、パネル、レイアウトなど、あらゆるものを 2 本指のピンチ＆パン操作（デスクトップでは Ctrl+マウス／Ctrl+ホイール）で拡大縮小・移動できます。詳しくは<a href="#chapter-3" class="chapter-link">第3章: インターフェースの基本</a>をご覧ください。</p>
+    <p>パネルがヘッダーのドラッグで動かせることは、すでに見たとおりです。さらに Rostrum では、メニュー、パネル、レイアウトなど、あらゆるものを 2 本指のピンチ＆パン操作（デスクトップでは Ctrl+マウス／Ctrl+ホイール）で拡大縮小・移動できます。詳しくは<a href="#chapter-3" class="chapter-link">第3章: インターフェースの基本</a>をご覧ください。</p>
 
     <h4>ジェスチャー</h4>
     <ul>
@@ -1038,14 +1038,14 @@ function closeVideo(event, container) {
         <li><strong>Add:</strong> 白紙ページの挿入</li>
         <li><strong>Cut/Copy/Paste:</strong> 現在の譜面の中でページを並べ替え、複製、削除する</li>
         <li><strong>Undo:</strong> 直前のページ操作を取り消す</li>
-        <li><strong>Export/Import:</strong> 共有バッファを介して他の Podium のタブとページをやり取りする</li>
+        <li><strong>Export/Import:</strong> 共有バッファを介して他の Rostrum のタブとページをやり取りする</li>
         <li><strong>Merge:</strong> 別の譜面を現在の譜面に取り込む</li>
         <li><strong>Flatten:</strong> 注釈を PDF の内容そのものに変換する</li>
         <li><strong>Magnify:</strong> ページの細部を拡大する</li>
     </ul>
     <p><strong>注:</strong> Ink のツールと同じく、Page のツールも数秒操作がないと自動的に解除されます。</p>
 
-    <p>共有バッファを使うと、Podium のタブ間でページを受け渡せます。Export でページをバッファへ送り、Import で別の譜面に挿入します。バッファはすべてのウェブアプリのタブとウィンドウで共有され、セッションをまたいで残ります。ウェブアプリ（studiop5.org）のタブ同士が 1 つのバッファを共有し、ブラウザ拡張のタブ同士が別のバッファを共有します。この境界を越えて受け渡すことはできません。</p>
+    <p>共有バッファを使うと、Rostrum のタブ間でページを受け渡せます。Export でページをバッファへ送り、Import で別の譜面に挿入します。バッファはすべてのウェブアプリのタブとウィンドウで共有され、セッションをまたいで残ります。ウェブアプリ（studiop5.org）のタブ同士が 1 つのバッファを共有し、ブラウザ拡張のタブ同士が別のバッファを共有します。この境界を越えて受け渡すことはできません。</p>
 
     <figure>
         <div class="video-container">
@@ -1073,7 +1073,7 @@ function closeVideo(event, container) {
         <li><strong>Clock:</strong> アナログの壁掛け時計。練習中に時間を把握できます。</li>
         <li><strong>Piano:</strong> 実際に鳴らせる 5 オクターブの鍵盤。基準音（A4 の周波数）を変えられ、歴史的な音律（平均律、ミーントーンなど）を選べます。うなりを使った調律モードと、YIN による音高検出も備え、検出した音名とセント単位のずれを表示する電子チューナーとして使えます。</li>
         <li><strong>Review:</strong> 直前の約 30 秒の音声・動画を録り、その場で再生します。波形とスペクトログラムで自分の演奏を目で確かめられます。練習の手早い振り返りにぴったりです。</li>
-        <li><strong>Volume:</strong> Podium のすべての音（メトロノーム、ピアノ、Review の再生）に効く音量調整。</li>
+        <li><strong>Volume:</strong> Rostrum のすべての音（メトロノーム、ピアノ、Review の再生）に効く音量調整。</li>
     </ul>
 
     <figure>
@@ -1084,48 +1084,48 @@ function closeVideo(event, container) {
     <p>それぞれの練習ツールの詳細は<a href="#chapter-9" class="chapter-link">第9章: More リング</a>をご覧ください</p>
 
     <h3>キーボードとペダルへの対応</h3>
-    <p>Podium は、矢印キーの押下として動作するフットペダル式のページめくり装置で使えます。Page リングの Numbers パネルで矢印キーの動作を設定すると、ペダルを踏む操作をページめくりやブックマークの移動に割り当てられます。</p>
+    <p>Rostrum は、矢印キーや Page Up/Down を送る Bluetooth・USB フットペダル式のページめくり装置で使えます。Page リングの Numbers パネルで矢印キーの動作を設定すると、ペダルを踏む操作をページめくりやブックマークの移動に割り当てられます。</p>
     <p>キーボードショートカットの設定は<a href="#chapter-7-numbers" class="chapter-link">第7章: Page リング - Numbers</a>をご覧ください</p>
 
     <h3>困ったときは</h3>
     <p>内側リングの App セルをタップし、Guide セルをタップするとこの文書が開きます。</p>
 
-    <p>以上です。これで Podium を使い始められます。それぞれの機能を詳しく知りたいときは、以下の章をご覧ください。</p>
+    <p>以上です。これで Rostrum を使い始められます。それぞれの機能を詳しく知りたいときは、以下の章をご覧ください。</p>
     <a href="#toc" class="back-to-toc">↑ 目次に戻る</a>
 </section>
 
 <section id="chapter-2">
-    <h2>第2章: Podium を動かす</h2>
+    <h2>第2章: Rostrum を動かす</h2>
 
-    <p>Podium のいちばん簡単な使い方は、URL から直接起動することです。インストールはいりません。ブラウザで <a href="https://studiop5.org/podium">studiop5.org/podium</a> を開けば、その場で使い始められます。登録もログインも初期設定も、いっさいありません。</p>
+    <p>Rostrum のいちばん簡単な使い方は、URL から直接起動することです。インストールはいりません。ブラウザで <a href="https://1921music.github.io/rostrum/">1921music.github.io/rostrum/</a> を開けば、その場で使い始められます。登録もログインも初期設定も、いっさいありません。</p>
 
-    <p>とはいえ、インストールしておきたい場面もあります。とくに、インターネットにつながる前提が置けない本番で Podium を使うときです。</p>
+    <p>とはいえ、インストールしておきたい場面もあります。とくに、インターネットにつながる前提が置けない本番で Rostrum を使うときです。</p>
 
-    <p><strong>オフラインでの利用。</strong> 一度訪れると、Podium は自動的に端末へ自身を保存するので、明示的にインストールしていなくても、インターネットなしで起動して動きます。ただし、本番などでオフラインで使う予定があるなら、<strong>インストールを強くおすすめします</strong>。明示的にインストールしていないと、ブラウザは空き容量が必要になったときや閲覧履歴を消したときに、保存された控えを何も言わずに捨ててしまうことがあります。いちばん必要なときに Podium がないという事態になりかねません。幸い Podium は非常に小さく、端末で使う容量はスマートフォンで撮った写真 2 枚ぶん程度です。</p>
+    <p><strong>オフラインでの利用。</strong> 一度訪れると、Rostrum は自動的に端末へ自身を保存するので、明示的にインストールしていなくても、インターネットなしで起動して動きます。ただし、本番などでオフラインで使う予定があるなら、<strong>インストールを強くおすすめします</strong>。明示的にインストールしていないと、ブラウザは空き容量が必要になったときや閲覧履歴を消したときに、保存された控えを何も言わずに捨ててしまうことがあります。いちばん必要なときに Rostrum がないという事態になりかねません。幸い Rostrum は非常に小さく、端末で使う容量はスマートフォンで撮った写真 2 枚ぶん程度です。</p>
 
-    <p><strong>ブラウザ拡張</strong>または <strong>PWA</strong> としてインストールすると、Podium は端末に常駐するようになります。拡張はそれ自体で完結しているため、デスクトップでオフラインに使うにはもっとも堅実な選択です。Android、デスクトップ、Chromebook では PWA のインストールも同じくらい確実です。例外は iPhone と iPad で、PWA としてインストールしてあっても、長く使わないでいるとシステムがインターネット接続を求めてくることがあります。ときどき Podium を開いておけば大丈夫です。</p>
+    <p><strong>ブラウザ拡張</strong>または <strong>PWA</strong> としてインストールすると、Rostrum は端末に常駐するようになります。拡張はそれ自体で完結しているため、デスクトップでオフラインに使うにはもっとも堅実な選択です。Android、デスクトップ、Chromebook では PWA のインストールも同じくらい確実です。例外は iPhone と iPad で、PWA としてインストールしてあっても、長く使わないでいるとシステムがインターネット接続を求めてくることがあります。ときどき Rostrum を開いておけば大丈夫です。</p>
 
-    <p><strong>iPad の画面の広さとジェスチャー。</strong> Podium を PWA としてインストールすることは、iPad ではとくに重要です。Safari は既定で、アドレスバー、タブ、ツールバーといった「装飾」を大きく表示し、貴重な画面を食います。iPad のホーム画面から PWA として起動すれば、Podium は全画面のスタンドアロン表示になり、画面のすべてを譜面に使えます。さらにスタンドアロン表示では、Safari の既定の画面端スワイプ（左端からのスワイプで履歴を戻る、など）が抑えられるので、本番中にページめくりやパネルのドラッグがブラウザの画面移動を誤って引き起こすことがありません。</p>
+    <p><strong>iPad の画面の広さとジェスチャー。</strong> Rostrum を PWA としてインストールすることは、iPad ではとくに重要です。Safari は既定で、アドレスバー、タブ、ツールバーといった「装飾」を大きく表示し、貴重な画面を食います。iPad のホーム画面から PWA として起動すれば、Rostrum は全画面のスタンドアロン表示になり、画面のすべてを譜面に使えます。さらにスタンドアロン表示では、Safari の既定の画面端スワイプ（左端からのスワイプで履歴を戻る、など）が抑えられるので、本番中にページめくりやパネルのドラッグがブラウザの画面移動を誤って引き起こすことがありません。</p>
 
-    <p>オフラインで使えるのはローカルに保存した譜面だけである点に注意してください。クラウドにある譜面を開くにはインターネット接続が必要です。英語以外の言語で Podium を使う場合、ブラウザの翻訳にも接続が必要になることがあります。<a href="#chapter-2-language">2.5 Podium を自分の言語で使う</a>をご覧ください。</p>
+    <p>オフラインで使えるのはローカルに保存した譜面だけである点に注意してください。クラウドにある譜面を開くにはインターネット接続が必要です。英語以外の言語で Rostrum を使う場合、ブラウザの翻訳にも接続が必要になることがあります。<a href="#chapter-2-language">2.5 Rostrum を自分の言語で使う</a>をご覧ください。</p>
 
     <h3 id="chapter-2-extension">2.1 Browser Extension</h3>
 
-    <p>Podium は、対応するデスクトップブラウザ（Chrome、Edge、および Brave や Opera などの Chromium 系ブラウザ）でブラウザ拡張としてインストールできます。インストールすると、Podium のアイコンがブラウザの拡張機能メニュー（ツールバーのパズルピースのアイコン）から使えるようになります。すぐに取り出せるよう、はじめにピン留めしておくのがおすすめです。パズルピースをタップし、一覧から Podium を見つけて、その横のピンのアイコンをタップします。ピン留めしたら、ツールバーの Podium アイコンをタップして「Launch Podium」をタップすれば、アプリが直接開きます。譜面はいつもどおりに読み込めます。拡張はさらに、ウェブを見ている最中に譜面を素早く開く方法を 2 つ用意しています。</p>
+    <p>Rostrum は、対応するデスクトップブラウザ（Chrome、Edge、および Brave や Opera などの Chromium 系ブラウザ）でブラウザ拡張としてインストールできます。インストールすると、Rostrum のアイコンがブラウザの拡張機能メニュー（ツールバーのパズルピースのアイコン）から使えるようになります。すぐに取り出せるよう、はじめにピン留めしておくのがおすすめです。パズルピースをタップし、一覧から Rostrum を見つけて、その横のピンのアイコンをタップします。ピン留めしたら、ツールバーの Rostrum アイコンをタップして「Launch Rostrum」をタップすれば、アプリが直接開きます。譜面はいつもどおりに読み込めます。拡張はさらに、ウェブを見ている最中に譜面を素早く開く方法を 2 つ用意しています。</p>
 
     <ul>
-        <li><strong>右クリックメニュー（コンテキストメニュー）:</strong> ウェブページ上の PDF リンクを右クリックして「Open with Podium」を選べます。閲覧中に譜面をつかみ取るいちばん速い方法です。<a href="https://imslp.org" target="_blank" rel="noopener noreferrer">IMSLP</a> の譜面では、IMSLP のアカウントにログインしてあるといちばんうまく動きます。ログインしていない場合はリンクが通常どおり開くので、ブラウザ側で免責事項の確認やログインを済ませてください。それ以外のサイトでは、初回だけそのサイトへのアクセスを求める許可ダイアログが出ます。これは標準的な安全対策で、Podium が PDF を「見て」ダウンロードできるようにするためのものです。一度許可すれば記憶され、二度目からは尋ねられません。</li>
+        <li><strong>右クリックメニュー（コンテキストメニュー）:</strong> ウェブページ上の PDF リンクを右クリックして「Open with Rostrum」を選べます。閲覧中に譜面をつかみ取るいちばん速い方法です。<a href="https://imslp.org" target="_blank" rel="noopener noreferrer">IMSLP</a> の譜面では、IMSLP のアカウントにログインしてあるといちばんうまく動きます。ログインしていない場合はリンクが通常どおり開くので、ブラウザ側で免責事項の確認やログインを済ませてください。それ以外のサイトでは、初回だけそのサイトへのアクセスを求める許可ダイアログが出ます。これは標準的な安全対策で、Rostrum が PDF を「見て」ダウンロードできるようにするためのものです。一度許可すれば記憶され、二度目からは尋ねられません。</li>
 
-        <li><strong>ブラウザから取り込む:</strong> ブラウザの通常のタブで（ブラウザ内蔵のビューアで）すでに PDF を見ているなら、<strong>ツールバーの Podium アイコン</strong>（さきほどピン留めしたもの）をタップするだけです。PDF が見つかると、ポップアップの上部に「Open in Podium」ボタンが現れます。タップすればその場で譜面を取り込めます。右クリックメニューと同じく、そのサイトについて初回だけ許可が必要になることがあります。</li>
+        <li><strong>ブラウザから取り込む:</strong> ブラウザの通常のタブで（ブラウザ内蔵のビューアで）すでに PDF を見ているなら、<strong>ツールバーの Rostrum アイコン</strong>（さきほどピン留めしたもの）をタップするだけです。PDF が見つかると、ポップアップの上部に「Open in Rostrum」ボタンが現れます。タップすればその場で譜面を取り込めます。右クリックメニューと同じく、そのサイトについて初回だけ許可が必要になることがあります。</li>
     </ul>
 
-    <p>拡張はオンラインでもオフラインでも動くので、インターネット接続を頼れない本番にうってつけです。拡張は「Open with Podium」で開いた譜面の履歴を独自に持っており、ワンタップで開き直せます。</p>
+    <p>拡張はオンラインでもオフラインでも動くので、インターネット接続を頼れない本番にうってつけです。拡張は「Open with Rostrum」で開いた譜面の履歴を独自に持っており、ワンタップで開き直せます。</p>
 
-    <p>拡張は、<a href="https://www.cpdl.org" target="_blank" rel="noopener noreferrer">CPDL（Choral Public Domain Library）</a>や <a href="https://imslp.org" target="_blank" rel="noopener noreferrer">IMSLP</a> といったオンラインの楽譜ライブラリとよく合います。IMSLP ではアカウントにログインしておくのがもっとも快適で、途中のページを経ずに Podium で譜面がすぐ開きます。音楽家にとってかけがえのないこの資源を、ぜひ IMSLP の会員になって支えてください。CPDL は、きれいな現代的な浄書による声楽・合唱曲の PDF へ直接リンクしており、Podium でそのまま開けます。クラシックギターの曲なら、Jean-François Delcamp の <a href="https://classical-guitar-sheet-music.com" target="_blank" rel="noopener noreferrer">Classical Guitar Sheet Music and Tabs</a> も優れた資源です。</p>
+    <p>拡張は、<a href="https://www.cpdl.org" target="_blank" rel="noopener noreferrer">CPDL（Choral Public Domain Library）</a>や <a href="https://imslp.org" target="_blank" rel="noopener noreferrer">IMSLP</a> といったオンラインの楽譜ライブラリとよく合います。IMSLP ではアカウントにログインしておくのがもっとも快適で、途中のページを経ずに Rostrum で譜面がすぐ開きます。音楽家にとってかけがえのないこの資源を、ぜひ IMSLP の会員になって支えてください。CPDL は、きれいな現代的な浄書による声楽・合唱曲の PDF へ直接リンクしており、Rostrum でそのまま開けます。クラシックギターの曲なら、Jean-François Delcamp の <a href="https://classical-guitar-sheet-music.com" target="_blank" rel="noopener noreferrer">Classical Guitar Sheet Music and Tabs</a> も優れた資源です。</p>
 
     <figure>
         <div class="video-container">
-            <img src="assets/imslp.webp" alt="IMSLP 上の Podium のコンテキストメニュー" loading="lazy">
+            <img src="assets/imslp.webp" alt="IMSLP 上の Rostrum のコンテキストメニュー" loading="lazy">
             <button type="button" class="play-overlay" aria-label="無音の動画を再生: IMSLP の譜面を開く" onclick="playVideo(this.parentElement)">再生</button>
             <button type="button" aria-label="動画を閉じる" class="close-video" onclick="closeVideo(event, this.parentElement)">&times;</button>
             <video aria-label="IMSLP の譜面を開く（無音のデモ）" controls preload="none" tabindex="0">
@@ -1133,33 +1133,33 @@ function closeVideo(event, container) {
                 お使いのブラウザは video タグに対応していません。
             </video>
         </div>
-        <figcaption>IMSLP で「Open with Podium」を表示した右クリックのコンテキストメニュー</figcaption>
+        <figcaption>IMSLP で「Open with Rostrum」を表示した右クリックのコンテキストメニュー</figcaption>
         <p class="video-status" role="status"></p>
     </figure>
 
-    <div class="note">Podium の拡張は iPhone と iPad では使えませんが、後述のプログレッシブウェブアプリとしてインストールできます。Android では Chrome が拡張に対応していません。Kiwi Browser や Lemur Browser といった他社の Chromium 系ブラウザは Android で Chrome 拡張に対応しており、Edge for Android もベータ版で限定的に対応していますが、Podium はこれらのブラウザでまだ検証していません。</div>
+    <div class="note">Rostrum の拡張は iPhone と iPad では使えませんが、後述のプログレッシブウェブアプリとしてインストールできます。Android では Chrome が拡張に対応していません。Kiwi Browser や Lemur Browser といった他社の Chromium 系ブラウザは Android で Chrome 拡張に対応しており、Edge for Android もベータ版で限定的に対応していますが、Rostrum はこれらのブラウザでまだ検証していません。</div>
 
     <h3 id="chapter-2-pwa">2.2 Progressive Web App (PWA)</h3>
 
-    <p>Podium はプログレッシブウェブアプリとしてもインストールできます。インストールすると、Podium は端末上の独立したアプリとして現れ、オフラインでも動きます。</p>
+    <p>Rostrum はプログレッシブウェブアプリとしてもインストールできます。インストールすると、Rostrum は端末上の独立したアプリとして現れ、オフラインでも動きます。</p>
 
-    <p><strong>デスクトップ（Chrome、Edge など）:</strong> Podium の URL を開いたとき、アドレスバーに Podium のアイコンと「アプリで開く」の案内が出ます。タップするとインストールできます。</p>
+    <p><strong>デスクトップ（Chrome、Edge など）:</strong> Rostrum の URL を開いたとき、アドレスバーに Rostrum のアイコンと「アプリで開く」の案内が出ます。タップするとインストールできます。</p>
 
     <figure>
         <img class="small" src="assets/pwa.webp" alt="アドレスバーに出る Chrome の PWA インストール案内" loading="lazy">
-        <figcaption>Podium のアイコンと「アプリで開く」の案内を表示した Chrome のアドレスバー（Linux）</figcaption>
+        <figcaption>Rostrum のアイコンと「アプリで開く」の案内を表示した Chrome のアドレスバー（Linux）</figcaption>
     </figure>
 
-    <p><strong>Android（Chrome）:</strong> ブラウザのメニュー（点 3 つ）をタップし、<strong>ホーム画面に追加</strong>を選びます。ポップアップで 2 つの選択肢が出るので、正しいアイコンとオフライン対応を備えた本来の PWA にするために<strong>インストール</strong>（「ショートカットを作成」ではないほう）を選んでください。Podium はアプリ一覧に現れ、そこからいつもどおりホーム画面に置けます。</p>
+    <p><strong>Android（Chrome）:</strong> ブラウザのメニュー（点 3 つ）をタップし、<strong>ホーム画面に追加</strong>を選びます。ポップアップで 2 つの選択肢が出るので、正しいアイコンとオフライン対応を備えた本来の PWA にするために<strong>インストール</strong>（「ショートカットを作成」ではないほう）を選んでください。Rostrum はアプリ一覧に現れ、そこからいつもどおりホーム画面に置けます。</p>
 
-    <p><strong>iPhone / iPad:</strong> Apple は PWA の自動インストール案内を出しません。インストールするには、モバイルブラウザ（Safari や Chrome など）で Podium を開き、ツールバーの<strong>共有ボタン</strong> <span style="display:inline-block;position:relative;width:.7em;height:1em;vertical-align:-.15em;">&#x2610;<span style="position:absolute;left:.1em;top:-.55em;font-size:1.2em;">&#x2191;</span></span>（iPhone では下の中央、iPad ではアドレスバーの横）をタップし、共有シートを下へスクロールして<strong>「ホーム画面に追加」</strong>をタップ、続いて<strong>「追加」</strong>をタップします。インストールすると Podium のアイコンがホーム画面に現れます。長押しするとシステムはこれを<strong>ブックマーク</strong>と呼びますが、ホーム画面のウェブアプリに対する Apple の通常の言い方なので心配はいりません。また、PWA を数週間使わないでいると、iPhone / iPad のシステムがアプリのデータを退避させることがあります。そうなると設定が初期化されたり、次の起動時にアプリを再確認するためインターネット接続が必要になったりします。これを防ぐには、ときどき Podium を開いておくだけでよいです。</p>
+    <p><strong>iPhone / iPad:</strong> Apple は PWA の自動インストール案内を出しません。インストールするには、モバイルブラウザ（Safari や Chrome など）で Rostrum を開き、ツールバーの<strong>共有ボタン</strong> <span style="display:inline-block;position:relative;width:.7em;height:1em;vertical-align:-.15em;">&#x2610;<span style="position:absolute;left:.1em;top:-.55em;font-size:1.2em;">&#x2191;</span></span>（iPhone では下の中央、iPad ではアドレスバーの横）をタップし、共有シートを下へスクロールして<strong>「ホーム画面に追加」</strong>をタップ、続いて<strong>「追加」</strong>をタップします。インストールすると Rostrum のアイコンがホーム画面に現れます。長押しするとシステムはこれを<strong>ブックマーク</strong>と呼びますが、ホーム画面のウェブアプリに対する Apple の通常の言い方なので心配はいりません。また、PWA を数週間使わないでいると、iPhone / iPad のシステムがアプリのデータを退避させることがあります。そうなると設定が初期化されたり、次の起動時にアプリを再確認するためインターネット接続が必要になったりします。これを防ぐには、ときどき Rostrum を開いておくだけでよいです。</p>
 
-    <div class="note">ブラウザのタブで Podium を動かす場合に比べた PWA の大きな利点は、ブラウザのツールバーもアドレスバーもその他の雑音もなく、つねに全画面を占めることです。PWA ならではの、アプリらしく整った使い心地です。そのため、PWA として動かしているときは Screen ボタンも全画面のスワイプも効きません。すでに全画面だからです。</div>
+    <div class="note">ブラウザのタブで Rostrum を動かす場合に比べた PWA の大きな利点は、ブラウザのツールバーもアドレスバーもその他の雑音もなく、つねに全画面を占めることです。PWA ならではの、アプリらしく整った使い心地です。そのため、PWA として動かしているときは Screen ボタンも全画面のスワイプも効きません。すでに全画面だからです。</div>
 
     <div class="note">当然ながら、オフラインではローカルに保存した譜面だけが使えます。</div>
 
     <h3 id="chapter-2-compat">2.3 ブラウザの対応状況</h3>
-    <p>Podium は現代的なブラウザすべてで動きます。機能の対応状況は下の表のとおりです。</p>
+    <p>Rostrum は現代的なブラウザすべてで動きます。機能の対応状況は下の表のとおりです。</p>
     <div class="table-scroll" role="region" aria-label="ブラウザ対応状況の表" tabindex="0">
     <table class="compat">
         <caption>ブラウザ別の機能の対応状況</caption>
@@ -1228,43 +1228,45 @@ function closeVideo(event, container) {
 
     <h3 id="chapter-2-foot-pedal">2.4 Foot Pedal</h3>
 
-    <p>Podium は、演奏家がよく使う Bluetooth のフットペダル式ページめくり装置で使えます。たいていのフットペダルはキーボードの矢印キーを送るので、Podium はそれを検出してページめくりに使います。</p>
+    <p>Rostrum は、演奏家がよく使う Bluetooth・USB フットペダル式ページめくり装置で使えます。端末には少数のキーだけを備えたキーボードとして認識され、矢印キーまたは Page Up/Down を送るとページをめくれます。多くのペダルは送るキーを選べ、その設定は通常ペダル自体に保存されます。Space や Enter を送る場合は、矢印キーまたは Page Up/Down に変更してください。</p>
 
-    <p>矢印キー（つまりペダル）の動作は、<a href="#chapter-7-numbers" class="chapter-link">Numbers パネル</a>（Page リング → Numbers）で設定します。右／上の矢印に「次のページへ進む」か「次のブックマークへ飛ぶ」、左／下の矢印に「前のページへ戻る」か「前のブックマークへ飛ぶ」を割り当てられます。ブックマークのモードは繰り返しのある譜面でとくに便利です。繰り返す部分の最初のページへ移動してそのページ番号を長押しし、ブックマークを置いておけば、繰り返しに入るときに戻り側のペダルで一息に跳べます。</p>
+    <p>キーボードとして動作しない文字起こし用ペダルや MIDI フットスイッチには対応していません。</p>
+
+    <p>矢印キー（つまりペダル）の動作は、<a href="#chapter-7-numbers" class="chapter-link">Numbers パネル</a>（Page リング → Numbers）で設定します。右／下の矢印（および Page Down）に「次のページへ進む」か「次のブックマークへ飛ぶ」、左／上の矢印（および Page Up）に「前のページへ戻る」か「前のブックマークへ飛ぶ」を割り当てられます。ブックマークのモードは繰り返しのある譜面でとくに便利です。繰り返す部分の最初のページへ移動してそのページ番号を長押しし、ブックマークを置いておけば、繰り返しに入るときに戻り側のペダルで一息に跳べます。ペダルでの移動は最初・最後のページやブックマークで止まり、折り返しません。</p>
 
     <div class="note">フットペダルは、譜面のレイアウトを直接タップしたときと同じ、タップでのページめくりの設定に従います。めくる速さは、使っているレイアウトのパネルにある <strong>Pace</strong> スライダーで調整します。<a href="#chapter-5-page-turning" class="chapter-link">§5 ページめくり</a>をご覧ください。</div>
 
     <a href="#toc" class="back-to-toc">↑ 目次に戻る</a>
 
-    <h3 id="chapter-2-language">2.5 Podium を自分の言語で使う</h3>
+    <h3 id="chapter-2-language">2.5 Rostrum を自分の言語で使う</h3>
 
-    <p>Podium のインターフェースは英語で書かれていますが、ブラウザ内蔵の翻訳を使えば、メニュー、パネル、説明を別の言語で読めます。このガイドブックも同じやり方で翻訳できます。使える言語はブラウザによって異なります。</p>
+    <p>Rostrum のインターフェースは英語で書かれていますが、ブラウザ内蔵の翻訳を使えば、メニュー、パネル、説明を別の言語で読めます。このガイドブックも同じやり方で翻訳できます。使える言語はブラウザによって異なります。</p>
 
-    <p>英語が優先する言語に入っていない場合、ブラウザが Podium の翻訳を自動的に申し出ることがあります。その申し出を受けて、言語を選んでください。Chrome と Edge では、英語のページをつねに自動で翻訳したいときに <strong>英語を常に翻訳</strong> を選ぶこともできます。</p>
+    <p>英語が優先する言語に入っていない場合、ブラウザが Rostrum の翻訳を自動的に申し出ることがあります。その申し出を受けて、言語を選んでください。Chrome と Edge では、英語のページをつねに自動で翻訳したいときに <strong>英語を常に翻訳</strong> を選ぶこともできます。</p>
 
     <p>自分から翻訳を求めるには、次のようにします。</p>
     <ul>
-        <li><strong>デスクトップの Chrome または Edge:</strong> Podium の背景の何もない部分を右クリックし、<strong>日本語に翻訳</strong>を選びます。別の言語にしたいときはブラウザの翻訳の操作から選べます。</li>
+        <li><strong>デスクトップの Chrome または Edge:</strong> Rostrum の背景の何もない部分を右クリックし、<strong>日本語に翻訳</strong>を選びます。別の言語にしたいときはブラウザの翻訳の操作から選べます。</li>
         <li><strong>Android、iPhone、iPad の Chrome:</strong> ブラウザの<strong>その他</strong>メニュー（点 3 つ）を開いて<strong>翻訳</strong>を選びます。</li>
         <li><strong>iPhone / iPad の Safari:</strong> アドレスバーの左にある小さなページメニューのアイコン（長方形）をタップし、<strong>Web サイトを翻訳</strong>または<strong>［言語］に翻訳</strong>を選びます。目的の言語が出てこないときは、<strong>設定 → 一般 → 言語と地域</strong>で優先する言語を確認してください。文言やアイコンはシステムのバージョンによって変わります。</li>
     </ul>
 
-    <p>タッチ画面では、長押しは引き続き Podium 自身のメニューを呼び出します。翻訳には上記のブラウザの操作を使ってください。英語に戻すには、ブラウザの翻訳の操作から元のページを表示するよう選びます。</p>
+    <p>タッチ画面では、長押しは引き続き Rostrum 自身のメニューを呼び出します。翻訳には上記のブラウザの操作を使ってください。英語に戻すには、ブラウザの翻訳の操作から元のページを表示するよう選びます。</p>
 
-    <div class="note"><strong>インストールしたアプリの場合:</strong> PWA ではブラウザのツールバーや翻訳の操作が隠れていることがあります。そこで翻訳が使えないときは、通常のブラウザのタブで <a href="https://studiop5.org/podium">studiop5.org/podium</a> を開き、そちらで翻訳してください。</div>
+    <div class="note"><strong>インストールしたアプリの場合:</strong> PWA ではブラウザのツールバーや翻訳の操作が隠れていることがあります。そこで翻訳が使えないときは、通常のブラウザのタブで <a href="https://1921music.github.io/rostrum/">1921music.github.io/rostrum/</a> を開き、そちらで翻訳してください。</div>
 
     <div class="note"><strong>自動翻訳について:</strong> 音楽用語や短いラベルはうまく訳されないことがあり、訳が長くなって操作部からあふれることもあります。アイコンが何の操作かを見分ける助けになります。いつでも英語に戻せます。ブラウザの翻訳が変えるのはインターフェースだけで、PDF の譜面の中身は変わりません。</div>
 
     <div class="note"><strong>翻訳されないもの:</strong> 訳すと誤りになるか使えなくなるため、わざとそのままにしてあるものがあります。クラウドサービスの名前（Drive、Dropbox、OneDrive）、ファイル名とフォルダー名、ページ番号、寸法と単位（pt、mm、in、Hz、cents、bpm）、ウェブのリンク、フォント名、標準の用紙サイズ、楽譜記号のグループ名、調律と音律の名前、カメラとマイクの名前です。画面上の Keyboard は決して翻訳されません。日付はもともと端末の言語と地域に従います。</div>
 
-    <div class="note"><strong>オフラインの場合:</strong> Podium 自身はインターネット接続なしで動きますが、ブラウザの翻訳はそうとは限りません。Chrome と Edge はどの端末でもインターネット越しに翻訳するため、オフラインでは Podium は英語で表示されます。Podium を翻訳したあとに接続が切れた場合、すでに画面に出ているものは訳されたままですが、そのあとに開くパネルやメッセージは英語で現れることがあります。iPhone、iPad、Mac の Safari と Firefox は、言語を端末にダウンロードしてあれば接続なしで翻訳できます。本番などで Podium を翻訳したままオフラインで使う予定があるなら、あらかじめ言語をダウンロードし、端末を機内モードにして翻訳が働くか確かめておいてください。</div>
+    <div class="note"><strong>オフラインの場合:</strong> Rostrum 自身はインターネット接続なしで動きますが、ブラウザの翻訳はそうとは限りません。Chrome と Edge はどの端末でもインターネット越しに翻訳するため、オフラインでは Rostrum は英語で表示されます。Rostrum を翻訳したあとに接続が切れた場合、すでに画面に出ているものは訳されたままですが、そのあとに開くパネルやメッセージは英語で現れることがあります。iPhone、iPad、Mac の Safari と Firefox は、言語を端末にダウンロードしてあれば接続なしで翻訳できます。本番などで Rostrum を翻訳したままオフラインで使う予定があるなら、あらかじめ言語をダウンロードし、端末を機内モードにして翻訳が働くか確かめておいてください。</div>
 
     <a href="#toc" class="back-to-toc">↑ 目次に戻る</a>
 
 <section id="chapter-3">
     <h2>第3章: インターフェースの基本</h2>
 
-    <p>Podium のインターフェースは 4 つの要素からできています。</p>
+    <p>Rostrum のインターフェースは 4 つの要素からできています。</p>
     <ul>
         <li><strong>背景:</strong> 作業場所。画面移動のジェスチャーを受け付けます。</li>
         <li><strong>メニュー:</strong> 内側と外側のリングからなる 2 段の円形メニュー。</li>
@@ -1274,7 +1276,7 @@ function closeVideo(event, container) {
 
     <h3>移動と拡大縮小</h3>
 
-    <p>Podium のあらゆるもの（メニュー、パネル、レイアウト）は、大きさと位置を変えられます。</p>
+    <p>Rostrum のあらゆるもの（メニュー、パネル、レイアウト）は、大きさと位置を変えられます。</p>
 
     <p><strong>砂地のような手触りの部分:</strong> メニュー中央のグリップ、パネルのヘッダー、スライダーには、砂のような模様が付いています。この模様の部分をドラッグすると、その要素を動かせます。</p>
 
@@ -1299,7 +1301,7 @@ function closeVideo(event, container) {
 
     <h3>メニュー</h3>
 
-    <p>起動すると、Podium は灰色の背景に円形メニューを表示します。メニューは 3 つの部分からできています。</p>
+    <p>起動すると、Rostrum は灰色の背景に円形メニューを表示します。メニューは 3 つの部分からできています。</p>
     <h4>グリップ（中央の円）</h4>
     <ul>
         <li><strong>タップ:</strong> メニューの折りたたみ／展開</li>
@@ -1379,7 +1381,7 @@ function closeVideo(event, container) {
     </figure>
     <h3>ブラウザのタブの名前</h3>
 
-    <p>Podium は複数のブラウザのタブで同時に動かせ、タブのあいだで<a href="#chapter-7-export-import">共有バッファ</a>を共有します。ウェブアプリ（studiop5.org）のタブ同士が 1 つのバッファを共有し、ブラウザ拡張のタブ同士が別のバッファを共有します。この境界を越えて受け渡すことはできません。タブを見分けられるように、それぞれに強弱記号と階名から取った短い音楽的な名前が割り当てられます。<em>do, re, mi, fa, so, la, ti, ff, mf, mp, pp, sf</em> です。譜面を読み込んでいるとき、ブラウザのタブにはその譜面のファイル名が表示されます。そうでないときは <em>Podium</em> のあとに括弧でタブの名前が付き、たとえば <em>Podium (do)</em> となります。拡張のタブは代わりに角括弧を使って <em>Podium [do]</em> となるので、そのタブがウェブアプリか拡張かひと目で分かります。理屈のうえでは、Podium のタブを同時に 12 個まで開けます。ただし、タブごとにブラウザのメモリと処理能力を余分に使うので、2 つか 3 つを超えると実用にならないことを覚えておいてください。</p>
+    <p>Rostrum は複数のブラウザのタブで同時に動かせ、タブのあいだで<a href="#chapter-7-export-import">共有バッファ</a>を共有します。ウェブアプリ（studiop5.org）のタブ同士が 1 つのバッファを共有し、ブラウザ拡張のタブ同士が別のバッファを共有します。この境界を越えて受け渡すことはできません。タブを見分けられるように、それぞれに強弱記号と階名から取った短い音楽的な名前が割り当てられます。<em>do, re, mi, fa, so, la, ti, ff, mf, mp, pp, sf</em> です。譜面を読み込んでいるとき、ブラウザのタブにはその譜面のファイル名が表示されます。そうでないときは <em>Rostrum</em> のあとに括弧でタブの名前が付き、たとえば <em>Rostrum (do)</em> となります。拡張のタブは代わりに角括弧を使って <em>Rostrum [do]</em> となるので、そのタブがウェブアプリか拡張かひと目で分かります。理屈のうえでは、Rostrum のタブを同時に 12 個まで開けます。ただし、タブごとにブラウザのメモリと処理能力を余分に使うので、2 つか 3 つを超えると実用にならないことを覚えておいてください。</p>
 
     <a href="#toc" class="back-to-toc">↑ 目次に戻る</a>
 </section>
@@ -1391,7 +1393,7 @@ function closeVideo(event, container) {
 
     <p>Score リングのセルはほとんどが灰色のままで、譜面を Open するか、空の譜面を New で作るまで使えません。</p>
 
-    <div class="note">Podium では、1 つのブラウザのウィンドウまたはタブで同時に開ける譜面は 1 つだけです。譜面を開くとき、いま開いている譜面に保存していない変更があると、その変更は失われます。そのため確認を求められます。複数の譜面を同時に開きたいときは、別のブラウザのウィンドウやタブで Podium を開いてください。<a href="#chapter-7" class="chapter-link">Page リング</a>を使えば、別のウィンドウで開いた譜面のあいだでページを複写できます。</div>
+    <div class="note">Rostrum では、1 つのブラウザのウィンドウまたはタブで同時に開ける譜面は 1 つだけです。譜面を開くとき、いま開いている譜面に保存していない変更があると、その変更は失われます。そのため確認を求められます。複数の譜面を同時に開きたいときは、別のブラウザのウィンドウやタブで Rostrum を開いてください。<a href="#chapter-7" class="chapter-link">Page リング</a>を使えば、別のウィンドウで開いた譜面のあいだでページを複写できます。</div>
 
     <figure>
         <img src="assets/scorecells.webp" alt="Score リングのメニューセル" class="cells" loading="lazy">
@@ -1426,7 +1428,7 @@ function closeVideo(event, container) {
 
     <p>ファイル／フォルダー一覧の各項目には、名前の変更と削除のアイコンがあります。複写・貼り付けの機能はありません。その代わりに、ファイルを開いて目的の場所に保存し、元のファイルを削除してください。</p>
 
-    <div class="note">Podium は意図的に、削除したファイルを完全に消すのではなく、保存先の提供元のごみ箱へ移します。挙動は提供元によって異なることがあります。ごみ箱を整理するには、その提供元にログインして、提供元自身の画面から操作してください。</div>
+    <div class="note">Rostrum は意図的に、削除したファイルを完全に消すのではなく、保存先の提供元のごみ箱へ移します。挙動は提供元によって異なることがあります。ごみ箱を整理するには、その提供元にログインして、提供元自身の画面から操作してください。</div>
 
     <h4>譜面を開く</h4>
 
@@ -1454,7 +1456,7 @@ function closeVideo(event, container) {
 
     <div class="note">ブラウザの安全対策によってローカルのファイルへの直接のアクセスが制限されているため、ファイル選択画面を特定のフォルダーから始めることはできません。</div>
 
-    <p><strong>ドラッグ＆ドロップ（デスクトップ）:</strong> デスクトップのブラウザでは、ファイル管理画面から PDF を Local タブへ直接ドラッグして Podium で開けます。</p>
+    <p><strong>ドラッグ＆ドロップ（デスクトップ）:</strong> デスクトップのブラウザでは、ファイル管理画面から PDF を Local タブへ直接ドラッグして Rostrum で開けます。</p>
 
     <h4>譜面を保存する</h4>
 
@@ -1477,21 +1479,21 @@ function closeVideo(event, container) {
 
     <h4 id="firefox-settings">デスクトップの Firefox でおすすめの設定</h4>
 
-    <p>デスクトップの Firefox で Podium をもっとも快適に使うには、次の設定にしてください（Firefox の設定 &rarr; 一般）。</p>
+    <p>デスクトップの Firefox で Rostrum をもっとも快適に使うには、次の設定にしてください（Firefox の設定 &rarr; 一般）。</p>
     <ul>
         <li><strong>ファイルとアプリケーション &rarr; ダウンロード:</strong> 「ファイルごとに保存先を指定する」を選びます。これで譜面をローカルに保存するときにファイル名と場所を選べます。</li>
-        <li><strong>ファイルとアプリケーション &rarr; プログラム:</strong> 一覧から「Portable Document Format (PDF)」を見つけて「毎回確認する」に設定します。これで Firefox が PDF を内蔵ビューアで勝手に開かなくなり、代わりに Podium で開くことを選べます。</li>
+        <li><strong>ファイルとアプリケーション &rarr; プログラム:</strong> 一覧から「Portable Document Format (PDF)」を見つけて「毎回確認する」に設定します。これで Firefox が PDF を内蔵ビューアで勝手に開かなくなり、代わりに Rostrum で開くことを選べます。</li>
     </ul>
 
-    <div class="note">Android、iPhone、iPad の Firefox は Podium での利用をおすすめしません。これらの端末では Chrome（Android）または Safari（iPhone / iPad）がもっとも快適です。</div>
+    <div class="note">Android、iPhone、iPad の Firefox は Rostrum での利用をおすすめしません。これらの端末では Chrome（Android）または Safari（iPhone / iPad）がもっとも快適です。</div>
 
     <p>保存のときにファイル名を指定できないプラットフォームでは、先に Details パネル（Score リング &rarr; Details）で譜面の名前を変えておいてください。拡張子 .pdf は付けなくてよく、なければ保存時に自動的に補われます。</p>
 
     <h4>複製の保護と制限付きの PDF</h4>
 
-    <p>Podium は、ウェブブラウザが標準で扱えない高度な機能（JBIG2 や JPEG 2000 による圧縮など）を使った PDF を自動的に見分けます。変更を禁じる安全上の制限が掛かったファイルも見分けます。そうしたファイルを開くと、Podium は警告のダイアログを表示します。</p>
+    <p>Rostrum は、ウェブブラウザが標準で扱えない高度な機能（JBIG2 や JPEG 2000 による圧縮など）を使った PDF を自動的に見分けます。変更を禁じる安全上の制限が掛かったファイルも見分けます。そうしたファイルを開くと、Rostrum は警告のダイアログを表示します。</p>
 
-    <p>こうした制限付きのファイルでも Podium で表示したり注釈を書き込んだりはできますが、PDF の規格上、注釈、メタデータ、ページの変更（挿入や削除など）をファイルに保存できないことがあります。保護された文書を保存しようとすると、Podium は代わりに元のままの「きれいな」PDF を保存する選択肢を示します。この代替の保存があるので、Podium での変更は残せなくても、文書そのものはローカルやクラウドに控えておけます。</p>
+    <p>こうした制限付きのファイルでも Rostrum で表示したり注釈を書き込んだりはできますが、PDF の規格上、注釈、メタデータ、ページの変更（挿入や削除など）をファイルに保存できないことがあります。保護された文書を保存しようとすると、Rostrum は代わりに元のままの「きれいな」PDF を保存する選択肢を示します。この代替の保存があるので、Rostrum での変更は残せなくても、文書そのものはローカルやクラウドに控えておけます。</p>
 
     <h3 id="chapter-4-new">4.2 Score リング: New<svg aria-hidden="true" focusable="false" class="gb-icon" style="margin-left:0.3em"><use href="#gb-new-score"/></svg></h3>
 
@@ -1516,7 +1518,7 @@ function closeVideo(event, container) {
 
     <p>いまの譜面を閉じます。</p>
 
-    <p>ふだんの使い方では、新しい譜面を開くだけで十分です。Podium がいまの譜面を自動的に閉じます。<strong>Close</strong> は、譜面を開かずに Podium の練習ツールを使いたい人のために用意されています。</p>
+    <p>ふだんの使い方では、新しい譜面を開くだけで十分です。Rostrum がいまの譜面を自動的に閉じます。<strong>Close</strong> は、譜面を開かずに Rostrum の練習ツールを使いたい人のために用意されています。</p>
 
     <p>いまの譜面に保存していない変更があるときは、閉じる前に確認のダイアログが出ます。</p>
 
@@ -1529,7 +1531,7 @@ function closeVideo(event, container) {
         <figcaption>Ink の選択肢とページ範囲の設定を表示した Print パネル</figcaption>
     </figure>
 
-    <p>Podium では、利用者が書き込んだ注釈を Ink と呼びます。Print パネルでは印刷の設定ができます。</p>
+    <p>Rostrum では、利用者が書き込んだ注釈を Ink と呼びます。Print パネルでは印刷の設定ができます。</p>
     <ul>
         <li><strong>Ink:</strong> 書き込んだ注釈を含めて印刷します</li>
         <li><strong>No Ink:</strong> 書き込んだ注釈を含めずに印刷します（元の PDF だけ）</li>
@@ -1551,9 +1553,9 @@ function closeVideo(event, container) {
 
     <p><strong>譜面の名前:</strong> パネルの上部には、譜面のファイル名を示す編集できる欄があります。この欄を直せば、保存する前に譜面の名前を変えられます。拡張子 .pdf は付けなくてよく、なければ保存時に自動的に補われます。Firefox や Android のように、保存時にファイル名を指定できないプラットフォームでとくに役立ちます。</p>
 
-    <p><strong>メタデータ:</strong> パネルには、Podium が作ったメタデータ（譜面を最後に変更した日時など）と、元の PDF にあったメタデータが表示されます。元の作者、作成日、その他の文書の属性など、その譜面の出どころに関する情報が含まれることもあります。</p>
+    <p><strong>メタデータ:</strong> パネルには、Rostrum が作ったメタデータ（譜面を最後に変更した日時など）と、元の PDF にあったメタデータが表示されます。元の作者、作成日、その他の文書の属性など、その譜面の出どころに関する情報が含まれることもあります。</p>
 
-    <p><strong>ページの大きさの扱い:</strong> Podium では、譜面のすべてのページを同じ大きさで表示します。PDF ファイル一般では必ずしもそうではありません。1 つの PDF には大きさの異なるページがいくつも入りえます。たとえば Letter と A4 のページが混ざっていたり、縦向きの標準のページのあいだに横長の折り込みページが挟まっていたりします。IMSLP のような図書館由来のスキャン譜面ではよくあることで、ページが別々の時期や別々の版からスキャンされている場合があります。Podium は既定で、PDF のいちばん大きなページに合わせてページの大きさを決め、それより小さいページをその枠の中央に置きます。Details パネルには、小さいページの扱いを決めるラジオボタンがあります。</p>
+    <p><strong>ページの大きさの扱い:</strong> Rostrum では、譜面のすべてのページを同じ大きさで表示します。PDF ファイル一般では必ずしもそうではありません。1 つの PDF には大きさの異なるページがいくつも入りえます。たとえば Letter と A4 のページが混ざっていたり、縦向きの標準のページのあいだに横長の折り込みページが挟まっていたりします。IMSLP のような図書館由来のスキャン譜面ではよくあることで、ページが別々の時期や別々の版からスキャンされている場合があります。Rostrum は既定で、PDF のいちばん大きなページに合わせてページの大きさを決め、それより小さいページをその枠の中央に置きます。Details パネルには、小さいページの扱いを決めるラジオボタンがあります。</p>
     <ul>
         <li><strong>Center:</strong>（既定）小さいページを、そろえた大きさの枠の中央に置きます</li>
         <li><strong>Expand:</strong> 小さいページを、長い辺（縦または横）がそろえた大きさいっぱいになるまで拡大し、もう一方の辺を中央に置きます</li>
@@ -1573,7 +1575,7 @@ function closeVideo(event, container) {
         <figcaption>Layout リングのメニューセル</figcaption>
     </figure>
 
-    <p>Podium には 4 つのレイアウト方式があります。</p>
+    <p>Rostrum には 4 つのレイアウト方式があります。</p>
     <ul>
         <li><strong>Book:</strong> ページをめくるアニメーションで実物の本を模します</li>
         <li><strong>Horizontal:</strong> 横方向に連続してスクロールします</li>
@@ -1585,11 +1587,11 @@ function closeVideo(event, container) {
 
     <p id="chapter-5-refit"><strong>Fit に戻す:</strong> 動かして拡大した表示を元に戻し、<strong>Fit</strong> の設定どおりの位置と大きさに戻す方法が 3 つあります。レイアウトのパネルで、すでに選ばれている Fit ボタンをタップする。Layout リングで、すでに有効なレイアウトのセルをタップする。そして、譜面の上を 2 本指でダブルタップする。最後のものは何も開いておく必要がなく、しかも譜面を動かしたのと同じ 2 本の指でできます。2 本指で、指を滑らせずに、短く 2 回タップしてください。2 本指で 1 回タップしただけでは何も起きないので、画面に手を置いてしまっても心配はいりません。</p>
 
-    <p id="chapter-5-remembered-view"><strong>表示位置の記憶:</strong> レイアウトをどのように動かし、拡大しても（たとえばタブレットで画面いっぱいになるよう譜面をドラッグしてピンチしても）、Podium はその位置と大きさを覚えています。レイアウトごとに別々の表示を保つので、レイアウトを切り替えて戻ってくると、それぞれ離れたときのままに復元されます。表示は譜面とともに保存されるので、ファイルを開き直すと、前回やめたところにそのまま戻ります。</p>
+    <p id="chapter-5-remembered-view"><strong>表示位置の記憶:</strong> レイアウトをどのように動かし、拡大しても（たとえばタブレットで画面いっぱいになるよう譜面をドラッグしてピンチしても）、Rostrum はその位置と大きさを覚えています。レイアウトごとに別々の表示を保つので、レイアウトを切り替えて戻ってくると、それぞれ離れたときのままに復元されます。表示は譜面とともに保存されるので、ファイルを開き直すと、前回やめたところにそのまま戻ります。</p>
 
-    <div class="note">記憶された表示は、それを記録したときの画面の大きさに結び付いています。窓の大きさが違う端末で譜面を開き直したとき、あるいはタブレットを縦横に回転させただけでも、Podium は保存された位置を無視して既定の収まり方に戻します。譜面が画面の外に行ってしまうことが決して起きないようにするためです。</div>
+    <div class="note">記憶された表示は、それを記録したときの画面の大きさに結び付いています。窓の大きさが違う端末で譜面を開き直したとき、あるいはタブレットを縦横に回転させただけでも、Rostrum は保存された位置を無視して既定の収まり方に戻します。譜面が画面の外に行ってしまうことが決して起きないようにするためです。</div>
 
-    <div class="note">Podium のレイアウトでは、すべてのページが同じ大きさでなければなりません。譜面のファイルを開くと、まずページの幅と高さの最大値が求められます。そのうえで、最大値より小さいページは既定で中央に置かれ、四辺を灰色の縁で埋められます。別の選択として、小さいページを拡大することもできます。長い辺がページいっぱいになるまで譜面を拡大し、もう一方の辺を中央に置きます。この挙動の設定は <a href="#chapter-4-details" class="chapter-link">Details パネル</a>をご覧ください。</div>
+    <div class="note">Rostrum のレイアウトでは、すべてのページが同じ大きさでなければなりません。譜面のファイルを開くと、まずページの幅と高さの最大値が求められます。そのうえで、最大値より小さいページは既定で中央に置かれ、四辺を灰色の縁で埋められます。別の選択として、小さいページを拡大することもできます。長い辺がページいっぱいになるまで譜面を拡大し、もう一方の辺を中央に置きます。この挙動の設定は <a href="#chapter-4-details" class="chapter-link">Details パネル</a>をご覧ください。</div>
 
     <h4 id="chapter-5-page-turning">ページめくり</h4>
     <p>Book、Horizontal、Vertical のレイアウトはいずれも、4 つのページ移動の方法に対応しています。</p>
@@ -1635,7 +1637,7 @@ function closeVideo(event, container) {
     <p>Book パネルの Fit ボタンは、譜面の最初の大きさを決めます。</p>
     <ul>
         <li><strong>Auto:</strong> 譜面全体が画面に収まるように Width と Height のどちらかを選びます</li>
-        <li><strong>None:</strong> PDF に記された大きさのまま。Podium は PDF の「ポイント」（1/72 インチ）を「CSS ピクセル」（画面の標準的な単位）に 1 対 1 で対応させます</li>
+        <li><strong>None:</strong> PDF に記された大きさのまま。Rostrum は PDF の「ポイント」（1/72 インチ）を「CSS ピクセル」（画面の標準的な単位）に 1 対 1 で対応させます</li>
         <li><strong>Width:</strong> 画面の幅に合わせます</li>
         <li><strong>Height:</strong> 画面の高さに合わせます</li>
     </ul>
@@ -1669,7 +1671,7 @@ function closeVideo(event, container) {
     <p>Horizontal パネルの Fit ボタンは、レイアウトの最初の大きさを決めます。</p>
     <ul>
         <li><strong>Auto:</strong> 譜面全体が画面に収まるように Width と Height のどちらかを選びます。</li>
-        <li><strong>None:</strong> PDF に記された大きさのまま（Podium は PDF の「ポイント」を「CSS ピクセル」に 1 対 1 で対応させます）。</li>
+        <li><strong>None:</strong> PDF に記された大きさのまま（Rostrum は PDF の「ポイント」を「CSS ピクセル」に 1 対 1 で対応させます）。</li>
         <li><strong>Width:</strong> 画面の幅に合わせます。</li>
         <li><strong>Height:</strong> 画面の高さに合わせます。</li>
     </ul>
@@ -1834,7 +1836,7 @@ function closeVideo(event, container) {
         <figcaption>5 本の五線、小節線付きの譜表、ルネサンスのリュート譜、単旋聖歌の譜表、ギターとマンドリンのコード表を示した Rastrum パネル</figcaption>
     </figure>
 
-    <p>このツールの名前は、ラテン語の「熊手」に由来します。写譜用紙に五線の平行線を引くための、先が何本かに分かれた筆記具のことです。Podium の Rastrum はその考えを広げて、最大 60 本の平行線を、必要なら小節線も付けて描けるようにしています。</p>
+    <p>このツールの名前は、ラテン語の「熊手」に由来します。写譜用紙に五線の平行線を引くための、先が何本かに分かれた筆記具のことです。Rostrum の Rastrum はその考えを広げて、最大 60 本の平行線を、必要なら小節線も付けて描けるようにしています。</p>
 
     <p>使い方は、まずページに触れ、そのままドラッグして rastrum オブジェクトの長さを決めます。</p>
 
@@ -1892,7 +1894,7 @@ function closeVideo(event, container) {
             1 つずつ組み合わせるのではなく、こちらを使ってください。</li>
     </ul>
 
-    <div class="note">Group のドロップダウンには 134 の項目があり、目当てのグループを探してスクロールするのは骨が折れます。どのグループにも直接跳べるように、物理キーボードか Podium の画面上の <a href="#chapter-9-keyboard" class="chapter-link">Keyboard</a>（More リング）で名前の頭の数文字を打ってください。打った文字に最初に一致したグループが自動的に選ばれます。</div>
+    <div class="note">Group のドロップダウンには 134 の項目があり、目当てのグループを探してスクロールするのは骨が折れます。どのグループにも直接跳べるように、物理キーボードか Rostrum の画面上の <a href="#chapter-9-keyboard" class="chapter-link">Keyboard</a>（More リング）で名前の頭の数文字を打ってください。打った文字に最初に一致したグループが自動的に選ばれます。</div>
 
     <p><strong>Staff Space での大きさ指定:</strong> この設定は、その記号が前提とする譜表の線の間隔を指定して記号の大きさを決めます。この値を <a href="#chapter-6-rastrum" class="chapter-link">Rastrum ツール</a>の staff space の設定と合わせておけば、記号と譜表の大きさが互いに正しく釣り合います。</p>
 
@@ -1916,7 +1918,7 @@ function closeVideo(event, container) {
 
     <p>Ink リングの直前の操作を取り消します。</p>
 
-    <p>あるページの操作を取り消すには、Undo セルを有効にしてから、そのページをタップして直前の操作の前の状態に戻します。Podium はページごとに直近 10 回の操作を記録しています。</p>
+    <p>あるページの操作を取り消すには、Undo セルを有効にしてから、そのページをタップして直前の操作の前の状態に戻します。Rostrum はページごとに直近 10 回の操作を記録しています。</p>
 
     <p>貼り付け、削除、変形も含め、Ink リングのどの操作も取り消せます。唯一の例外は Copy そのもので、これは取り消せません（そのあとの貼り付けは取り消せます）。</p>
 
@@ -1948,7 +1950,7 @@ function closeVideo(event, container) {
 
     <p>グリッドそれ自体は注釈のオブジェクトではありません。ほかの Ink の操作を邪魔せず、譜面を保存したり印刷したりしても残りません。</p>
 
-    <p>グリッドは、ink の要素をそろえて正確に置くのに役立ちます。要素どうしや譜面の要素のあいだの距離を測るのにも使えます。グリッドを置くときに測り始めの位置を 0 点に合わせ、そこから長さを読み取ってください。グリッドの寸法は、拡大率やモニターの解像度に関わらず、その譜面を印刷したときの大きさについての Podium の推定を表します。</p>
+    <p>グリッドは、ink の要素をそろえて正確に置くのに役立ちます。要素どうしや譜面の要素のあいだの距離を測るのにも使えます。グリッドを置くときに測り始めの位置を 0 点に合わせ、そこから長さを読み取ってください。グリッドの寸法は、拡大率やモニターの解像度に関わらず、その譜面を印刷したときの大きさについての Rostrum の推定を表します。</p>
 
     <h3 id="chapter-6-edit">6.8 Ink リング: Edit<svg aria-hidden="true" focusable="false" class="gb-icon" style="margin-left:0.3em"><use href="#gb-edit"/></svg></h3>
 
@@ -2046,7 +2048,7 @@ function closeVideo(event, container) {
 
     <p><strong>Undo:</strong> 直前のページ操作（切り取りまたは貼り付け）を取り消します。</p>
 
-    <p><strong>Export:</strong> ページを共有バッファに複写し、ほかの Podium のタブから使えるようにします。</p>
+    <p><strong>Export:</strong> ページを共有バッファに複写し、ほかの Rostrum のタブから使えるようにします。</p>
 
     <p><strong>Import:</strong> 共有バッファのページを、いまの譜面に挿入します。</p>
 
@@ -2065,7 +2067,7 @@ function closeVideo(event, container) {
         <figcaption>ページ番号の設定を表示した Numbers パネル</figcaption>
     </figure>
 
-    <p>譜面のどのページにも 2 つの番号があります。並び順の位置（1 枚目、2 枚目、3 枚目…）と、表示されるページ番号です。Podium はレイアウトの余白に表示されるページ番号を示し、それを 2 つの設定で決めます。</p>
+    <p>譜面のどのページにも 2 つの番号があります。並び順の位置（1 枚目、2 枚目、3 枚目…）と、表示されるページ番号です。Rostrum はレイアウトの余白に表示されるページ番号を示し、それを 2 つの設定で決めます。</p>
 
     <p><strong>Roman pages:</strong> 譜面の先頭から何ページを小文字のローマ数字（i, ii, iii…）で番号付けするかです。扉、目次、前書きといった前付けによく使われます。</p>
 
@@ -2084,11 +2086,13 @@ function closeVideo(event, container) {
 
     <h4>フットペダルのキー</h4>
 
-    <p>これらの設定は、音楽家がよく使う Bluetooth のフットペダル式ページめくり装置のためのものです。フットペダルはキーの少ない特殊なキーボードにすぎないので、これらの指定は通常のキーボードでも同じように働きます。</p>
+    <p>これらの設定は、音楽家がよく使う Bluetooth・USB のフットペダル式ページめくり装置のためのものです。フットペダルはキーの少ない特殊なキーボードにすぎないので、これらの指定は通常のキーボードでも同じように働きます。</p>
 
-    <p>上または右の矢印キーに 1 つ、左または下の矢印キーに 1 つ、動作を割り当てられます。上または右のキーを押したときに次のページへ移動するか、次のブックマークへ移動するかを、該当のボタンをタップして決めます。同じように、左または下のキーで前のページへ移動するか、前のブックマークへ移動するかも選べます。</p>
+    <p>右と下のカーソル矢印キー（および Page Down）に一つ、左と上のカーソル矢印キー（および Page Up）に一つのショートカットを割り当てられます。それぞれのボタンで、次／前のページへ移動するか、次／前のブックマークへ移動するかを選びます。</p>
 
-    <div class="note">ふつうは譜面を前後にめくる使い方をします。ただし、ブックマークを前後にたどれることは、数ページにわたる繰り返しのある譜面を読むときにとくに助かります。繰り返す部分の始まりがあるページにブックマークを置き、右または上の矢印キーを Pages、左または下の矢印キーを Bookmarks に設定してください。繰り返しを弾き進めるあいだは右の矢印キー（またはそれに当たるフットペダル）で次のページへ進み、繰り返しの終わりに来たら左の矢印キーで繰り返しの先頭へ一息に戻ります。</div>
+    <div class="note">ふつうは譜面を前後にめくる使い方をします。ただし、ブックマークを前後にたどれることは、数ページにわたる繰り返しのある譜面を読むときにとくに助かります。繰り返す部分の始まりがあるページにブックマークを置き、右または下の矢印キーを Pages、左または上の矢印キーを Marks に設定してください。繰り返しを弾き進めるあいだは右の矢印キー（またはそれに当たるフットペダル）で次のページへ進み、繰り返しの終わりに来たら左の矢印キーで繰り返しの先頭へ一息に戻ります。</div>
+
+    <p>どちらの設定でも、譜面の先頭・末尾や最初・最後のブックマークで移動は止まり、反対側へ折り返しません。演奏中に誤って踏んでも、譜面の反対側へ移動することはありません。</p>
 
     <h4>そのほかのキーボードショートカット</h4>
 
@@ -2099,7 +2103,6 @@ function closeVideo(event, container) {
         <li><strong>Ctrl+Home:</strong> 最初のブックマークへ跳ぶ</li>
         <li><strong>Ctrl+End:</strong> 最後のブックマークへ跳ぶ</li>
         <li><strong>Ctrl+矢印:</strong> 次／前のブックマークへ移動（上のフットペダルの矢印キーの設定に関わらず）</li>
-        <li><strong>PageUp / PageDown:</strong> 前／次のページへ移動</li>
     </ul>
 
     <h3 id="chapter-7-add">7.2 Page リング: Add<svg aria-hidden="true" focusable="false" class="gb-icon" style="margin-left:0.3em"><use href="#gb-new-page"/></svg></h3>
@@ -2132,7 +2135,7 @@ function closeVideo(event, container) {
 
     <p>いまの譜面の中でページを切り取り、複写し、貼り付けます。</p>
 
-    <p>この 3 つのセルは、いまのタブとセッションの中にだけ存在するローカルのクリップボードを扱います。共有バッファやほかの Podium のタブとはやり取りしません。</p>
+    <p>この 3 つのセルは、いまのタブとセッションの中にだけ存在するローカルのクリップボードを扱います。共有バッファやほかの Rostrum のタブとはやり取りしません。</p>
 
     <p><strong>Cut:</strong> Cut セルを有効にしてからページをタップします。そのページは譜面から取り除かれ、ローカルのクリップボードに入ります。</p>
 
@@ -2156,7 +2159,7 @@ function closeVideo(event, container) {
 
     <h3 id="chapter-7-export-import">7.5 Page リング: Export, Import<svg aria-hidden="true" focusable="false" class="gb-icon" style="margin-left:0.3em"><use href="#gb-export-page"/></svg><svg aria-hidden="true" focusable="false" class="gb-icon"><use href="#gb-import-page"/></svg></h3>
 
-    <p>共有バッファを介して、Podium のタブ間でページをやり取りします。</p>
+    <p>共有バッファを介して、Rostrum のタブ間でページをやり取りします。</p>
 
     <figure>
         <img src="assets/pageimport.webp" alt="Import パネル" loading="lazy">
@@ -2178,7 +2181,7 @@ function closeVideo(event, container) {
         <li><strong>Clear:</strong> 共有バッファを完全に空にし、すべてのページを一度に取り除きます。</li>
     </ul>
 
-    <div class="note"><strong>インスタンスをまたぐ共有とプライバシー:</strong> 共有バッファは、同じブラウザのオリジンで動いている Podium のすべてのインスタンスで共有されます。つまり、すべてのブラウザのタブとインストールしたプログレッシブウェブアプリ（PWA）が 1 つのバッファを共有し、ブラウザ拡張は別のバッファを持ちます。この境界を越えて受け渡すことはできません。バッファは譜面を閉じてもブラウザを再起動しても残ります。<strong>ブラウザを他の人と共有している場合</strong>で、プライバシーが気になるなら、使い終わったあとに共有バッファを空にしてください。ウェブアプリと拡張の両方を使っているときは、それぞれのバッファを別々に空にする必要があります。</div>
+    <div class="note"><strong>インスタンスをまたぐ共有とプライバシー:</strong> 共有バッファは、同じブラウザのオリジンで動いている Rostrum のすべてのインスタンスで共有されます。つまり、すべてのブラウザのタブとインストールしたプログレッシブウェブアプリ（PWA）が 1 つのバッファを共有し、ブラウザ拡張は別のバッファを持ちます。この境界を越えて受け渡すことはできません。バッファは譜面を閉じてもブラウザを再起動しても残ります。<strong>ブラウザを他の人と共有している場合</strong>で、プライバシーが気になるなら、使い終わったあとに共有バッファを空にしてください。ウェブアプリと拡張の両方を使っているときは、それぞれのバッファを別々に空にする必要があります。</div>
 
     <h4>主な使い道: 練習用の譜面</h4>
 
@@ -2213,7 +2216,7 @@ function closeVideo(event, container) {
 
     <p>譜面のページの Ink の注釈を PDF に焼き付けます。</p>
 
-    <p>Podium では、各ページが重なった 2 つの層からできています。</p>
+    <p>Rostrum では、各ページが重なった 2 つの層からできています。</p>
     <ul>
         <li>譜面の PDF の内容を表示する背景の層［オープンソースの Mozilla PDF ライブラリによります］。</li>
         <li>譜面に加えた、編集できる Ink オブジェクトを表示する注釈の層［オープンソースの Fabric.js ライブラリによります］。</li>
@@ -2284,7 +2287,7 @@ function closeVideo(event, container) {
 
     <p><strong>Guide:</strong> このガイドブックを開きます。</p>
 
-    <p><strong>Storage:</strong> Podium がブラウザに保存しているデータを扱います。</p>
+    <p><strong>Storage:</strong> Rostrum がブラウザに保存しているデータを扱います。</p>
 
     <p><strong>Curtain:</strong> 画面を暗くします。暗い場所での本番で役立ちます。</p>
 
@@ -2304,15 +2307,15 @@ function closeVideo(event, container) {
     <h4>About タブ</h4>
     <p>アプリのバージョン番号と、次のリンクを示します。</p>
     <ul>
-        <li><strong><a href="https://studiop5.org/releaseNotes.html" target="_blank">Release Notes:</a></strong> Podium のウェブサイト上のバージョン履歴</li>
-        <li><strong><a href="https://studiop5.org/privacy.html" target="_blank">Privacy:</a></strong> プライバシーポリシー</li>
-        <li><strong><a href="https://studiop5.org/terms.html" target="_blank">Terms:</a></strong> 利用規約</li>
-        <li><strong><a href="https://github.com/studiop5/podium" target="_blank">Source:</a></strong> GitHub のソースコードリポジトリ</li>
-        <li><strong><a href="https://github.com/studiop5/podium/issues" target="_blank">Issues:</a></strong> 不具合の報告と機能の要望</li>
+        <li><strong><a href="https://studiop5.org/releaseNotes.html" target="_blank">Upstream Release Notes:</a></strong> Rostrum のウェブサイト上のバージョン履歴</li>
+        <li><strong><a href="https://studiop5.org/privacy.html" target="_blank">Upstream Privacy:</a></strong> プライバシーポリシー</li>
+        <li><strong><a href="https://studiop5.org/terms.html" target="_blank">Upstream Terms:</a></strong> 利用規約</li>
+        <li><strong><a href="https://github.com/1921music/rostrum" target="_blank">Source:</a></strong> GitHub のソースコードリポジトリ</li>
+        <li><strong><a href="https://github.com/1921music/rostrum/issues" target="_blank">Issues:</a></strong> 不具合の報告と機能の要望</li>
     </ul>
 
     <h4>Credits タブ</h4>
-    <p>Podium が土台にしているオープンソースのプロジェクトを挙げています。</p>
+    <p>Rostrum が土台にしているオープンソースのプロジェクトを挙げています。</p>
 
     <h4>License タブ</h4>
     <p>著作権とライセンスの正式な表示（<a href="https://www.gnu.org/licenses/agpl-3.0-standalone.html" target="_blank">GNU Affero General Public License v3</a>）。</p>
@@ -2333,20 +2336,20 @@ function closeVideo(event, container) {
 
     <h3 id="chapter-8-storage">8.4 App リング: Storage<svg aria-hidden="true" focusable="false" class="gb-icon" style="margin-left:0.3em"><use href="#gb-storage"/></svg></h3>
 
-    <p>Podium がブラウザに保存しているデータを扱います。</p>
+    <p>Rostrum がブラウザに保存しているデータを扱います。</p>
 
     <figure>
         <img src="assets/appstorage.webp" alt="Storage パネル" loading="lazy">
         <figcaption>Storage パネル</figcaption>
     </figure>
 
-    <p>Storage パネルには、Podium がブラウザに保存しているデータを扱うボタンがあります。</p>
+    <p>Storage パネルには、Rostrum がブラウザに保存しているデータを扱うボタンがあります。</p>
 
     <ul>
         <li><strong>Menu:</strong> メニューの多くの設定の保存値を消します。これをタップするとメニューが既定の状態に戻り、すべてのレイアウト（いま開いているレイアウトの拡大率、位置、設定も含みます）が工場出荷時の既定に戻ります。</li>
         <li><strong>Recent:</strong> Open、Save、Copy のパネルに表示される、最近開いたものの一覧を消します。</li>
         <li><strong>Buffer:</strong> 共有バッファの中身を消します（詳しくは <a href="#chapter-7-export-import">Page リング: Export, Import</a> をご覧ください）。</li>
-        <li><strong>Reload:</strong> Podium を強制的に読み直します（キャッシュを消しての再起動）。保存していない変更をうっかり失わないよう、確認のダイアログを経てから行われます。</li>
+        <li><strong>Reload:</strong> Rostrum を強制的に読み直します（キャッシュを消しての再起動）。保存していない変更をうっかり失わないよう、確認のダイアログを経てから行われます。</li>
     </ul>
 
     <p>使える環境では、開発者に役立つ保存容量の統計も、更新できる形で表示されます。</p>
@@ -2370,7 +2373,7 @@ function closeVideo(event, container) {
 
     <h3 id="chapter-8-wakelock">8.6 App リング: Wakelock<svg aria-hidden="true" focusable="false" class="gb-icon" style="margin-left:0.3em"><use href="#gb-wakelock"/></svg></h3>
 
-    <p>本番中に画面が自動的に暗くなったりロックされたりするのを防ぎます。Wakelock が働いているあいだ、Podium が前面にある限り端末の画面は点いたままです。Wakelock セルをタップすると入り切りが切り替わります。</p>
+    <p>本番中に画面が自動的に暗くなったりロックされたりするのを防ぎます。Wakelock が働いているあいだ、Rostrum が前面にある限り端末の画面は点いたままです。Wakelock セルをタップすると入り切りが切り替わります。</p>
 
     <figure>
         <img src="assets/appwakelock.webp" alt="Wakelock セルの拡大" loading="lazy">
@@ -2383,7 +2386,7 @@ function closeVideo(event, container) {
 
     <p>全画面表示を切り替えます。背景を下へスワイプしても切り替えられます。iPhone / iPad では、スワイプは全画面を抜けることしかできません。全画面にするにはこのボタンを使ってください。</p>
 
-    <p>Screen セルから外へドラッグすると <strong>Screen パネル</strong>が開きます。Podium のもの（メニュー、譜面、開いているパネル）を正確に動かし、大きさを変える操作が並んでいます。ピンチズームでは大ざっぱすぎて位置が決まらないときや、スタイラスで作業するときにとくに役立ちます。</p>
+    <p>Screen セルから外へドラッグすると <strong>Screen パネル</strong>が開きます。Rostrum のもの（メニュー、譜面、開いているパネル）を正確に動かし、大きさを変える操作が並んでいます。ピンチズームでは大ざっぱすぎて位置が決まらないときや、スタイラスで作業するときにとくに役立ちます。</p>
 
     <figure>
         <img src="assets/appscreen.webp" alt="Screen パネル" loading="lazy">
@@ -2398,7 +2401,7 @@ function closeVideo(event, container) {
         <li><strong>デクレシェンドのボタン</strong> — 対象を小さくします。</li>
     </ul>
 
-    <p>対象を変えるには、目当てのものに触れるか操作するだけです。あるいはパネルの<strong>走る人の形</strong>のアイコンで、Podium のものを重なり順に 1 つずつたどれます。重なり順は操作の履歴で決まります。いちばん最近触れたり動かしたりしたものが手前に来ます。</p>
+    <p>対象を変えるには、目当てのものに触れるか操作するだけです。あるいはパネルの<strong>走る人の形</strong>のアイコンで、Rostrum のものを重なり順に 1 つずつたどれます。重なり順は操作の履歴で決まります。いちばん最近触れたり動かしたりしたものが手前に来ます。</p>
 
     <a href="#toc" class="back-to-toc">↑ 目次に戻る</a>
 </section>
@@ -2495,7 +2498,7 @@ function closeVideo(event, container) {
 
     <h3 id="chapter-9-clock">9.4 More リング: Clock<svg aria-hidden="true" focusable="false" class="gb-icon" style="margin-left:0.3em"><use href="#gb-clock"/></svg></h3>
 
-    <p>端末の既定のタイムゾーンで、現在の時刻と日付を示す壁掛け時計です。Podium を離れずに練習中の時間を把握できます。</p>
+    <p>端末の既定のタイムゾーンで、現在の時刻と日付を示す壁掛け時計です。Rostrum を離れずに練習中の時間を把握できます。</p>
 
     <p>時計は切り離して画面の好きな場所に置けます。</p>
 
@@ -2520,11 +2523,11 @@ function closeVideo(event, container) {
     <p>|=|（<i>ブレーヴェ</i>）のボタンから左右にドラッグすると、鍵盤の幅を狭めたり広げたりできます。</p>
     <p>8va（<i>オッターヴァ</i>）のボタンから左右にドラッグすると、鍵盤の中で見えている鍵の範囲が動きます。</p>
 
-    <div class="note">ピアノの音の標本は、Podium のダウンロードの大きさのかなりの部分を占めます。そのため鍵盤の最大は 5 オクターブに限ってあります。18 世紀のチェンバロやフォルテピアノによくある大きさです。標本は切り詰め、標本化の間隔も粗くして、（願わくは）許せる音質を保ちつつ大きさを抑えています。</div>
+    <div class="note">ピアノの音の標本は、Rostrum のダウンロードの大きさのかなりの部分を占めます。そのため鍵盤の最大は 5 オクターブに限ってあります。18 世紀のチェンバロやフォルテピアノによくある大きさです。標本は切り詰め、標本化の間隔も粗くして、（願わくは）許せる音質を保ちつつ大きさを抑えています。</div>
 
-    <p>鍵の上を指で滑らせればグリッサンドが弾けます。複数の指を使えば、和音や音程も含めて同時に鳴らせます（Settings: Timbre で決めた同時発音数の上限まで。下記参照）。Podium は弾ける限りの同時発音に対応しますが、実際のタッチ画面はたいてい 5 点までしか認識しません。</p>
+    <p>鍵の上を指で滑らせればグリッサンドが弾けます。複数の指を使えば、和音や音程も含めて同時に鳴らせます（Settings: Timbre で決めた同時発音数の上限まで。下記参照）。Rostrum は弾ける限りの同時発音に対応しますが、実際のタッチ画面はたいてい 5 点までしか認識しません。</p>
 
-    <p><strong>Sustain モード:</strong> ピアノのペダルの標準的な記号で示されます。このモードでは、鍵を離したあとも音が鳴り続けます。ただしピアノの音は最大で 2 秒とすこししか続きません。Podium は本格的な音楽制作の道具ではありません。</p>
+    <p><strong>Sustain モード:</strong> ピアノのペダルの標準的な記号で示されます。このモードでは、鍵を離したあとも音が鳴り続けます。ただしピアノの音は最大で 2 秒とすこししか続きません。Rostrum は本格的な音楽制作の道具ではありません。</p>
 
     <p><strong>Autorepeat モード:</strong> Autorepeat モードのボタンをタップすると切り替わります。有効にすると、鍵を押すとそれが一定の間隔で自動的に繰り返されます（ピアノの標本では 2.5 秒、音叉の音色では 5 秒。下記の Settings: Timbre を参照）。音が続いて聞こえるので調律しやすくなります。</p>
 
@@ -2582,7 +2585,7 @@ function closeVideo(event, container) {
 
     <p>Review のツールは、練習やリハーサルのあいだずっとあなたを録り続けます。しくじったとき（あるいはうまくいったとき）、その瞬間をすぐに見直して検討できます。</p>
 
-    <p>メモリが尽きる心配をせずに、何時間でも Review を動かしておけます。裏側では Podium がメモリを自動的に管理し、直近の部分（ふつうは 30 秒から数分）だけを再生できる形で残します。そのため、端末の資源を使い切ることなく、いつでも直近の演奏を見直せます。</p>
+    <p>メモリが尽きる心配をせずに、何時間でも Review を動かしておけます。裏側では Rostrum がメモリを自動的に管理し、直近の部分（ふつうは 30 秒から数分）だけを再生できる形で残します。そのため、端末の資源を使い切ることなく、いつでも直近の演奏を見直せます。</p>
 
     <div class="note">これはメモリの消費を防ぎますが、電池はかなり使うので、電池で動かすよりも電源につないでおくのがよいです。</div>
 
@@ -2641,7 +2644,7 @@ function closeVideo(event, container) {
         <li><strong>逐次検索</strong> — 打つにつれて、対象の欄の表示が、最初に一致した項目だけに変わっていきます。逐次検索はファイルのパネル（Open と Save）と、あらゆるドロップダウンで使えます。もっとも役立つのは <a href="#chapter-6-symbols" class="chapter-link">Symbols パネル</a>のグループの選択です。</li>
     </ul>
 
-    <p>「<strong>…</strong>」と書かれたキーを押すと、キーボードが<strong>特殊キー</strong>の配列に変わります。各国語の文字、カーソルの矢印キー、Home と End のキーが含まれます。「<strong>Aa</strong>」と書かれたキーで通常の文字のキーに戻ります。矢印キーは、物理のペダルを手元に置かずに <a href="#chapter-7-numbers" class="chapter-link">Bluetooth のフットペダルの設定</a>を確かめるのにも役立ちます。</p>
+    <p>「<strong>…</strong>」と書かれたキーを押すと、キーボードが<strong>特殊キー</strong>の配列に変わります。各国語の文字、カーソルの矢印キー、Home と End のキーが含まれます。「<strong>Aa</strong>」と書かれたキーで通常の文字のキーに戻ります。矢印キーは、物理のペダルを手元に置かずに <a href="#chapter-7-numbers" class="chapter-link">フットペダルの設定</a>を確かめるのにも役立ちます。</p>
 
 
     <figure>
@@ -2660,9 +2663,9 @@ function closeVideo(event, container) {
 
     <h3 id="chapter-9-volume">9.8 More リング: Volume<svg aria-hidden="true" focusable="false" class="gb-icon" style="margin-left:0.3em"><use href="#gb-volume"/></svg></h3>
 
-    <p>Podium が出すすべての音（メトロノーム、ピアノ、Review の再生）に効く音量調整です。</p>
+    <p>Rostrum が出すすべての音（メトロノーム、ピアノ、Review の再生）に効く音量調整です。</p>
 
-    <p>この音量調整は、端末自身の音量設定に対して音を絞る形で働きます。うまく使うには、端末の音量を大きめにしておき、Podium の音量スライダーで好みの高さまで下げてください。全画面で練習しているときなど、端末の音量の操作に手が届きにくい場面でとくに便利です。</p>
+    <p>この音量調整は、端末自身の音量設定に対して音を絞る形で働きます。うまく使うには、端末の音量を大きめにしておき、Rostrum の音量スライダーで好みの高さまで下げてください。全画面で練習しているときなど、端末の音量の操作に手が届きにくい場面でとくに便利です。</p>
 
     <a href="#toc" class="back-to-toc">↑ 目次に戻る</a>
 </section>
@@ -2865,7 +2868,7 @@ function closeVideo(event, container) {
         <dt>Review<svg aria-hidden="true" focusable="false" class="gb-icon" style="margin-left:0.3em"><use href="#gb-review"/></svg></dt><dd> &mdash; <a href="#chapter-9-review">9.6</a></dd>
         <dt>Roman numerals</dt><dd> &mdash; <a href="#chapter-7-numbers">7.1</a></dd>
         <dt>Rotating rings</dt><dd> &mdash; <a href="#chapter-3">Ch.3</a></dd>
-        <dt>Running Podium</dt><dd> &mdash; <a href="#chapter-2">Ch.2</a></dd>
+        <dt>Running Rostrum</dt><dd> &mdash; <a href="#chapter-2">Ch.2</a></dd>
     </dl>
     <div class="idx-letter">S</div>
     <dl>
@@ -2904,7 +2907,7 @@ function closeVideo(event, container) {
     <dl>
         <dt>Undo<svg aria-hidden="true" focusable="false" class="gb-icon" style="margin-left:0.3em"><use href="#gb-undo"/></svg></dt><dd> &mdash; <a href="#chapter-6-undo">6.6</a>, <a href="#chapter-7-undo">7.4</a></dd>
         <dt>Undo history</dt><dd> &mdash; <a href="#chapter-6-undo">6.6</a>, <a href="#chapter-7-undo">7.4</a></dd>
-        <dt>Using Podium in Your Language</dt><dd> &mdash; <a href="#chapter-2-language">2.5</a></dd>
+        <dt>Using Rostrum in Your Language</dt><dd> &mdash; <a href="#chapter-2-language">2.5</a></dd>
     </dl>
     <div class="idx-letter">V</div>
     <dl>
@@ -2929,9 +2932,9 @@ function closeVideo(event, container) {
 <!-- END KEYWORD INDEX -->
 
 <footer style="margin-top:3em;padding:2em 1em;border-top:1px solid #ccc;font-size:.75em;color:#666;text-align:center;">
-    <p>Copyright &copy; 2025 Glendon Diener. この文書は Podium プロジェクトの一部であり、<a href="https://www.gnu.org/licenses/agpl-3.0-standalone.html" target="_blank">GNU Affero General Public License v3</a> のもとで提供されます。</p>
+    <p>Copyright &copy; 2025 Glendon Diener. この文書は Rostrum プロジェクトの一部であり、<a href="https://www.gnu.org/licenses/agpl-3.0-standalone.html" target="_blank">GNU Affero General Public License v3</a> のもとで提供されます。</p>
     <p>この文書に挙げた製品名、ロゴ、ブランドはすべてそれぞれの所有者の財産であり、識別の目的でのみ用いています。</p>
-    <p>Podium で開く譜面ファイルを使用する権利があるかどうかは、利用者の責任で確認してください。</p>
+    <p>Rostrum で開く譜面ファイルを使用する権利があるかどうかは、利用者の責任で確認してください。</p>
 </footer>
 
 </body>

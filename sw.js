@@ -1,13 +1,13 @@
-// Podium Service Worker
+// Rostrum Service Worker
 // Enables offline functionality and PWA installation
 
-const CACHE_NAME = 'podium-v2.3.0-581e471afc81';
+let CACHE_NAME = 'rostrum-v2.3.1-3184674d121a';
 // Relative to this script, so Podium works when served from a subdirectory.
 // The packaged page is podium.html where Podium is deployed alongside the rest
 // of the site, and index.html where the deployment is Podium alone, so try both
 // and keep whichever exists: addAll would reject the whole install if either
 // were missing.
-const urlsToCache = [
+let urlsToCache = [
   './',
   './podium.html',
 ];
@@ -142,7 +142,7 @@ self.addEventListener('fetch', (event) => {
           return response;
         }
         // Clone the request
-        const fetchRequest = event.request.clone();
+        let fetchRequest = event.request.clone();
 
         return fetch(fetchRequest).then((response) => {
           // Check if valid response
@@ -151,7 +151,7 @@ self.addEventListener('fetch', (event) => {
           }
 
           // Clone the response
-          const responseToCache = response.clone();
+          let responseToCache = response.clone();
 
           // Only cache same-origin requests (not external PDFs), and never a
           // request carrying a query string (e.g. the "?t=" cache-buster the
