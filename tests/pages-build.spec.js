@@ -102,7 +102,7 @@ test("the About panel names the build's commit both ways", async ({ page }) => {
     const panel = _panels_.AboutPanel.get(_menu_.rings.app.cells.about);
     _body_.append(panel.elm);
   });
-  const face = page.locator(".Panel__elm", { hasText: "PODIUM: Sheet Music Studio" });
+  const face = page.locator(".Panel__elm", { hasText: "ROSTRUM: Sheet Music Studio" });
   await expect(face).toBeVisible();
   const shown = {
     text: await face.textContent(),
@@ -300,14 +300,14 @@ test("installing the worker really stores the guidebook", async ({ page }) => {
   const stored = await page.evaluate(async () => {
     const registration = await navigator.serviceWorker.register("sw.js");
     await navigator.serviceWorker.ready;
-    const name = (await caches.keys()).find(key => key.startsWith("podium-"));
+    const name = (await caches.keys()).find(key => key.startsWith("rostrum-"));
     const cache = await caches.open(name);
     const keys = (await cache.keys()).map(request => new URL(request.url).pathname);
     return { name, keys };
   });
 
   try {
-    expect(stored.name).toMatch(/^podium-v2\.3\.0-[0-9a-f]{12}$/);
+    expect(stored.name).toMatch(/^rostrum-v2\.3\.1-[0-9a-f]{12}$/);
     expect(stored.keys).toContain("/pages/Guidebook.ja.html");
     expect(stored.keys.filter(p => p.endsWith(".webp"))).toHaveLength(62);
     expect(stored.keys.filter(p => p.endsWith(".webm"))).toEqual([]);
