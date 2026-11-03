@@ -118,8 +118,7 @@ current branch is touched — there is no `gh-pages` checkout, and the branch yo
 are working on stays checked out. `gh-pages` holds only the deployment and has
 no relation to the source tree, which is why the commit is built by hand. The
 remote branch is the parent, a deployment identical to the one already served is
-a no-op, and the message records the source commit (marked `+dirty` when the
-build may not match it). GitHub Pages then builds it, which takes a few minutes
+a no-op, and the message records the source commit. The deployer requires committed sources and a build matching HEAD. GitHub Pages then builds it, which takes a few minutes
 and occasionally stalls; `gh api repos/1921music/rostrum/pages/builds/latest --jq
 .status` reports it and `gh api -X POST repos/1921music/rostrum/pages/builds` prods
 it.
