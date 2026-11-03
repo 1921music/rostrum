@@ -12,6 +12,7 @@ const CACHE_SCOPE = 'rostrum-scope:' + self.registration.scope + ':';
 let urlsToCache = [
   './',
   './podium.html',
+  './index.html',
 ];
 // The static-host build replaces this with the guidebook and its images, which
 // that deployment carries, so the guidebook reads offline like the rest of the

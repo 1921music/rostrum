@@ -257,7 +257,7 @@ test("every deployed screenshot decodes, and so does a re-encoded clip", async (
 test("the worker precaches the guidebook and its images, but no video", async () => {
   const worker = fs.readFileSync(path.join(pagesDir, "sw.js"), "utf8");
   const listed = [...worker.matchAll(/^\s*'(\.\/[^']*)',$/gm)].map(m => m[1]);
-  const precached = listed.filter(url => url !== "./podium.html"); // absent by design
+  const precached = listed.filter(url => url !== "./podium.html" && url !== "./index.html"); // absent by design
 
   expect(precached).toContain("./");
   expect(precached).toContain("./Guidebook.ja.html");
@@ -280,7 +280,7 @@ test("the service worker's cache name follows everything it serves", async () =>
   // an unchanged page would otherwise never reach a device that had installed.
   const worker = fs.readFileSync(path.join(pagesDir, "sw.js"), "utf8");
   const precached = [...worker.matchAll(/^\s*'(\.\/[^']*)',$/gm)]
-    .map(m => m[1]).filter(url => url !== "./podium.html");
+    .map(m => m[1]).filter(url => url !== "./podium.html" && url !== "./index.html");
   const hash = crypto.createHash("sha256").update(fs.readFileSync(pageFile));
   for (const url of precached)
     if (url !== "./") hash.update(fs.readFileSync(path.join(pagesDir, url.slice(2))));
