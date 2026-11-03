@@ -1,7 +1,7 @@
 // Rostrum Service Worker
 // Enables offline functionality and PWA installation
 
-let CACHE_NAME = 'rostrum-v2.3.1-3184674d121a';
+let CACHE_NAME = 'rostrum-v2.3.1-4606b9773801';
 // Relative to this script, so Podium works when served from a subdirectory.
 // The packaged page is podium.html where Podium is deployed alongside the rest
 // of the site, and index.html where the deployment is Podium alone, so try both
