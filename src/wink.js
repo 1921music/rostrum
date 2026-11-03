@@ -758,7 +758,7 @@ class WinkWatch {
       return "Permission to use the camera was denied or dismissed.";
     if (name == "NotReadableError")
       return "The camera is unavailable -- it is in use by another app, or the "
-        + "system video stack was reset. <strong>Reloading Podium usually fixes "
+        + "system video stack was reset. <strong>Reloading Rostrum usually fixes "
         + "this.</strong>";
     if (name == "NotFoundError") return "No camera was found on this device.";
     if (name == "OverconstrainedError") return "No camera matches what was asked for.";
