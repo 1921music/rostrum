@@ -1,7 +1,9 @@
 // Rostrum Service Worker
 // Enables offline functionality and PWA installation
 
-let CACHE_NAME = 'rostrum-v2.3.1-4606b9773801';
+let CACHE_NAME = 'rostrum-v1.0.0-11f5e7c279cb';
+// Cache Storage is shared by every app on this origin; isolate each deployment.
+const CACHE_SCOPE = 'rostrum-scope:' + self.registration.scope + ':';
 // Relative to this script, so Podium works when served from a subdirectory.
 // The packaged page is podium.html where Podium is deployed alongside the rest
 // of the site, and index.html where the deployment is Podium alone, so try both
@@ -10,6 +12,7 @@ let CACHE_NAME = 'rostrum-v2.3.1-4606b9773801';
 let urlsToCache = [
   './',
   './podium.html',
+  './index.html',
 ];
 // The static-host build replaces this with the guidebook and its images, which
 // that deployment carries, so the guidebook reads offline like the rest of the
@@ -85,7 +88,7 @@ const docToCache = [
 // Install event - cache resources
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME)
+    caches.open(CACHE_SCOPE + CACHE_NAME)
       .then((cache) => {
         console.log('Podium: Cache opened');
         return Promise.all([...urlsToCache, ...docToCache]
@@ -101,7 +104,7 @@ self.addEventListener('activate', (event) => {
     caches.keys().then((cacheNames) => {
       return Promise.all(
         cacheNames.map((cacheName) => {
-          if (cacheName !== CACHE_NAME) {
+          if (cacheName.startsWith(CACHE_SCOPE) && cacheName !== CACHE_SCOPE + CACHE_NAME) {
             console.log('Podium: Deleting old cache:', cacheName);
             return caches.delete(cacheName);
           }
@@ -116,6 +119,9 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   // Only handle GET requests — never intercept POST/PUT/etc. (e.g. OAuth token exchanges)
   if (event.request.method !== 'GET') return;
+  // A nested experimental deployment has its own worker and cache.
+  if (new URL(event.request.url).pathname.startsWith(
+      new URL('wink-page-turn/', self.registration.scope).pathname)) return;
 
   // Leave media alone: do not answer it, do not cache it. A <video> is fetched
   // with Range requests, which arrive as 206 responses, and the Cache API
@@ -135,7 +141,7 @@ self.addEventListener('fetch', (event) => {
   }
 
   event.respondWith(
-    caches.match(event.request)
+    caches.open(CACHE_SCOPE + CACHE_NAME).then(cache => cache.match(event.request))
       .then((response) => {
         // Cache hit - return response from cache
         if (response) {
@@ -160,7 +166,7 @@ self.addEventListener('fetch', (event) => {
           // them keeps the canonical (no-query) entry set only at install time,
           // so it stays pinned until a real service worker update ships.
           if (event.request.url.startsWith(self.location.origin) && !new URL(event.request.url).search) {
-            caches.open(CACHE_NAME)
+            caches.open(CACHE_SCOPE + CACHE_NAME)
               .then((cache) => {
                 cache.put(event.request, responseToCache);
               });
