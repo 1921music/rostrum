@@ -1,7 +1,7 @@
 # Rostrum が upstream の Podium に加えたもの
 
 - **基準点** [studiop5/podium](https://github.com/studiop5/podium) の `v2.3.1`（`658013c`）。元の分岐点は `v2.3.0`（`da186fc`）で、独自変更をマージなしのコミット列として載せ直した。
-- **この fork** [yatra9/podium](https://github.com/yatra9/podium)。差分は 35 コミット。
+- **この fork** [1921music/rostrum](https://github.com/1921music/rostrum)。表示名は **Rostrum**。
 - **配備先** <https://1921music.github.io/rostrum/>（GitHub Pages、`gh-pages` ブランチ）。
 - **upstream の基準バージョン** `2.3.1`。タグは打っていない。どのビルドが動いているかは App → About の `Build` 行（UTC 時刻）と `Commit` 行（ハッシュ）で判別する。
 
