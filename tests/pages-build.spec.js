@@ -366,7 +366,7 @@ test("the model is deployed whole, and left out of the precache", async () => {
   const digest = hash.digest("hex").slice(0, 12);
   expect(worker).toContain(`const ASSET_CACHE_NAME = 'rostrum-assets-v1-${digest}';`);
   // And the app's digest does not cover them, or the two would move together.
-  expect(worker).not.toContain(`let CACHE_NAME = 'rostrum-v2.3.1-${digest}';`);
+  expect(worker).not.toContain(`let CACHE_NAME = 'rostrum-v1.0.0-${digest}';`);
 
   // The source must stay unstamped, or the build would have nothing to replace.
   const source = fs.readFileSync(path.join(__dirname, "..", "src", "sw.js"), "utf8");
@@ -375,7 +375,7 @@ test("the model is deployed whole, and left out of the precache", async () => {
   // exactly the bug this whole arrangement exists to avoid, and it would show
   // up as a 17 MB download months later rather than as a failure here.
   expect(source).toMatch(
-    /cacheName !== CACHE_NAME && cacheName !== ASSET_CACHE_NAME/);
+    /cacheName !== CACHE_SCOPE \+ CACHE_NAME && cacheName !== CACHE_SCOPE \+ ASSET_CACHE_NAME/);
 });
 
 test("the worker files the model under the cache that survives a release", async ({ page }) => {
@@ -413,7 +413,7 @@ test("the worker files the model under the cache that survives a release", async
 
   try {
     await expect.poll(filed, { timeout: 10_000 }).toEqual({
-      [`rostrum-assets-v1-${crypto.createHash("sha256")
+      [`rostrum-scope:${new URL("./", page.url()).href}:rostrum-assets-v1-${crypto.createHash("sha256")
         .update(Buffer.concat(winkFiles().map(n => fs.readFileSync(path.join(winkDir, n)))))
         .digest("hex").slice(0, 12)}`]: 1,
     });

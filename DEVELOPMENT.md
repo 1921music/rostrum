@@ -198,3 +198,7 @@ mise exec -- python -m unittest discover -s tests -p test_deploy_pages.py
 The browser tests mock cloud APIs. Real provider sign-in is checked manually.
 `tests/variants.spec.js` verifies both apps together when `build/variants/`
 contains the stable deployment with the wink deployment under `wink-page-turn/`.
+
+The wink model and runtime are optional, pinned downloads (about 17 MB). Without
+them, the app still starts and reports the missing model; model-dependent tests skip.
+
