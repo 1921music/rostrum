@@ -91,21 +91,36 @@ test('large PDF: open, turn, bookmark and distant jump', async ({ page }, testIn
     bookmarks: _score_.pgs.flatMap((pg, i) => pg.bookmark ? [i + 1] : []),
   }));
   console.log('Initial:', JSON.stringify(result));
+  result.diagnostic = process.env.ROSTRUM_BENCH_DIAGNOSTIC || null;
+  if (result.diagnostic === 'rollers-off')
+    await page.evaluate(() => { _Layout_.activeLayout.spinRollers = () => {}; });
   async function jump(pn, kind) {
-    const move = await page.evaluate(async ({ pn, kind }) => {
+    const move = await page.evaluate(async ({ pn, kind, animated }) => {
       const pg = _score_.pgs[pn - 1];
       const cached = !!(pg.inflated && pg.mozCanvas && !pg.deferred);
       __bench.renders.length = 0;
       const start = performance.now();
-      await _Layout_.activeLayout.pgGoTo(pn);
+      await _Layout_.activeLayout.pgGoTo(pn, animated);
+      const prepared = performance.now();
+      const gaps = [];
+      let lastFrame = prepared;
       while (!(pg.inflated && pg.mozCanvas && !pg.deferred && !pg.renderTask && !pg.renderPromise && !_Layout_.activeLayout.inOp)) {
         if (performance.now() - start > 30_000) throw new Error(`Page ${pn} did not finish displaying`);
         await new Promise(requestAnimationFrame);
+        const now = performance.now();
+        gaps.push(now - lastFrame);
+        lastFrame = now;
       }
+      // The first callback runs before painting. A second frame allows the
+      // new full-quality viewport to be painted, including instant jumps.
+      await new Promise(requestAnimationFrame);
       await new Promise(requestAnimationFrame);
       return { kind, page: pn, cached, ms: performance.now() - start,
+        prepareMs: prepared - start, afterPrepareMs: performance.now() - prepared,
+        frames: gaps.length, maxFrameGapMs: Math.max(0, ...gaps),
+        pace: _score_.layout.pace,
         renders: __bench.renders.filter(r => r.page === pn) };
-    }, { pn, kind });
+    }, { pn, kind, animated: result.diagnostic !== 'animation-off' });
     console.log('Move:', JSON.stringify(move));
     return move;
   }
