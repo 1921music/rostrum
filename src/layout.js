@@ -2089,7 +2089,7 @@ class ScrollLayout extends Layout {
           let step = snap < 1 ? (this.snapMap[snap] ?? 0) : snap;
           if (step === "visible") step = 0;
           let pace = (step || 1) * _score_[this.props.MAXWIDTH] / _score_.layout.pace ;
-          return this.pgSnapTo(eup[CLIENTX] > mid ? -pace : pace) ;
+          return this.pgSnapTo(eup[CLIENTX] > mid ? -pace : pace, null, true) ;
         }
         else if(drag.lift) return this.pgSnapTo(0);
         else  return this.pgSnapTo(drag[VX], drag);
@@ -2111,7 +2111,7 @@ class ScrollLayout extends Layout {
     this.snapStep = 1;       // whole-page; pgSnapTo corrects for snap setting on next gesture
     this.snapIndex = pn - 1;
     let pace = _score_[this.props.MAXWIDTH] / _score_.layout.pace;
-    await this.pgCommit(pn, pace, animated);
+    await this.pgCommit(pn, pace, animated, true);
   }
 
   async pgMount(pn) {
@@ -2168,13 +2168,27 @@ class ScrollLayout extends Layout {
 
   commitAnimId = 0; // prevent multiple pgCommit animation threads
 
-  async pgCommit(pn, pace, animated = true) { // pace is px/msec
+  pagesReady(pn, lastPn) {
+    const pages = this.score.pgs.slice(pn - 1, lastPn);
+    return pages.length > 0 && pages.every(pg => pg.inflated && !pg.deferred &&
+      (!pg.mozPn || (pg.mozCanvas && !pg.renderTask && !pg.renderPromise)));
+  }
+
+  async pgCommit(pn, pace, animated = true, instantIfReady = false) { // pace is px/msec
     let { LEFT, MAXWIDTH } = this.props;
+    // Taps and explicit page jumps should reveal an already-rendered score
+    // immediately. Keep the configured animation for drag/fling settling and
+    // for pages that still need rendering; never substitute a low-res preview.
+    if (instantIfReady && this.pagesReady(...this.snapPns())) {
+      animated = false;
+    }
+    const animId = ++this.commitAnimId;
     this.inOp = true;
     this.pnPost(pn);
     this.pagerLeft.build();
     this.pagerRight.build();
     await this.pgMount(pn);
+    if (animId !== this.commitAnimId || this.destroyed) return;
     let target = this.sashStart / _pxPerEm_;
     if (!animated) {
       this.sash.style[LEFT] = target + "em";
@@ -2185,9 +2199,8 @@ class ScrollLayout extends Layout {
     let duration = ((this.snapStep || 1) * _score_[MAXWIDTH]) / pace ;
     this.spinRollers(duration);
     let start = performance.now();
-    let animId = ++this.commitAnimId;
     let step = (now) => {
-      if (animId !== this.commitAnimId) return;
+      if (animId !== this.commitAnimId || this.destroyed) return;
       let t = Math.min((now - start) / duration, 1);
       let eased = 1 - Math.pow(1 - t, 3); // cubic ease-out: full speed start, decelerates to rest
       this.sash.style[LEFT] = (startLeft + (target - startLeft) * eased) + "em";
@@ -2207,8 +2220,8 @@ class ScrollLayout extends Layout {
     if (pgSnapStep === "visible") pgSnapStep = 0;
     let pxPerMsec = (pgSnapStep || 1) * _score_[this.props.MAXWIDTH] / _score_.layout.pace ;
     switch (how) {
-      case "next": return this.pgSnapTo(-pxPerMsec) ;
-      case "prev": return this.pgSnapTo(pxPerMsec) ;
+      case "next": return this.pgSnapTo(-pxPerMsec, null, true) ;
+      case "prev": return this.pgSnapTo(pxPerMsec, null, true) ;
       case "first": return this.pgGoTo(1) ;
       case "last": return this.pgGoTo(this.score.pgs.length) ;
     }
@@ -2245,7 +2258,7 @@ class ScrollLayout extends Layout {
     return [left, right];
   }
 
-  async pgSnapTo(vel, drag = null) {
+  async pgSnapTo(vel, drag = null, instantIfReady = false) {
     // move the page to requested snap point, animating at given velocity
     // vel is given in px/msec, but note:
     //            vel == 0 means snap to nearest (a no-op if pgSnap == 0)
@@ -2293,7 +2306,7 @@ class ScrollLayout extends Layout {
     if (snapWidth > 0)
       this.snapIndex = Math.round(-this.sashStart / snapWidth);
     let [newPn] = this.snapPns();
-    await this.pgCommit(newPn, pace);
+    await this.pgCommit(newPn, pace, true, instantIfReady);
   }
 
   spinRollers(dur = 0) {
