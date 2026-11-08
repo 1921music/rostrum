@@ -31,7 +31,7 @@ async function open(page, key) {
 }
 
 for (const key of ['horizontal', 'vertical']) {
-  test(`${key}: prepared jumps and page turns preserve the full-quality canvases`, async ({ page }) => {
+  test(`${key}: cached pages respect the configured animation and preserve quality`, async ({ page }) => {
     await open(page, key);
     const result = await page.evaluate(async () => {
       const layout = _Layout_.activeLayout;
@@ -39,17 +39,36 @@ for (const key of ['horizontal', 'vertical']) {
       const canvas = pg.mozCanvas;
       const size = [canvas.width, canvas.height];
       await layout.pgGoTo(2);
-      const jumpInstant = !layout.inOp;
+      const jumpAnimated = layout.inOp;
+      while (layout.inOp) await new Promise(requestAnimationFrame);
       await layout.pgOpen('next');
-      const nextInstant = !layout.inOp;
+      const nextAnimated = layout.inOp;
+      while (layout.inOp) await new Promise(requestAnimationFrame);
       await layout.pgOpen('prev');
-      return { jumpInstant, nextInstant, prevInstant: !layout.inOp,
+      const prevAnimated = layout.inOp;
+      while (layout.inOp) await new Promise(requestAnimationFrame);
+      return { jumpAnimated, nextAnimated, prevAnimated,
         sameCanvas: pg.mozCanvas === canvas, sameSize: canvas.width === size[0] && canvas.height === size[1],
         atTarget: Math.abs(parseFloat(layout.sash.style[layout.props.LEFT]) * _pxPerEm_ - layout.sashStart) < 0.1,
         page: _score_.numbers.pn };
     });
-    expect(result).toEqual({ jumpInstant: true, nextInstant: true, prevInstant: true,
+    expect(result).toEqual({ jumpAnimated: true, nextAnimated: true, prevAnimated: true,
       sameCanvas: true, sameSize: true, atTarget: true, page: 2 });
+  });
+
+  test(`${key}: Pace zero displays cached pages without a delayed animation`, async ({ page }) => {
+    await open(page, key);
+    const state = await page.evaluate(async () => {
+      _score_.layout.pace = 0;
+      const layout = _Layout_.activeLayout;
+      const canvas = _score_.pgs[1].mozCanvas;
+      await layout.pgGoTo(2);
+      await layout.pgOpen('next');
+      await layout.pgOpen('prev');
+      return { moving: layout.inOp, sameCanvas: _score_.pgs[1].mozCanvas === canvas,
+        page: _score_.numbers.pn, pace: _score_.layout.pace };
+    });
+    expect(state).toEqual({ moving: false, sameCanvas: true, page: 2, pace: 0 });
   });
 
   test(`${key}: partially ready spreads and drag settling still animate`, async ({ page }) => {
@@ -75,6 +94,7 @@ for (const key of ['horizontal', 'vertical']) {
     await page.evaluate(async () => {
       const layout = _Layout_.activeLayout;
       await layout.pgSnapTo(-_score_[layout.props.MAXWIDTH] / 500);
+      _score_.layout.pace = 0;
       await layout.pgGoTo(1);
     });
     await page.waitForTimeout(650);
