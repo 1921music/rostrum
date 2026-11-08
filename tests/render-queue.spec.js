@@ -16,8 +16,51 @@ test.setTimeout(120_000);
 const PAGES = 40;
 
 test.beforeEach(async ({ page }) => {
+  await page.route('**/*', route => {
+    const url = new URL(route.request().url());
+    if (['http:', 'https:'].includes(url.protocol) && url.hostname !== '127.0.0.1')
+      throw new Error(`Unexpected external request: ${url.origin}`);
+    return route.continue();
+  });
   await page.goto("/podium.html");
   await page.waitForFunction(() => !!window._menu_?.rings?.layout?.cells?.vertical);
+});
+
+test('a visible page overtakes background work already queued', async ({ page }) => {
+  await openPdf(page);
+  await page.evaluate(async () => {
+    await Promise.allSettled([..._score_.pendingInflates]);
+    window.__releaseBackground = await _score_.renderGate({ showing: false });
+    await _score_.pgUse(30);
+  });
+  await expect.poll(() => page.evaluate(() => _score_.bgWaiting.some(w => w.pg.mozPn === 30))).toBe(true);
+  await page.evaluate(() => {
+    _score_.pgs[29].showing = true;
+    _score_.pgUse(30);
+  });
+  await expect.poll(() => page.evaluate(() => _score_.pgs[29].inflated)).toBe(true);
+  expect(await page.evaluate(() => _score_.bgRenders)).toBe(1);
+  await page.evaluate(() => __releaseBackground());
+});
+
+test('leaving a queued page cancels it instead of rendering it later', async ({ page }) => {
+  await openPdf(page);
+  await page.evaluate(async () => {
+    await Promise.allSettled([..._score_.pendingInflates]);
+    window.__releaseBackground = await _score_.renderGate({ showing: false });
+    await _score_.pgUse(30);
+  });
+  await expect.poll(() => page.evaluate(() => _score_.bgWaiting.some(w => w.pg.mozPn === 30))).toBe(true);
+  const state = await page.evaluate(async () => {
+    _score_.pgUnuse(_score_.pgs[29]);
+    __releaseBackground();
+    await Promise.allSettled([..._score_.pendingInflates]);
+    return { inflated: _score_.pgs[29].inflated, queued: _score_.bgWaiting.length,
+      drawn: __drawn.includes(30), renders: _score_.showRenders + _score_.bgRenders };
+  });
+  expect(state).toEqual({ inflated: false, queued: 0, drawn: true, renders: 0 });
+  // __drawn observes the cancelled attempt as well; no PDF canvas was completed.
+  expect(await page.evaluate(() => _score_.pgs[29].mozCanvas)).toBeNull();
 });
 
 // Only a pdf-backed page rasterises, so these tests need a real pdf rather than

@@ -1719,6 +1719,15 @@ class Score {
     if (pn > this.pgs.length || pn < 1) return null;
     let pg = this.pgs[pn - 1]; // this.pgs is 0-based
     pg.inUse = true;
+    // A prefetched page may already be waiting behind another background
+    // render. Once it becomes visible it must not stay in that queue.
+    if (pg.showing) {
+      let waiting = this.bgWaiting.find(w => w.pg === pg);
+      if (waiting) {
+        this.bgWaiting.splice(this.bgWaiting.indexOf(waiting), 1);
+        waiting.go(true);
+      }
+    }
     await pg.inflate(true, nonblocking);
     pg.lastUsed = performance.now();
     return pg;
@@ -1762,8 +1771,9 @@ class Score {
       });
       if (!go) return null;
     }
-    ++this.bgRenders;
-    return release("bgRenders");
+    let counter = pg.showing ? "showRenders" : "bgRenders";
+    ++this[counter];
+    return release(counter);
   }
 
   renderNext() {
@@ -1793,6 +1803,14 @@ class Score {
     if (!pg.inUse) return;
     pg.inUse = false;
     pg.showing = false; // nobody is looking at it, so it has no claim on the cpu
+
+    // Keep completed pages for fast returns, but stop work on pages outside
+    // the layout's prefetch window before starting a distant jump.
+    if (!pg.magnifierHold && !pg.tempHolds &&
+        (pg.inflatePromise || pg.renderTask || pg.renderPromise)) {
+      pg.deflate();
+      return;
+    }
 
     // We don't immediately deflate an unused pg: instead, deflate least recently
     // used unused pg's, allowing at most Score.MAX_INFLATED inflated but unused pg's.

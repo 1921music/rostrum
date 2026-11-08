@@ -2121,11 +2121,13 @@ class ScrollLayout extends Layout {
     // the sash.  All other pages on the sash are marked as unused.
     let { LEFT, RIGHT, TOP, BOTTOM, WIDTH } = this.props;
     let { gap, pgShow } = this.cell.geo;
+    let visibleCount = pgShow;
+    pgShow = Math.max(pgShow, 4); // retain the same window that we prefetch below
     let pgWidth = this.cell.geo.pg[WIDTH];
     for (let pgElm of Array.from(this.sash.children)) {
       let pg = pgElm.pg;
       let sashPn = this.score.pnOf(pg);
-      if (sashPn < pn - pgShow || sashPn > pn + pgShow) {
+      if (sashPn < pn - pgShow || sashPn > pn + pgShow + 1) {
         pgElm.remove();
         this.score.pgUnuse(pg);
       }
@@ -2133,10 +2135,9 @@ class ScrollLayout extends Layout {
 
     // pn is about to sit at the leading edge of the scroll, so [pn, pn+pgShow-1]
     // is what the reader is waiting to see. How far outside that a page is.
-    let last = pn + pgShow - 1;
+    let last = pn + visibleCount - 1;
     let out = (sashPn) => Math.max(pn - sashPn, sashPn - last, 0);
 
-    pgShow = Math.max(pgShow, 4); // ensure at least 4
     // Mount the pages on screen first and then outwards. Rasterising a cold page
     // costs the cpu hundreds of milliseconds, and the whole window of them goes
     // at once, so the order pages reach Score.renderGate decides how long the
