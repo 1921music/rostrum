@@ -6,13 +6,16 @@ const { test, expect } = require('@playwright/test');
 // Set ROSTRUM_BENCH_PDF, then run:
 // mise exec -- npx playwright test tests/large-pdf.spec.js --repeat-each=3
 // ROSTRUM_BENCH_URL optionally selects a separately built baseline HTML.
+// ROSTRUM_BENCH_PACE=0 uses the app's actual no-animation setting.
+// ROSTRUM_BENCH_CHANNEL=chrome uses installed Chrome and records its renderer.
 // Tracing is disabled because attaching a hundreds-of-MB input distorts timing.
 const pdf = process.env.ROSTRUM_BENCH_PDF;
 test.skip(!pdf, 'Set ROSTRUM_BENCH_PDF to a local PDF path');
-test.use({ viewport: { width: 1280, height: 720 }, trace: 'off' });
+test.use({ viewport: { width: 1280, height: 720 }, trace: 'off',
+  ...(process.env.ROSTRUM_BENCH_CHANNEL ? { channel: process.env.ROSTRUM_BENCH_CHANNEL } : {}) });
 test.setTimeout(600_000);
 
-test('large PDF: open, turn, bookmark and distant jump', async ({ page }, testInfo) => {
+test('large PDF: open, turn, bookmark and distant jump', async ({ page, browser }, testInfo) => {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
   const external = [];
@@ -26,10 +29,12 @@ test('large PDF: open, turn, bookmark and distant jump', async ({ page }, testIn
   });
   await page.goto(process.env.ROSTRUM_BENCH_URL || '/podium.html');
   await page.waitForFunction(() => !!window._Score_ && !!window._menu_);
-  await page.evaluate(() => {
+  const pace = process.env.ROSTRUM_BENCH_PACE === undefined ? 350 : Number(process.env.ROSTRUM_BENCH_PACE);
+  expect(Number.isFinite(pace) && pace >= 0).toBe(true);
+  await page.evaluate(pace => {
     window.__bench = { stages: {}, renders: [] };
     _menu_.rings.layout.stash.active = 'vertical';
-    Object.assign(_menu_.rings.layout.cells.vertical.stash, { pnShow: 'On', pz: null });
+    Object.assign(_menu_.rings.layout.cells.vertical.stash, { pnShow: 'On', pz: null, pace });
     const stages = __bench.stages;
     const read = Blob.prototype.arrayBuffer;
     Blob.prototype.arrayBuffer = async function (...args) {
@@ -76,7 +81,7 @@ test('large PDF: open, turn, bookmark and distant jump', async ({ page }, testIn
       return activate.apply(this, args);
     };
     _FileSrc_.openActiveScore(_menu_.rings.score.cells.open);
-  });
+  }, pace);
   await page.getByText('Local', { exact: true }).click();
   const input = page.locator('.Local input[type=file]');
   await input.waitFor({ state: 'attached', timeout: 10_000 });
@@ -94,13 +99,19 @@ test('large PDF: open, turn, bookmark and distant jump', async ({ page }, testIn
   result.diagnostic = process.env.ROSTRUM_BENCH_DIAGNOSTIC || null;
   if (result.diagnostic === 'rollers-off')
     await page.evaluate(() => { _Layout_.activeLayout.spinRollers = () => {}; });
+  if (result.diagnostic === 'decorations-off')
+    await page.addStyleTag({ content: '.ScrollLayout__roll{filter:none!important}.ScrollLayout-texture{background-image:none!important}.canvas-container{box-shadow:none!important}' });
+  const system = await browser.newBrowserCDPSession();
+  const { gpu } = await system.send('SystemInfo.getInfo');
+  result.renderer = gpu.auxAttributes?.glRenderer;
+  await system.detach();
   async function jump(pn, kind) {
-    const move = await page.evaluate(async ({ pn, kind, animated }) => {
+    const move = await page.evaluate(async ({ pn, kind }) => {
       const pg = _score_.pgs[pn - 1];
       const cached = !!(pg.inflated && pg.mozCanvas && !pg.deferred);
       __bench.renders.length = 0;
       const start = performance.now();
-      await _Layout_.activeLayout.pgGoTo(pn, animated);
+      await _Layout_.activeLayout.pgGoTo(pn);
       const prepared = performance.now();
       const gaps = [];
       let lastFrame = prepared;
@@ -120,7 +131,7 @@ test('large PDF: open, turn, bookmark and distant jump', async ({ page }, testIn
         frames: gaps.length, maxFrameGapMs: Math.max(0, ...gaps),
         pace: _score_.layout.pace,
         renders: __bench.renders.filter(r => r.page === pn) };
-    }, { pn, kind, animated: result.diagnostic !== 'animation-off' });
+    }, { pn, kind });
     console.log('Move:', JSON.stringify(move));
     return move;
   }

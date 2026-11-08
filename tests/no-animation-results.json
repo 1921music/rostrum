@@ -1,0 +1,196 @@
+{
+  "date": "2026-11-09",
+  "document": {
+    "name": "ジャズスタンダート名曲557.pdf",
+    "bytes": 387272295,
+    "pages": 556
+  },
+  "change": "Removed readiness-based animation bypass. Only the actual Pace=0 setting takes the zero-duration path; positive Pace values retain their configured animations.",
+  "baseline": "Animation bypass already removed; Pace=0 still schedules a zero-duration rAF animation and roller work. The baseline HTML was built by omitting only the duration<=0 fast path.",
+  "measurement": "Same Pace=0, quality=3, viewport=1280x720, vertical layout, local file input; full-quality canvas/navigation completion plus two animation frames. Three runs per version, six prefetched turns per run. No external requests.",
+  "summary": {
+    "chromeGPU": {
+      "before": {
+        "prefetched turn": {
+          "medianMs": 52.3,
+          "minMs": 44.8,
+          "maxMs": 381.9,
+          "samplesMs": [
+            123.8,
+            381.9,
+            45.3,
+            45.1,
+            45.5,
+            44.8,
+            118,
+            162.8,
+            46.3,
+            45.3,
+            46.5,
+            203,
+            115.8,
+            168.8,
+            56.4,
+            48.2,
+            46.6,
+            199
+          ],
+          "targetRenderCount": 0
+        },
+        "bookmark revisit": {
+          "medianMs": 87,
+          "minMs": 46.5,
+          "maxMs": 536.9,
+          "samplesMs": [
+            46.5,
+            87,
+            536.9
+          ],
+          "targetRenderCount": 0
+        }
+      },
+      "after": {
+        "prefetched turn": {
+          "medianMs": 29.8,
+          "minMs": 26.2,
+          "maxMs": 198.5,
+          "samplesMs": [
+            101.5,
+            169.4,
+            28.9,
+            30.1,
+            29.4,
+            30,
+            120.6,
+            153.8,
+            29.4,
+            28.9,
+            27.5,
+            29.5,
+            105.1,
+            198.5,
+            26.2,
+            28.6,
+            30.2,
+            29.6
+          ],
+          "targetRenderCount": 0
+        },
+        "bookmark revisit": {
+          "medianMs": 41.4,
+          "minMs": 35.7,
+          "maxMs": 269.7,
+          "samplesMs": [
+            269.7,
+            35.7,
+            41.4
+          ],
+          "targetRenderCount": 0
+        }
+      },
+      "renderer": "ANGLE (AMD, AMD Radeon(TM) Graphics (0x00001638) Direct3D11 vs_5_0 ps_5_0, D3D11-31.0.21923.11000)"
+    },
+    "chromiumSoftware": {
+      "before": {
+        "prefetched turn": {
+          "medianMs": 293.2,
+          "minMs": 162.1,
+          "maxMs": 823.4,
+          "samplesMs": [
+            313.5,
+            271.2,
+            790.5,
+            433.6,
+            197.4,
+            186.9,
+            321,
+            282.7,
+            823.4,
+            456.1,
+            214.5,
+            178,
+            303.7,
+            279.4,
+            799.9,
+            425.1,
+            194,
+            162.1
+          ],
+          "targetRenderCount": 0
+        },
+        "bookmark revisit": {
+          "medianMs": 373.4,
+          "minMs": 368.8,
+          "maxMs": 427.7,
+          "samplesMs": [
+            368.8,
+            373.4,
+            427.7
+          ],
+          "targetRenderCount": 0
+        }
+      },
+      "after": {
+        "prefetched turn": {
+          "medianMs": 321.8,
+          "minMs": 174.9,
+          "maxMs": 531.4,
+          "samplesMs": [
+            389.1,
+            370.9,
+            531.4,
+            283.8,
+            243.8,
+            210.3,
+            388,
+            339.1,
+            405.4,
+            201.6,
+            184,
+            174.9,
+            346.9,
+            352.9,
+            496.4,
+            304.4,
+            266.7,
+            224.6
+          ],
+          "targetRenderCount": 0
+        },
+        "bookmark revisit": {
+          "medianMs": 411.1,
+          "minMs": 365.5,
+          "maxMs": 434.3,
+          "samplesMs": [
+            411.1,
+            365.5,
+            434.3
+          ],
+          "targetRenderCount": 0
+        }
+      },
+      "renderer": "Default Playwright Chromium headless shell; SwiftShader confirmed in a separate diagnostic run.",
+      "interpretation": "No stable end-to-end improvement observed in this software-rendered environment."
+    }
+  },
+  "limitations": [
+    "Medians are not worst-case guarantees; occasional cached-turn stalls remain.",
+    "Do not compare software-renderer timings directly with hardware-renderer timings."
+  ],
+  "validation": {
+    "regression": {
+      "passed": 38,
+      "failed": 0,
+      "files": [
+        "cached-navigation.spec.js",
+        "pgnav.spec.js",
+        "bookmarks.spec.js",
+        "refit.spec.js",
+        "render-queue.spec.js"
+      ]
+    },
+    "benchmark": "3 baseline and 3 final runs passed for each renderer configuration",
+    "settings": "Horizontal and vertical tests verify positive Pace=500 retains animations and Pace=0 completes cached navigation without scheduling delayed animation frames; same full-quality canvases are retained."
+  },
+  "implementationCommit": "d05d6f7bf219db902a89b05324594c545be9c3a1"
+}

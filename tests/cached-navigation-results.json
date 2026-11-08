@@ -1,4 +1,6 @@
 {
+  "status": "superseded: animation-setting bypass reverted at user request",
+  "correction": "These historical timings included bypassing the configured animation. They are not evidence of faster processing with the same honored animation setting.",
   "date": "2026-11-08",
   "document": {
     "name": "ジャズスタンダート名曲557.pdf",
