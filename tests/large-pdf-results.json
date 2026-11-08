@@ -1,0 +1,253 @@
+{
+  "date": "2026-11-08",
+  "document": {
+    "name": "ジャズスタンダート名曲557.pdf",
+    "bytes": 387272295,
+    "pages": 556,
+    "embeddedRostrumBookmarks": 0
+  },
+  "baselineCommit": "e11e719962cb1e5eeea3e251ff69fbb6e734b027",
+  "environment": {
+    "platform": "Windows",
+    "browser": "Playwright Chromium headless",
+    "playwright": "1.62.0",
+    "viewport": [
+      1280,
+      720
+    ],
+    "layout": "vertical",
+    "quality": 3,
+    "trace": false,
+    "runsPerVersion": 3
+  },
+  "method": [
+    "Normal Local file input; no network PDF or cloud API.",
+    "Navigation includes full-quality PDF canvas completion and page-movement animation completion, followed by an animation frame.",
+    "Immediate turns: 2,3,4,3,2,1 directly after opening; cache readiness can differ because opening finishes earlier.",
+    "Prefetched turns: same sequence after pending page inflations settle.",
+    "Bookmark fixture at page 389 created before jumping; original PDF has no Rostrum bookmarks.",
+    "Distant pages: 194 and 500; bookmark revisit: 389.",
+    "Initial read timing varies with local file/OS cache; these are local measurements, not performance guarantees."
+  ],
+  "summary": {
+    "initial": {
+      "beforeMedianMs": 1813.5,
+      "afterMedianMs": 1111.6,
+      "samplesPerVersion": 3,
+      "beforeMs": [
+        4130.2,
+        1703.3,
+        1813.5
+      ],
+      "afterMs": [
+        1190.8,
+        1111.6,
+        1097.9
+      ]
+    },
+    "immediate turn": {
+      "beforeMedianMs": 786.3,
+      "afterMedianMs": 654.8,
+      "samplesPerVersion": 18,
+      "beforeMs": [
+        1353.4,
+        961.8,
+        1166.4,
+        693.6,
+        589.8,
+        677.2,
+        1375.8,
+        973.9,
+        863.2,
+        706.1,
+        634.5,
+        552.6,
+        1387.7,
+        1007.6,
+        1195.7,
+        709.4,
+        617.8,
+        547.1
+      ],
+      "afterMs": [
+        436.6,
+        609.1,
+        711.5,
+        730.5,
+        675,
+        678.1,
+        455,
+        627.1,
+        719.2,
+        789.9,
+        852,
+        651.6,
+        427.4,
+        444.1,
+        808.5,
+        613.7,
+        620.9,
+        658
+      ]
+    },
+    "prefetched turn": {
+      "beforeMedianMs": 645.3,
+      "afterMedianMs": 640.8,
+      "samplesPerVersion": 18,
+      "beforeMs": [
+        624.2,
+        662.7,
+        848.1,
+        702.5,
+        603.6,
+        530.7,
+        602.2,
+        703.3,
+        888,
+        712.9,
+        623,
+        555.9,
+        626.2,
+        697.4,
+        898.7,
+        715.1,
+        627.9,
+        536.1
+      ],
+      "afterMs": [
+        577.5,
+        592.4,
+        580.6,
+        893.7,
+        540.1,
+        674.1,
+        714.2,
+        566.3,
+        680.2,
+        867.1,
+        543.9,
+        666.2,
+        598.3,
+        831.1,
+        685.6,
+        650.4,
+        569.3,
+        631.3
+      ]
+    },
+    "bookmark": {
+      "beforeMedianMs": 1218.3,
+      "afterMedianMs": 605.5,
+      "samplesPerVersion": 3,
+      "beforeMs": [
+        1218.3,
+        867,
+        1247.9
+      ],
+      "afterMs": [
+        592,
+        605.5,
+        612.3
+      ]
+    },
+    "bookmark revisit": {
+      "beforeMedianMs": 1429.6,
+      "afterMedianMs": 465.5,
+      "samplesPerVersion": 3,
+      "beforeMs": [
+        1324.2,
+        1429.6,
+        1485.5
+      ],
+      "afterMs": [
+        456.3,
+        465.5,
+        597.6
+      ]
+    },
+    "distant": {
+      "beforeMedianMs": 1011.4,
+      "afterMedianMs": 627.9,
+      "samplesPerVersion": 6,
+      "beforeMs": [
+        986.1,
+        1139.1,
+        995.3,
+        1040.6,
+        996.7,
+        1026.2
+      ],
+      "afterMs": [
+        629.2,
+        605.9,
+        627.1,
+        656.4,
+        569.2,
+        628.8
+      ]
+    }
+  },
+  "initialStagesMs": {
+    "before": [
+      {
+        "read": 2618,
+        "pdfInit": 53.7,
+        "getPage": 46.2,
+        "beforeActivate": 2759.6
+      },
+      {
+        "read": 224.3,
+        "pdfInit": 53.7,
+        "getPage": 56.6,
+        "beforeActivate": 378.2
+      },
+      {
+        "read": 230.8,
+        "pdfInit": 54.5,
+        "getPage": 57.1,
+        "beforeActivate": 393.7
+      }
+    ],
+    "after": [
+      {
+        "read": 269.2,
+        "pdfInit": 55.9,
+        "getPage": 55.9,
+        "beforeActivate": 433.2
+      },
+      {
+        "read": 202.8,
+        "pdfInit": 54.5,
+        "getPage": 52.4,
+        "beforeActivate": 360.4
+      },
+      {
+        "read": 212.2,
+        "pdfInit": 52.9,
+        "getPage": 53.6,
+        "beforeActivate": 363.1
+      }
+    ]
+  },
+  "implementationCommit": "e6eff05ea07b5bbf9f730a3f66416919d7f9ce28",
+  "validation": {
+    "benchmark": "3 baseline runs and 3 final runs passed; no external requests",
+    "suite": {
+      "passed": 89,
+      "failed": 3,
+      "skipped": 1
+    },
+    "isolatedRerun": {
+      "passed": 3,
+      "failed": 0,
+      "settingsChanged": false
+    },
+    "initialFailures": [
+      "pages-build: service worker scope cleanup timeout",
+      "pgnav: vertical drag start alert",
+      "refit: two-finger double tap"
+    ],
+    "renderQueueTests": "All 5 passed in the full suite",
+    "note": "The full suite was not uniformly green in one run; the three timing-sensitive failures passed in isolation."
+  }
+}
