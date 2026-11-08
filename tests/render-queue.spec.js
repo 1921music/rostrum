@@ -63,6 +63,19 @@ test('leaving a queued page cancels it instead of rendering it later', async ({ 
   expect(await page.evaluate(() => _score_.pgs[29].mozCanvas)).toBeNull();
 });
 
+test('background pages wait for page movement to finish', async ({ page }) => {
+  await openPdf(page);
+  await page.evaluate(async () => {
+    await Promise.allSettled([..._score_.pendingInflates]);
+    _Layout_.activeLayout.inOp = true;
+    await _score_.pgUse(30);
+  });
+  await expect.poll(() => page.evaluate(() => _score_.bgWaiting.some(w => w.pg.mozPn === 30))).toBe(true);
+  expect(await page.evaluate(() => _score_.pgs[29].mozCanvas)).toBeNull();
+  await page.evaluate(() => { _Layout_.activeLayout.inOp = false; });
+  await expect.poll(() => page.evaluate(() => _score_.pgs[29].inflated)).toBe(true);
+});
+
 // Only a pdf-backed page rasterises, so these tests need a real pdf rather than
 // the new score the other suites use.
 async function openPdf(page) {

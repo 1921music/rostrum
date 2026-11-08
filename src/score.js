@@ -253,6 +253,15 @@ class Pg {
       canvasContext: ctx,
       viewport: viewport,
     });
+    renderTask.onContinue = resume => {
+      const proceed = () => {
+        if (signal?.aborted || this.score.disposed) return;
+        if (!this.showing && this.score.backgroundPaused)
+          requestAnimationFrame(proceed);
+        else resume();
+      };
+      proceed();
+    };
     try {
       await renderTask.promise;
     } catch(err) {
@@ -1745,6 +1754,13 @@ class Score {
   bgRenders = 0; // renders in flight for pages that are merely mounted
   bgWaiting = []; // {pg, go} of renders parked until it is their turn
 
+  get backgroundPaused() {
+    // Keep page-turn animations responsive even when the target is cached and
+    // therefore has no foreground render occupying the gate.
+    let layout = Layout.activeLayout;
+    return layout?.score === this && layout.inOp;
+  }
+
   async renderGate(pg) {
     // Hold a render until it is this @pg's turn to have the cpu.
     // @return a function to call when the render is done, or null if the pg was
@@ -1756,18 +1772,21 @@ class Score {
         if (spent) return; // a render releases once, however it ended
         spent = true;
         --this[counter];
-        this.renderNext();
+        // Finish replacing the visible placeholder and let the browser paint
+        // before PDF.js starts decoding/rasterising another background page.
+        requestAnimationFrame(() => requestAnimationFrame(() => this.renderNext()));
       };
     };
     if (pg.showing) {
       ++this.showRenders;
       return release("showRenders");
     }
-    if (this.showRenders || this.bgRenders) {
+    if (this.showRenders || this.bgRenders || this.backgroundPaused) {
       let waiter = { pg };
       let go = await new Promise((resolve) => {
         waiter.go = resolve;
         this.bgWaiting.push(waiter);
+        requestAnimationFrame(() => this.renderNext());
       });
       if (!go) return null;
     }
@@ -1780,7 +1799,11 @@ class Score {
     // Let the waiting page nearest the one being read go next. Nearest, because a
     // jump mounts a whole window of pages at once, and the reader may well have
     // moved somewhere else again before that queue drains.
-    if (this.showRenders || this.bgRenders || !this.bgWaiting.length) return;
+    if (this.disposed || this.showRenders || this.bgRenders || !this.bgWaiting.length) return;
+    if (this.backgroundPaused) {
+      requestAnimationFrame(() => this.renderNext());
+      return;
+    }
     let pn = this.numbers?.pn || 1;
     let dist = (w) => Math.abs(this.pnOf(w.pg) - pn);
     let near = this.bgWaiting.reduce((best, w) => (dist(w) < dist(best) ? w : best));
