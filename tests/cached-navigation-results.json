@@ -1,0 +1,123 @@
+{
+  "date": "2026-11-08",
+  "document": {
+    "name": "ジャズスタンダート名曲557.pdf",
+    "bytes": 387272295,
+    "pages": 556
+  },
+  "baselineCommit": "b3ba1b6",
+  "environment": {
+    "browser": "Playwright Chromium headless",
+    "platform": "Windows",
+    "viewport": [
+      1280,
+      720
+    ],
+    "layout": "vertical",
+    "quality": 3,
+    "paceMs": 350,
+    "runsPerVersion": 3
+  },
+  "measurement": "Normal local file input; full-quality canvas completion and navigation completion, then two animation frames to allow viewport painting. This replaces the earlier single-frame timing, so both versions were measured again.",
+  "rootCause": [
+    "No target-page PDF rendering occurred on prefetched turns. Preparation median was about 1 ms.",
+    "Cached page navigation still ran the configured 350 ms scroll animation. Frame gaps extended total waiting time.",
+    "Taps and explicit jumps now present already-rendered visible pages immediately; drag/fling settling and incomplete visible ranges keep animation."
+  ],
+  "summary": {
+    "prefetched turn": {
+      "before": {
+        "medianMs": 673.9,
+        "prepareMedianMs": 1.3,
+        "samplesMs": [
+          924.9,
+          676.4,
+          975,
+          637,
+          574.3,
+          672.8,
+          777.9,
+          643.7,
+          937.7,
+          628.2,
+          672.3,
+          680.8,
+          795,
+          675,
+          959.2,
+          670.1,
+          619,
+          663.5
+        ],
+        "allTargetsCached": true,
+        "targetRenderCount": 0
+      },
+      "after": {
+        "medianMs": 252.4,
+        "prepareMedianMs": 1.2,
+        "samplesMs": [
+          269.3,
+          397.9,
+          414,
+          204.3,
+          183.9,
+          173.8,
+          250.7,
+          363.4,
+          392.4,
+          254.1,
+          201.8,
+          211.6,
+          266.9,
+          369.9,
+          390.7,
+          200.9,
+          184.4,
+          189.8
+        ],
+        "allTargetsCached": true,
+        "targetRenderCount": 0
+      }
+    },
+    "bookmark revisit": {
+      "before": {
+        "medianMs": 637.1,
+        "prepareMedianMs": 8.5,
+        "samplesMs": [
+          631.1,
+          637.1,
+          680
+        ],
+        "allTargetsCached": true,
+        "targetRenderCount": 0
+      },
+      "after": {
+        "medianMs": 308.7,
+        "prepareMedianMs": 11.1,
+        "samplesMs": [
+          313.9,
+          308.7,
+          270.1
+        ],
+        "allTargetsCached": true,
+        "targetRenderCount": 0
+      }
+    }
+  },
+  "validation": {
+    "benchmark": "3 baseline and 3 final runs passed, with no external requests",
+    "regression": {
+      "passed": 36,
+      "failed": 0,
+      "files": [
+        "cached-navigation.spec.js",
+        "pgnav.spec.js",
+        "bookmarks.spec.js",
+        "refit.spec.js",
+        "render-queue.spec.js"
+      ]
+    },
+    "quality": "New tests verify reuse of the same full-resolution PDF canvases and their pixel dimensions in horizontal and vertical layouts."
+  },
+  "implementationCommit": "9b3945df296678f5d024ae6d47facae7a89afb6c"
+}
