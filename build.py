@@ -571,8 +571,11 @@ if args.extension:
     extension_app_dir = os.path.join(extension_dir, 'build')
     # Check dependencies before replacing an existing unpacked extension.
     score_modules = os.path.join('lib', 'score-engine')
-    if not os.path.isfile(os.path.join(score_modules, 'mscz-engine.js')):
-        sys.exit('Missing extension score modules; regenerate with build_score_engine.py.')
+    score_module_names = ('mscz.js', 'mscz-engine.js', 'text-fonts.js', 'playback.js', 'playback-worker.js', 'mscz-synth.js')
+    missing_score_modules = [name for name in score_module_names if not os.path.isfile(os.path.join(score_modules, name))]
+    if missing_score_modules:
+        sys.exit('Missing extension score modules: ' + ', '.join(missing_score_modules)
+                 + '; regenerate with build_score_engine.py.')
     # Everything under extension_dir is generated below, so start from nothing:
     # the page's scripts are numbered, and a build that emits fewer of them than
     # the last one would otherwise leave stale scripts behind to be packaged.

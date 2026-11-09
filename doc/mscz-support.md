@@ -35,17 +35,20 @@ Ordinary image drawing inherited from the Qt-free engine is incomplete; this
 first integration does not add support for arbitrary pre-existing score images.
 Playback supports play/pause/stop and part mixing, but not seek or a play cursor.
 
-The web/PWA and standalone HTML contain the engine, fonts and EAS GM audio bank.
-They do not require an audio service. The browser extension currently retains
-PDF support only: enabling the score engine requires a separately approved CSP
-change. No extension CSP changes are included in this implementation.
+The web/PWA, standalone HTML and browser extension contain the engine, fonts
+and EAS GM audio bank. They do not require an audio service. The MV3 extension
+imports JavaScript and its audio Worker from packaged files under
+`build/score-engine/`. Its CSP adds only `'wasm-unsafe-eval'` to allow the bundled
+WASM to run. It adds no permission for JavaScript evaluation, inline scripts,
+data: script modules or Blob script workers. No additional host permissions are needed.
 
 ## Building the engine
 
 `engine/` is an independent fork of mscz_webviewer, including its original
 licenses and vendored source. Its own `.mise.toml` declares Emscripten, CMake,
 Ninja, Python and Node. The normal Rostrum build uses the checked-in generated
-`lib/score-engine-data.js`; it does not require WSL or a C++ compiler.
+`lib/score-engine-data.js` and generated modules under `lib/score-engine/`; it
+does not require WSL or a C++ compiler.
 
 After changing engine sources, run in a WSL environment with the pinned tools:
 
@@ -59,7 +62,35 @@ mise exec -- python build.py --podium
 mise exec -- npx playwright test tests/music-score.spec.js
 ```
 
-Commit the regenerated payload together with engine changes. The browser tests
+Commit both the regenerated payload and extension modules with engine changes.
+The browser tests
 block unexpected external requests and cover MusicXML/MXL conversion, SVG and
 text restoration, original-key saving, transposition, playback, mixer settings,
 and simulated MSCX image movement/scaling.
+
+## Verifying the extension
+
+```sh
+mise exec -- npm run test:extension
+```
+
+This builds `build/extension/` and loads it as an actual unpacked Manifest V3
+extension in Playwright's full Chromium using an isolated temporary profile.
+The test blocks all HTTP(S) requests, then verifies score rendering,
+transposition, synthesized playback, pause/stop, original-key MSCZ saves,
+editable annotation restoration, and existing PDF rendering while offline.
+It also asserts that no CSP violations occur and that audio Workers come from
+the extension's own files. The usual web/PWA tests remain separate.
+
+For a project-local browser installation, without changing an existing cache,
+PowerShell can use:
+
+```powershell
+$env:PLAYWRIGHT_BROWSERS_PATH = Join-Path $PWD 'build/playwright-browsers'
+mise exec -- npx playwright install chromium
+mise exec -- npm run test:extension
+```
+
+To use the build, open the browser's extension manager, enable developer mode,
+and load `build/extension/` as an unpacked extension. Reload an already loaded
+copy after rebuilding to apply its updated CSP and scripts.

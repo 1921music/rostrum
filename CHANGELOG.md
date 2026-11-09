@@ -10,8 +10,9 @@
   display transposition. Keep source MusicXML/MXL files intact on conversion.
 - Vendor an independently maintained score engine; see
   [implementation notes and current limits](doc/mscz-support.md).
-- Browser-extension score support is pending approval of the required CSP change;
-  its existing PDF support remains available.
+- Enable the same score features in the MV3 browser extension using packaged
+  JavaScript modules and audio Workers, with WASM-only CSP permission. Add an
+  actual offline extension round-trip test with external requests blocked.
 
 ## 1.0.0 — 2026-11-03
 

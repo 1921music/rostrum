@@ -55,6 +55,13 @@ unpacked extension from `chrome://extensions`:
 mise exec -- npm run build:extension
 ```
 
+The extension also supports MSCZ/MusicXML/MXL scores. It packages its score
+modules and audio Worker as local files and permits bundled WebAssembly via
+`'wasm-unsafe-eval'`, without allowing JavaScript eval or remote scripts.
+Run `mise exec -- npm run test:extension` to verify it in a real MV3 browser
+context. See [score support](doc/mscz-support.md) for engine asset regeneration
+and an optional project-local Playwright browser installation.
+
 The personal build supports pCloud OAuth in the extension context. The web build supports Direct Login. OAuth is the
 recommended sign-in method and its access token is kept in
 `chrome.storage.session`, so it is cleared when Chrome exits. Direct Login
