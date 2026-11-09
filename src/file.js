@@ -327,7 +327,8 @@ class FileSrc {
     let score = _score_;
     let src = FileSrc.get(score.source);
     // If no source, or source doesn't support saving (like URL/WWW), show the save panel
-    if (!src || typeof src.putFile != 'function') {
+    if (!src || typeof src.putFile != 'function' || (score.music && !score.music.savedAsMscz
+        && !/\.mscz$/i.test(score.music.name) && !(src instanceof LocalSrc))) {
       let panel = panels[cell.name + "Panel"].get(cell);
       if (panel.elm.style.visibility != "visible") {
         panel.show();
@@ -338,7 +339,9 @@ class FileSrc {
 
     // For local files, reuse the file handle from open (if available) for instant save.
     // Otherwise, get a new handle via file picker while still in user gesture.
-    let handle = score.name === score.saveName ? score.fileHandle || null : null;
+    const nativeHandle = !score.music || /\.mscz$/i.test(score.music.name) || score.music.savedAsMscz;
+    let handle = score.name === score.saveName && nativeHandle
+      && (!score.fileHandle?.name || score.fileHandle.name === score.saveName) ? score.fileHandle || null : null;
     if (!handle && src instanceof LocalSrc && src.getFileHandle) {
       try {
         handle = await src.getFileHandle(score.saveName);
@@ -357,6 +360,7 @@ class FileSrc {
         let data = await score.toFile();
         const saved = await src.putFile(score.path, score.saveName, data, handle);
         score.update({ name: saved?.name || score.saveName });
+        if (score.music) score.music.savedAsMscz = true;
         Score.visit(score, { size: data.length, modified: Date.now() });
         score.setDirty(false);
         toast("File saved.");
@@ -2514,6 +2518,7 @@ class LocalFileView {
       let { name, modified } = await this.src.putFile(score.path, score.saveName, data, handle);
       score.fileHandle = handle; // remember for future quick-saves
       score.update({ source: this.source, name: name, path: null });
+      if (score.music) score.music.savedAsMscz = true;
       Score.visit(score, { size: data.length, modified: modified });
       score.setDirty(false);
       toast("File saved");
@@ -3322,6 +3327,7 @@ class FileSystemView extends FileListView {
       let data = await _score_.toFile();
       await this.src.putFile(this.path, name, data);
       score.update({ source: this.source, name: name, path: this.path });
+      if (score.music) score.music.savedAsMscz = true;
       Score.visit(score, { size: data.length, modified: Date.now() });
       score.setDirty(false);
       await this.setPath(this.path, true);

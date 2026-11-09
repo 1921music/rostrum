@@ -8,6 +8,8 @@ const ROSTRUM_SVG_NS = "https://1921music.github.io/rostrum/ns";
 const isMusicScore = name => /\.(mscz|mxl|musicxml|xml)$/i.test(name || '');
 let musicEnginePromise;
 async function musicEngine() {
+  if (globalThis.chrome?.runtime?.id)
+    throw new Error('この拡張版ではMSCZ／MusicXMLはまだ利用できません。Web版で開いてください。');
   return musicEnginePromise ??= (async () => {
     const payload = globalThis._scoreEngineAssets_;
     if (!payload) throw new Error('Score engine assets are missing. Build the score engine first.');
@@ -55,6 +57,8 @@ class MusicDocument {
         task.promise = (async () => {
           const image = await doc.pageImage(pn);
           if (cancelled) throw new DOMException('Render cancelled', 'AbortError');
+          canvasContext.fillStyle = '#ffffff';
+          canvasContext.fillRect(0, 0, viewport.width, viewport.height);
           canvasContext.drawImage(image, 0, 0, viewport.width, viewport.height);
         })();
         return task;
@@ -71,11 +75,12 @@ class MusicDocument {
     })());
     return this.svgs.get(pn);
   }
+  releasePage(pn) { this.svgs.delete(pn); }
   nearest(page, x, y) {
     const anchors = this.info.anchors.filter(a => a.page === page);
     if (!anchors.length) throw new Error('This page has no musical anchor for annotations.');
     // Select the staff/system vertically before searching its timeline.
-    const staff = anchors.reduce((best, a) => Math.abs(a.y + 2 * a.sp - y) < Math.abs(best.y + 2 * best.sp - y) ? a : best);
+    const staff = anchors.reduce((best, a) => Math.abs(a.y + 2 * a.spY - y) < Math.abs(best.y + 2 * best.spY - y) ? a : best);
     return anchors.filter(a => a.staff === staff.staff && a.system === staff.system)
       .reduce((best, a) => Math.abs(a.x - x) < Math.abs(best.x - x) ? a : best);
   }

@@ -23,6 +23,7 @@
 #include "engraving/dom/system.h"
 #include "engraving/dom/image.h"
 #include "engraving/dom/imageStore.h"
+#include "engraving/dom/staff.h"
 
 #ifndef NO_QT_SUPPORT
 #include <QBuffer>
@@ -624,7 +625,8 @@ bool Session::rostrumInfo(std::string& out, std::string& error, bool hideAnnotat
             a["system"] = system->pagePos().y() * sy;
             a["x"] = s->pageX() * sx;
             a["y"] = system->staffYpage(staff) * sy;
-            a["sp"] = score->style().spatium() * sx;
+            a["sp"] = score->staff(staff)->spatium(s->tick()) * sx;
+            a["spY"] = score->staff(staff)->spatium(s->tick()) * sy;
             anchors.append(a);
         }
     }
@@ -636,6 +638,10 @@ bool Session::rostrumInfo(std::string& out, std::string& error, bool hideAnnotat
         std::string svg(reinterpret_cast<const char*>(bytes.constData()), bytes.size());
         if (svg.find("https://1921music.github.io/rostrum/ns") == std::string::npos) return;
         JsonObject i;
+        auto* anchorParent = image->parentItem();
+        while (anchorParent && !anchorParent->isSegment()) anchorParent = anchorParent->parentItem();
+        if (anchorParent) i["key"] = toSegment(anchorParent)->tick().toString();
+        i["staff"] = int(image->staffIdx());
         auto* parent = image->parentItem();
         while (parent && !parent->isPage()) parent = parent->parentItem();
         if (!parent) return;

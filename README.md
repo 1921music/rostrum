@@ -61,6 +61,11 @@ A Chrome/Edge browser extension is available for opening PDF scores directly fro
 Build, test and deployment instructions are in [DEVELOPMENT.md](DEVELOPMENT.md).
 See [CHANGELOG.md](CHANGELOG.md) for Rostrum release notes.
 
+The `mscz_support` development branch adds MSCZ/MusicXML/MXL viewing,
+transposition, playback and SVG annotation persistence. See
+[score support](doc/mscz-support.md) for its save format, engine build and current
+limits. These changes have not been deployed to the public app.
+
 ## License
 
 [GNU Affero General Public License v3](https://www.gnu.org/licenses/agpl-3.0-standalone.html)

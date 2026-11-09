@@ -2803,6 +2803,7 @@ e.taken = true ;
          this.bMarkTimer.cancel();
          // (no active pg if a newer build superseded this pgGoTo: nothing to drag)
          if(!cursor && !this.active) return;
+         if(this.score.music) return;
          if(!cursor) cursor = new this.Organizer(e, this);
          cursor.mv(emv);
        }

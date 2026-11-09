@@ -165,7 +165,7 @@ class Pg {
   // object: pencil/pen/rastrum/...; control rendering keys off it, see
   // canvas.js) and "podiumStash" (the tool settings it was drawn with, which
   // its panel loads when it is selected).
-  static customProps = ["flatten", "podiumType", "podiumStash", "rostrumAnchor"];
+  static customProps = ["flatten", "podiumType", "podiumStash", "rostrumAnchor", "rostrumId"];
 
   // Default color used to pad pages < maxWidth and/or maxHeight:
   static paddingColor = "#fff";
@@ -576,6 +576,7 @@ class Pg {
       this.canvas = null;
       this.mozCanvas?.remove();
       this.mozCanvas = null;
+      this.score.music?.releasePage(this.mozPn);
       this.elm = null;
       this.grid = null;
       this.inflated = false;
@@ -1529,13 +1530,20 @@ class Score {
       if (!metadata) throw new Error('Unsupported Rostrum annotation; original file remains unchanged.');
       const data = JSON.parse(metadata.textContent);
       if (data.version !== 1 || !data.object || !data.bounds) throw new Error('Unsupported annotation version.');
-      const a = this.music.nearest(image.page, image.x, image.y);
+      const a = this.music.anchor(image.key, image.staff) || this.music.nearest(image.page, image.x, image.y);
       const scale = image.width / data.bounds.width;
+      // Each image occurrence is independent, including MuseScore copies that
+      // share one image resource and its embedded metadata.
+      data.object.rostrumId = crypto.randomUUID();
       records.push({ ...data, key: a.key, staff: a.staff, sp: a.sp / scale,
-        dx: (image.x - a.x) / a.sp, dy: (image.y - a.y) / a.sp });
+        spY: a.spY / (image.height / data.bounds.height),
+        dx: (image.x - a.x) / a.sp, dy: (image.y - a.y) / a.spY });
     }
     const settings = this.music.settings;
     if (activate && settings.menu) _menu_.stashFromJsonObj(settings.menu, 'score');
+    this.music.bookmarks = Array.isArray(settings.bookmarks) ? settings.bookmarks.filter(b =>
+      typeof b.key === 'string' && Number.isInteger(b.staff) && typeof b.color === 'string' && CSS.supports('color', b.color)) : [];
+    if (activate) this.quality = _menu_.rings.score.cells.details.stash.quality ?? this.quality;
     if (Number.isInteger(settings.transpose) && settings.transpose >= -12 && settings.transpose <= 12) {
       this.music.native.setViewTransposeSemitones(settings.transpose, settings.spelling === 'preserve' ? 'preserve' : 'readable');
       this.music.transpose = settings.transpose;
@@ -1556,17 +1564,23 @@ class Score {
   async buildMusicPages(records) {
     const pages = this.music.info.pages;
     this.pgs = pages.map((p, i) => new Pg(this, p.width, p.height, { objects: [] }, i + 1));
+    for (const bookmark of this.music.bookmarks || []) {
+      const a = this.music.anchor(bookmark.key, bookmark.staff);
+      if (a) this.pgs[a.page].bookmark = bookmark.color;
+    }
     for (const r of records) {
       const a = this.music.anchor(r.key, r.staff);
       if (!a) throw new Error('An annotation anchor is missing; annotations were not discarded.');
       const objects = await new Promise(resolve => fabric.util.enlivenObjects([r.object], resolve));
       const obj = objects[0];
       if (!obj) throw new Error('Could not restore an annotation.');
-      const scale = a.sp / r.sp;
-      obj.set({ left: a.x + r.dx * a.sp + (r.object.left - r.bounds.left) * scale,
-        top: a.y + r.dy * a.sp + (r.object.top - r.bounds.top) * scale,
-        scaleX: (r.object.scaleX ?? 1) * scale, scaleY: (r.object.scaleY ?? 1) * scale,
-        rostrumAnchor: { key: a.key, staff: a.staff } });
+      const sx = a.sp / r.sp, sy = a.spY / (r.spY ?? r.sp);
+      const matrix = fabric.util.multiplyTransformMatrices([sx, 0, 0, sy,
+        a.x + r.dx * a.sp - r.bounds.left * sx, a.y + r.dy * a.spY - r.bounds.top * sy], obj.calcTransformMatrix());
+      const transform = fabric.util.qrDecompose(matrix);
+      obj.set({ flipX: false, flipY: false, scaleX: transform.scaleX, scaleY: transform.scaleY,
+        angle: transform.angle, skewX: transform.skewX, skewY: 0, rostrumAnchor: { key: a.key, staff: a.staff } });
+      obj.setPositionByOrigin({ x: transform.translateX, y: transform.translateY }, 'center', 'center');
       this.pgs[a.page].json.objects.push(obj.toObject(Pg.customProps));
     }
     this.pgRefresh();
@@ -1574,6 +1588,10 @@ class Score {
 
   async musicRecords() {
     const records = [];
+    this.music.bookmarks = this.pgs.flatMap((pg, page) => {
+      const a = pg.bookmark && this.music.info.anchors.find(a => a.page === page);
+      return a ? [{ key: a.key, staff: a.staff, color: pg.bookmark }] : [];
+    });
     for (let page = 0; page < this.pgs.length; ++page) {
       const pg = this.pgs[page];
       const inflated = pg.inflated;
@@ -1583,12 +1601,13 @@ class Score {
         pg.canvas.discardActiveObject();
         for (const obj of pg.canvas.getObjects()) {
           const bounds = obj.getBoundingRect(true, true);
-          const a = obj.rostrumAnchor && this.music.anchor(obj.rostrumAnchor.key, obj.rostrumAnchor.staff)
-            || this.music.nearest(page, bounds.left, bounds.top);
+          const previous = obj.rostrumAnchor && this.music.anchor(obj.rostrumAnchor.key, obj.rostrumAnchor.staff);
+          const a = previous?.page === page ? previous : this.music.nearest(page, bounds.left, bounds.top);
           obj.rostrumAnchor = { key: a.key, staff: a.staff };
-          records.push({ version: 1, object: obj.toObject(Pg.customProps), bounds,
-            sp: a.sp, key: a.key, staff: a.staff,
-            dx: (bounds.left - a.x) / a.sp, dy: (bounds.top - a.y) / a.sp,
+          obj.rostrumId ||= crypto.randomUUID();
+          records.push({ version: 1, id: obj.rostrumId, object: obj.toObject(Pg.customProps), bounds,
+            sp: a.sp, spY: a.spY, key: a.key, staff: a.staff,
+            dx: (bounds.left - a.x) / a.sp, dy: (bounds.top - a.y) / a.spY,
             drawing: obj.toSVG() });
         }
       } finally {
@@ -1622,10 +1641,19 @@ class Score {
 
   async toFile() {
     if (!this.music) return this.toPdf();
+    if (this.disposePromise) throw new Error('Cannot save a disposed score');
+    if (this.musicBusy) throw new Error('Wait for transposition to finish before saving.');
+    const pending = this.toMusicFile();
+    this.pendingExports.add(pending);
+    try { return await pending; } finally { this.pendingExports.delete(pending); }
+  }
+
+  async toMusicFile() {
     const records = await this.musicRecords();
     const annotations = records.map(r => {
       const xml = document.implementation.createDocument("http://www.w3.org/2000/svg", 'svg');
       const svg = xml.documentElement;
+      svg.setAttributeNS("http://www.w3.org/2000/xmlns/", 'xmlns:xlink', "http://www.w3.org/1999/xlink");
       svg.setAttribute('viewBox', `${r.bounds.left} ${r.bounds.top} ${r.bounds.width} ${r.bounds.height}`);
       svg.setAttribute('width', r.bounds.width); svg.setAttribute('height', r.bounds.height);
       const metadata = xml.createElementNS("http://www.w3.org/2000/svg", 'metadata');
@@ -1633,16 +1661,18 @@ class Score {
       const { drawing, ...data } = r;
       annotation.textContent = JSON.stringify(data);
       metadata.append(annotation); svg.append(metadata);
-      const drawingDoc = new DOMParser().parseFromString(`<svg xmlns="http://www.w3.org/2000/svg">${drawing}</svg>`, 'image/svg+xml');
+      const drawingDoc = new DOMParser().parseFromString(`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">${drawing}</svg>`, 'image/svg+xml');
+      if (drawingDoc.querySelector('parsererror')) throw new Error('Could not serialize an annotation as SVG.');
       for (const node of [...drawingDoc.documentElement.childNodes]) svg.append(xml.importNode(node, true));
       return { key: r.key, staff: r.staff, dx: r.dx, dy: r.dy,
-        width: r.bounds.width / r.sp, height: r.bounds.height / r.sp,
+        width: r.bounds.width / r.sp, height: r.bounds.height / (r.spY ?? r.sp),
         svg: new XMLSerializer().serializeToString(xml) };
     });
     if (this === _score_) Layout.activeLayout?.capturePz();
     return this.music.native.saveRostrum({ annotations, settings: JSON.stringify({ version: 1,
       transpose: this.music.transpose, spelling: this.music.native.viewTransposeSpelling,
       volume: this.music.player.volume, mixer: this.music.player.mixer,
+      bookmarks: this.music.bookmarks,
       menu: _menu_.stashToJsonObj('score') }) });
   }
 

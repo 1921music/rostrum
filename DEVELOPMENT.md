@@ -40,6 +40,10 @@ Navigate to `https://localhost:9876/pod.html` to use the application.
 
 ### Build System
 
+MSCZ/MusicXML integration and rebuilding its vendored WASM engine are described
+in [doc/mscz-support.md](doc/mscz-support.md). The regular build uses the
+checked-in engine payload and requires no C++ toolchain.
+
 This project uses a custom Python-based build system.
 
 ### Personal Chrome extension
