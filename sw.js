@@ -1,7 +1,7 @@
 // Rostrum Service Worker
 // Enables offline functionality and PWA installation
 
-let CACHE_NAME = 'rostrum-v1.0.0-11f5e7c279cb';
+let CACHE_NAME = 'rostrum-v1.0.0-afa297a3738d';
 // Cache Storage is shared by every app on this origin; isolate each deployment.
 const CACHE_SCOPE = 'rostrum-scope:' + self.registration.scope + ':';
 // Relative to this script, so Podium works when served from a subdirectory.
