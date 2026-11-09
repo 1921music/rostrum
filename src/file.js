@@ -246,6 +246,9 @@ class FileSrc
 class FileSrc {
   static refs = null;
 
+  static rememberLocal(file) { return FileSrc.get(Score.sources.local).remember(file); }
+  static clearLocalRecent() { return FileSrc.get(Score.sources.local).clearRecent(); }
+
   // ref is string or singleton instance
   static get(ref) {
     // FileSrc.refs is a 2-way mapping between Score.sources (strings that
@@ -306,7 +309,7 @@ class FileSrc {
             modified = file.lastModified;
             name = file.name;
           } else {
-            ({ data, size, created, modified, name = score.name, path = score.path, fileHandle } = await src.getFile(score.path, score.name));
+            ({ data, size, created, modified, name = score.name, path = score.path, fileHandle } = await src.getFile(picking ? null : score.path, picking ? null : score.name));
           }
           if (picking) _shade_.show("Opening file");
           score = await new Score().init(score.source, path, name, data);
@@ -360,6 +363,7 @@ class FileSrc {
         let data = await score.toFile();
         const saved = await src.putFile(score.path, score.saveName, data, handle);
         score.update({ name: saved?.name || score.saveName });
+        if (src instanceof LocalSrc) await src.remember(new File([data], score.name, { lastModified: saved?.modified || Date.now() }));
         if (score.music) score.music.savedAsMscz = true;
         Score.visit(score, { size: data.length, modified: Date.now() });
         score.setDirty(false);
@@ -398,8 +402,54 @@ class FileSrc {
 
 class LocalSrc extends FileSrc {
   source = Score.sources.local;
+  recentFiles = new Map();
+
+  async recentStore(mode, run) {
+    const open = indexedDB.open('rostrum-local-recent', 1);
+    open.onupgradeneeded = () => open.result.createObjectStore('files', { keyPath: 'name' });
+    const db = await idbRequest(open);
+    try {
+      const transaction = db.transaction('files', mode);
+      const done = new Promise((resolve, reject) => {
+        transaction.oncomplete = resolve;
+        transaction.onabort = () => reject(transaction.error || new Error('Recent storage failed'));
+        transaction.onerror = () => reject(transaction.error);
+      });
+      const [result] = await Promise.all([run(transaction.objectStore('files')), done]);
+      return result;
+    } finally { db.close(); }
+  }
+
+  async remember(file) {
+    this.recentFiles.delete(file.name);
+    this.recentFiles.set(file.name, file);
+    while (this.recentFiles.size > 20) this.recentFiles.delete(this.recentFiles.keys().next().value);
+    try {
+      await this.recentStore('readwrite', async store => {
+        await idbRequest(store.put({ name: file.name, file, visited: Date.now() }));
+        const entries = await idbRequest(store.getAll());
+        for (const entry of entries.sort((a, b) => b.visited - a.visited).slice(20)) store.delete(entry.name);
+      });
+    } catch (error) {
+      console.warn('Could not persist local Recent file', error);
+      toast('Local Recent is available only until this tab is closed.');
+    }
+  }
+
+  async clearRecent() {
+    this.recentFiles.clear();
+    await this.recentStore('readwrite', store => idbRequest(store.clear()));
+  }
 
   async getFile(path, name, mode) {
+    // Recent stores a local copy, since an <input type=file> grants no reusable
+    // path or file handle. Never turn a Recent click into a different file picker.
+    if (name) {
+      let file = this.recentFiles.get(name);
+      if (!file) file = (await this.recentStore('readonly', store => idbRequest(store.get(name))))?.file;
+      if (!file) throw new Error('This older Recent entry has no local copy. Open the file once from the Local tab.', { cause: 'fileSrc' });
+      return { path: null, name: file.name, data: await file.arrayBuffer(), size: file.size, modified: file.lastModified };
+    }
     if (window.showOpenFilePicker) {
       let types = mode == "copy"
         ? [{ description: "Image Files", accept: { "image/jpeg": [".jpg", ".jpeg"], "image/png": [".png"] } }]
@@ -409,6 +459,7 @@ class LocalSrc extends FileSrc {
       let file = await handle.getFile();
       await checkFileSize(file.name, file.size);
       let data = await file.arrayBuffer();
+      await this.remember(file);
       return { path: null, name: file.name, data: data, created: null, modified: file.lastModified, size: data.byteLength, fileHandle: handle };
     }
     return new Promise((accept, reject) => {
@@ -429,6 +480,7 @@ class LocalSrc extends FileSrc {
             return reject(error);
           }
           let data = await file.arrayBuffer();
+          await this.remember(file);
           return accept({ path: null, name: file.name, data: data, created: null, modified: file.lastModified, size: data.byteLength });
         },
         { once: true }
@@ -2469,6 +2521,7 @@ class LocalFileView {
         else {
           if(await checkUnsaved()) {
             try {
+              await FileSrc.rememberLocal(file);
               let score = await new Score().init(Score.sources.local, null, file.name, await file.arrayBuffer());
               Score.visit(score, visitUpdate);
               toast("File opened");
@@ -2516,6 +2569,7 @@ class LocalFileView {
       // Although toPdf is async, it usually completes quickly enough to 
       // preserve the gesture for the file picker.
       let { name, modified } = await this.src.putFile(score.path, score.saveName, data, handle);
+      await FileSrc.rememberLocal(new File([data], name, { lastModified: modified }));
       score.fileHandle = handle; // remember for future quick-saves
       score.update({ source: this.source, name: name, path: null });
       if (score.music) score.music.savedAsMscz = true;
@@ -2987,7 +3041,7 @@ class FileListView {
           toast("File downloaded");
         }
       } catch (error) {
-        if (!error.handled) errDialog(error, "Error: failed to download file from cloud server.");
+        if (!error.handled) errDialog(error, source === Score.sources.local ? 'Error opening local Recent file.' : 'Error: failed to download file from cloud server.');
       } finally {
         _shade_.hide();
         this.panel.hide();

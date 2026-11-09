@@ -134,6 +134,46 @@ test('playback and transpose ring panels operate on a score; PDF keeps its usual
     save: _score_.saveName, pages: _score_.pgs.length }))).toEqual({ transpose: false, save: 'test.pdf', pages: 1 });
 });
 
+test('music panels fit their controls on desktop and narrow screens', async ({ page }) => {
+  await page.evaluate(async xml => {
+    await new _Score_().init('Local', null, 'panels.musicxml', new TextEncoder().encode(xml));
+  }, xml);
+  for (const width of [795, 375]) {
+    await page.setViewportSize({ width, height: 900 });
+    for (const name of ['transpose', 'playback']) {
+      await page.evaluate(() => _menu_.closePanels());
+      await expect(page.locator('[data-tag="TransposePanel"], [data-tag="PlaybackPanel"]')).toHaveCount(0);
+      await page.evaluate(name => _menu_.notify(`score/${name}/up`), name);
+      const panel = page.locator(`[data-tag="${name === 'transpose' ? 'Transpose' : 'Playback'}Panel"]`);
+      await expect(panel.locator('.Panel__elm')).toBeVisible();
+      await page.evaluate(async () => {
+        await Promise.all(document.getAnimations().filter(a => a.effect?.getComputedTiming().iterations !== Infinity)
+          .map(a => a.finished.catch(() => {})));
+      });
+      await expect.poll(() => panel.locator('.Panel__elm').evaluate(elm => {
+        const r = elm.getBoundingClientRect();
+        return r.left >= 0 && r.top >= 0 && r.right <= innerWidth && r.bottom <= innerHeight;
+      })).toBe(true);
+      const result = await panel.evaluate(elm => {
+        const body = elm.querySelector('.Panel__body'), b = body.getBoundingClientRect();
+        const controls = [...body.querySelectorAll('button,input,select,output')].map(n => n.getBoundingClientRect());
+        const steps = [...body.querySelectorAll('[data-step], .TransposePanel__steps output')].map(n => {
+          const r = n.getBoundingClientRect(); return r.y + r.height / 2;
+        });
+        const row = body.querySelector('.PlaybackPanel__part');
+        const ranges = row ? [...row.querySelectorAll('input[type=range]')].map(n => n.getBoundingClientRect().width) : [];
+        return { fits: controls.every(r => r.left >= b.left - 1 && r.right <= b.right + 1),
+          overflow: body.scrollWidth - body.clientWidth, steps, ranges };
+      });
+      expect(result.fits, `${width}px ${name}`).toBe(true);
+      expect(result.overflow).toBeLessThanOrEqual(1);
+      if (name === 'transpose') expect(Math.max(...result.steps) - Math.min(...result.steps)).toBeLessThan(5);
+      else { expect(result.ranges).toHaveLength(2); expect(result.ranges[1]).toBeLessThan(result.ranges[0]); }
+    }
+  }
+  await page.screenshot({ path: 'build/music-panels-narrow.png', animations: 'disabled' });
+});
+
 test('MXL converts to MSCZ on save without reusing the source handle', async ({ page }) => {
   test.setTimeout(90000);
   const mxl = zip({ 'META-INF/container.xml': '<container><rootfiles><rootfile full-path="score.musicxml" media-type="application/vnd.recordare.musicxml+xml"/></rootfiles></container>', 'score.musicxml': xml });

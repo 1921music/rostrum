@@ -105,26 +105,73 @@ for (const packaged of ['source', 'web', 'file', 'extension']) test(`${packaged}
       expect(Math.abs(box.cy - box.h / 2)).toBeLessThan(2);
     };
     await checkCentered();
-    await page.evaluate(bytes => {
-      const file = new File([new Uint8Array(bytes)], 'recent.pdf', { type: 'application/pdf' });
-      window.__pickCount = 0;
-      window.showOpenFilePicker = async () => { ++window.__pickCount; return [{ getFile: async () => file }]; };
-    }, bytes);
+    await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('recent') || '[]').some(f => f.name === 'first.pdf'))).toBe(true);
+    // A reload discards all in-memory File objects; Recent must use persisted bytes.
+    let fileChoosers = 0;
+    page.on('filechooser', () => ++fileChoosers);
+    await page.reload();
+    await page.waitForFunction(() => !!window._Score_ && !!window._menu_);
     await page.evaluate(() => {
-      _menu_.op.emv = { clientX: 350, clientY: 100 };
-      _menu_.notify('score/open/out');
+      _menu_.rings.layout.stash.active = 'horizontal';
+      Object.assign(_menu_.rings.layout.cells.horizontal.stash, { pgShow: 2, fit: 'Auto', pz: null });
+      window.__pickCount = 0;
+      window.showOpenFilePicker = async () => { ++window.__pickCount; throw new Error('Recent must not open a picker'); };
+    });
+    await page.evaluate(() => {
+      _menu_.notify('score/open/up');
     });
     await panel.getByText('Recent', { exact: true }).click();
     await panel.locator('.Flv-list__file[data-name="first.pdf"]').click();
-    await expect.poll(() => page.evaluate(() => _score_?.name)).toBe('recent.pdf');
+    await expect.poll(() => page.evaluate(() => _score_?.name)).toBe('first.pdf');
     await expect.poll(renderedInk).toBeGreaterThan(100);
     await checkCentered();
-    expect(await page.evaluate(() => window.__pickCount)).toBe(1);
+    expect(await page.evaluate(() => window.__pickCount)).toBe(0);
+    expect(fileChoosers).toBe(0);
     expect(errors).toEqual([]);
     expect(external).toEqual([]);
     if (packaged === 'file') {
       expect(startupErrors).toEqual([]);
       expect(pwaRequests).toEqual([]);
+      await expect(panel).toHaveCount(0);
+      await page.evaluate(() => {
+        _menu_.op.emv = { clientX: 350, clientY: 100 };
+        _menu_.notify('score/open/out');
+      });
+      await panel.getByText('Local', { exact: true }).click();
+      await panel.locator('input[type="file"]').setInputFiles({
+        name: 'recent.musicxml', mimeType: 'application/xml', buffer: Buffer.from(xml),
+      });
+      await expect.poll(() => page.evaluate(() => _score_?.name)).toBe('recent.musicxml');
+      await expect.poll(() => page.evaluate(() => !!_score_?.pgs[0].musicSvg)).toBe(true);
+      await expect(panel).toHaveCount(0);
+      await page.reload();
+      await page.waitForFunction(() => !!window._Score_ && !!window._menu_);
+      await page.evaluate(() => {
+        window.showOpenFilePicker = async () => { throw new Error('Recent must not open a picker'); };
+        _menu_.notify('score/open/up');
+      });
+      await panel.getByText('Recent', { exact: true }).click();
+      await panel.locator('.Flv-list__file[data-name="recent.musicxml"]').click();
+      await expect.poll(() => page.evaluate(() => _score_?.name)).toBe('recent.musicxml');
+      await expect.poll(() => page.evaluate(() => !!_score_?.pgs[0].musicSvg)).toBe(true);
+      expect(fileChoosers).toBe(0);
+      await expect(panel).toHaveCount(0);
+      await page.evaluate(() => {
+        const recent = JSON.parse(localStorage.getItem('recent'));
+        recent.unshift({ source: 'Local', path: null, name: 'legacy.pdf' });
+        localStorage.setItem('recent', JSON.stringify(recent));
+        _menu_.op.emv = { clientX: 350, clientY: 100 };
+        _menu_.notify('score/open/out');
+      });
+      await panel.getByText('Recent', { exact: true }).click();
+      await panel.locator('.Flv-list__file[data-name="legacy.pdf"]').click();
+      await expect(page.getByText('This older Recent entry has no local copy. Open the file once from the Local tab.', { exact: true })).toBeVisible();
+      expect(fileChoosers).toBe(0);
+      expect(await page.evaluate(async () => {
+        await _FileSrc_.clearLocalRecent();
+        try { await _FileSrc_.get('Local').getFile(null, 'first.pdf'); return false; }
+        catch (e) { return e.cause === 'fileSrc'; }
+      })).toBe(true);
     }
   } finally { await context.close(); }
 });

@@ -1900,6 +1900,7 @@ class StoragePanel extends Panel {
               });
           } else if (tag == "Recent") {
             localStorage.setItem("recent", []);
+            await FileSrc.clearLocalRecent();
             for (let src of Object.values(Score.sources))
               localStorage.setItem(src, "");
             toast("Recent list cleared");
@@ -3879,11 +3880,48 @@ class CurtainPanel extends Panel {
   }
 }
 
-class TransposePanel extends Panel {
+class MusicPanel extends Panel {
+  static css = css('MusicPanels', `
+    .MusicPanel { min-width:0; box-sizing:border-box; max-width:calc(100vw - 3em); padding:.5em; }
+    .TransposePanel { width:22em; }
+    .PlaybackPanel { width:28em; }
+    .MusicPanel button, .MusicPanel select { font:inherit; }
+    .MusicPanel button { padding:.25em .5em; white-space:nowrap; }
+    .MusicPanel p { margin:.75em 0; }
+    .MusicPanel [role=status]:empty { display:none; }
+    .TransposePanel__steps { display:grid; grid-template-columns:1fr auto 1fr; gap:.5em; align-items:center; }
+    .TransposePanel output { white-space:nowrap; min-width:6em; }
+    .TransposePanel__spelling, .PlaybackPanel__master { display:flex; gap:.75em; align-items:center; }
+    .TransposePanel select { flex:1; min-width:0; }
+    .PlaybackPanel__transport { display:flex; align-items:center; justify-content:center; gap:.5em; }
+    .PlaybackPanel__master input { flex:1; min-width:0; }
+    .PlaybackPanel__part { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,.6fr) auto auto;
+      gap:.5em .75em; padding:.75em 0; border-top:1px solid #8886; align-items:center; text-align:left; }
+    .PlaybackPanel__part-name { grid-column:1 / -1; overflow-wrap:anywhere; }
+    .PlaybackPanel__part label { display:flex; align-items:center; gap:.25em; white-space:nowrap; }
+    .PlaybackPanel__part label:has(input[type=range]) { display:grid; gap:.25em; }
+    .PlaybackPanel__part input[type=range] { width:100%; min-width:0; margin:0; }
+  `);
+  show() {
+    super.show(() => { if (this.elm.isConnected) this.constrain(); });
+    return this;
+  }
+  constrain() {
+    super.constrain();
+    const box = this.panel.getBoundingClientRect();
+    const dx = box.left < 8 ? 8 - box.left : box.right > innerWidth - 8 ? innerWidth - 8 - box.right : 0;
+    const dy = box.top < 8 ? 8 - box.top : box.bottom > innerHeight - 8 ? innerHeight - 8 - box.bottom : 0;
+    this.elm.style.left = this.elm.offsetLeft + dx + 'px';
+    this.elm.style.top = this.elm.offsetTop + dy + 'px';
+  }
+}
+
+class TransposePanel extends MusicPanel {
   constructor(cell) {
     super(cell);
-    this.body.innerHTML = `<div><button data-step="-1">- semitone</button> <output></output> <button data-step="1">+ semitone</button></div>
-      <p><button data-reset>Original key</button></p><label>Spelling <select><option value="readable">Readable</option><option value="preserve">Preserve</option></select></label><p role="status"></p>`;
+    this.body.classList.add('MusicPanel', 'TransposePanel');
+    this.body.innerHTML = `<div class="TransposePanel__steps"><button data-step="-1">- semitone</button> <output></output> <button data-step="1">+ semitone</button></div>
+      <p><button data-reset>Original key</button></p><label class="TransposePanel__spelling">Spelling <select><option value="readable">Readable</option><option value="preserve">Preserve</option></select></label><p role="status"></p>`;
     this.body.addEventListener('click', e => {
       if (!e.target.matches('button')) return;
       const music = _score_?.music;
@@ -3910,11 +3948,12 @@ class TransposePanel extends Panel {
   show() { super.show(); this.sync(); return this; }
 }
 
-class PlaybackPanel extends Panel {
+class PlaybackPanel extends MusicPanel {
   constructor(cell) {
     super(cell);
-    this.body.innerHTML = `<button data-play>Play</button> <button data-stop>Stop</button> <output></output>
-      <p><label>Volume <input data-master type="range" min="0" max="100" value="80"></label></p>
+    this.body.classList.add('MusicPanel', 'PlaybackPanel');
+    this.body.innerHTML = `<div class="PlaybackPanel__transport"><button data-play>Play</button> <button data-stop>Stop</button> <output></output></div>
+      <p><label class="PlaybackPanel__master">Volume <input data-master type="range" min="0" max="100" value="80"></label></p>
       <div data-mixer style="max-height:40vh;overflow:auto"></div><p role="status"></p>`;
     this.body.querySelector('[data-play]').onclick = async () => {
       const player = _score_?.music?.player; if (!player) return;
@@ -3943,6 +3982,7 @@ class PlaybackPanel extends Panel {
     const mixer = this.body.querySelector('[data-mixer]'); mixer.replaceChildren();
     player?.timeline?.parts.forEach((part, i) => {
       const row = document.createElement('div'), label = document.createElement('span');
+      row.className = 'PlaybackPanel__part'; label.className = 'PlaybackPanel__part-name';
       label.textContent = part.name; row.append(label);
       for (const [key, name] of [['volume', 'Volume'], ['pan', 'Pan'], ['mute', 'Mute'], ['solo', 'Solo']]) {
         const control = document.createElement('input'), title = document.createElement('label');

@@ -2,6 +2,11 @@
 
 ## Unreleased — MSCZ support
 
+- Keep the last 20 local file copies in browser storage for picker-free Recent
+  opening after reload; refresh saved copies and clear them with Recent history.
+  Legacy local history entries require opening once from Local.
+- Give Transpose and Playback responsive panel layouts, separate mixer track
+  names from controls, and shorten the Pan sliders.
 - Skip PWA manifest loading and service-worker registration in standalone
   `file://` HTML. Center single-page Horizontal/Vertical layouts on opening,
   including when the layout is configured to show two pages.

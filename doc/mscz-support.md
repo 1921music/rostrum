@@ -14,6 +14,12 @@ needed, then release it with the page cache.
 The score panels use English labels. UTF-8 is declared at the start of the HTML,
 before the embedded license, including standalone and extension builds.
 
+Local Recent entries keep up to 20 file snapshots in IndexedDB, so they can be
+opened without a file picker after reloading the standalone HTML. Saving updates
+the snapshot; clearing Recent also deletes these copies. External edits require
+opening the changed file from Local again. Older metadata-only history entries
+need to be opened once from Local before they can work this way.
+
 ## Saving
 
 All notation-score saves produce MSCZ. A MusicXML/MXL source is saved under a
