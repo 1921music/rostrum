@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { pathToFileURL } = require('node:url');
 const { test, expect, chromium } = require('@playwright/test');
 
 const extensionDir = path.resolve(__dirname, '../build/extension');
@@ -25,6 +26,72 @@ test('extension packages local score modules with WASM-only CSP permission', asy
   const html = fs.readFileSync(path.join(extensionDir, 'build/podium.html'), 'utf8');
   expect(html.slice(0, 1024)).toMatch(/<meta charset="utf-8">/i);
   expect(html).not.toMatch(/<script[^>]*>\s*[^<\s]/);
+});
+
+for (const packaged of ['source', 'web', 'file', 'extension']) test(`${packaged}: first PDF and Open → Recent render through the file UI`, async ({}, testInfo) => {
+  test.setTimeout(60000);
+  const manifest = JSON.parse(fs.readFileSync(builtManifest, 'utf8'));
+  const id = crypto.createHash('sha256').update(Buffer.from(manifest.key, 'base64')).digest('hex').slice(0, 32)
+    .replace(/[0-9a-f]/g, c => String.fromCharCode(97 + parseInt(c, 16)));
+  const context = await chromium.launchPersistentContext(testInfo.outputPath('profile'), {
+    channel: 'chromium', headless: true,
+    args: [`--disable-extensions-except=${extensionDir}`, `--load-extension=${extensionDir}`],
+  });
+  const external = [], errors = [];
+  try {
+    await context.route('**/*', route => {
+      const url = route.request().url();
+      if (url === 'https://accounts.google.com/gsi/client') return route.fulfill({
+        contentType: 'application/javascript', body: 'window.google = { accounts: { oauth2: {} } };',
+      });
+      if (/^https?:/.test(url) && !url.startsWith('http://127.0.0.1:9876/')) {
+        external.push(url); return route.abort();
+      }
+      return route.continue();
+    });
+    const page = await context.newPage();
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto(packaged === 'extension' ? `chrome-extension://${id}/build/podium.html`
+      : packaged === 'file' ? pathToFileURL(path.join(sourceDir, 'build/podium.html')).href
+      : `http://127.0.0.1:9876/${packaged === 'source' ? 'pod' : 'podium'}.html`);
+    await page.waitForFunction(() => !!window._Score_ && !!window._menu_);
+    const bytes = await page.evaluate(async () => {
+      const doc = await PDFLib.PDFDocument.create();
+      doc.addPage([300, 400]).drawText('PDF regression test');
+      return [...await doc.save()];
+    });
+    await page.evaluate(() => _menu_.notify('score/open/up'));
+    const panel = page.locator('[data-tag="OpenPanel"]');
+    await panel.getByText('Local', { exact: true }).click();
+    await panel.locator('input[type="file"]').setInputFiles({ name: 'first.pdf', mimeType: 'application/pdf', buffer: Buffer.from(bytes) });
+    await expect.poll(() => page.evaluate(() => _score_?.name), { message: 'first PDF opens; errors: ' + errors }).toBe('first.pdf');
+    const renderedInk = () => page.evaluate(() => {
+      const pg = _score_?.pgs[0];
+      if (!pg?.mozCanvas || pg.rendering) return 0;
+      const canvas = pg.mozCanvas, pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+      let ink = 0;
+      for (let i = 0; i < pixels.length; i += 4) if (pixels[i + 3] && pixels[i] < 128) ++ink;
+      return ink;
+    });
+    await expect.poll(renderedInk).toBeGreaterThan(100);
+    await expect(panel).toHaveCount(0);
+    await page.evaluate(bytes => {
+      const file = new File([new Uint8Array(bytes)], 'recent.pdf', { type: 'application/pdf' });
+      window.__pickCount = 0;
+      window.showOpenFilePicker = async () => { ++window.__pickCount; return [{ getFile: async () => file }]; };
+    }, bytes);
+    await page.evaluate(() => {
+      _menu_.op.emv = { clientX: 350, clientY: 100 };
+      _menu_.notify('score/open/out');
+    });
+    await panel.getByText('Recent', { exact: true }).click();
+    await panel.locator('.Flv-list__file[data-name="first.pdf"]').click();
+    await expect.poll(() => page.evaluate(() => _score_?.name)).toBe('recent.pdf');
+    await expect.poll(renderedInk).toBeGreaterThan(100);
+    expect(await page.evaluate(() => window.__pickCount)).toBe(1);
+    expect(errors).toEqual([]);
+    expect(external).toEqual([]);
+  } finally { await context.close(); }
 });
 
 test('real MV3 extension renders, transposes, plays and saves scores offline without CSP violations', async ({}, testInfo) => {

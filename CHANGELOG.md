@@ -2,6 +2,9 @@
 
 ## Unreleased — MSCZ support
 
+- Fix PDF worker startup from standalone `file://` HTML, including PDFs opened
+  through Recent. Test Local and Recent opening in source, packaged web, local
+  HTML and the actual MV3 extension, checking rendered PDF content.
 - Share bundled fonts across inline SVG score pages so chord symbols and framed
   rehearsal text use the same fonts as layout. Rasterize only for thumbnails,
   magnification and export.

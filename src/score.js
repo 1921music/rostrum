@@ -1408,7 +1408,14 @@ class Score {
         mozSrc = null; // allow gc
         window.pdfjsLib = await import(pdfUrl);
         URL.revokeObjectURL(pdfUrl);
-        let mozWorkerUrl = URL.createObjectURL(await inflate(mozWorkerSrc));
+        const workerScript = await inflate(mozWorkerSrc);
+        // A file:// document has an opaque origin. Chromium rejects a module
+        // worker fetched from its blob:null URL as a cross-origin redirect.
+        // A self-contained data URL works from the standalone HTML as well.
+        const localFile = location.protocol === 'file:';
+        let mozWorkerUrl = localFile
+          ? await bytesToBase64DataUrl(await workerScript.arrayBuffer(), 'application/javascript')
+          : URL.createObjectURL(workerScript);
         let mozWorker = new Worker(mozWorkerUrl, { type: "module" });
         // A module worker fetches its script asynchronously, so the blob URL
         // must stay valid until that fetch lands — revoking right after the
@@ -1416,7 +1423,7 @@ class Score {
         // an error) proves the script has loaded and executed, so it's safe to
         // release the URL then and let the source blob be GC'd.
         let revokeListeners = listen(mozWorker, ["message", "error"], () => {
-          URL.revokeObjectURL(mozWorkerUrl);
+          if (!localFile) URL.revokeObjectURL(mozWorkerUrl);
           unlisten(revokeListeners);
         });
         window.pdfjsLib.GlobalWorkerOptions.workerPort = mozWorker;

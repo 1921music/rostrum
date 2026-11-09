@@ -80,6 +80,10 @@ and simulated MSCX image movement/scaling.
 They also cover shared font registrations, rehearsal text/frame bounds, English
 panel labels and PDF opening through both the Local tab and the active-score
 Open action. Selecting a different file uses its actual name, format and handle.
+The extension test suite also opens a PDF first, then opens one through Recent,
+in source HTTP, packaged HTTP, standalone `file://` HTML and the MV3 extension.
+It checks rendered PDF pixels. Standalone HTML uses a data-URL PDF module worker
+because Chromium rejects a blob-URL module worker from an opaque file origin.
 
 ## Verifying the extension
 
