@@ -483,6 +483,7 @@ def podium_page_patches(canonical):
      '    <title id="title">Rostrum</title>\n'),
     # the libraries are included by main.js itself (see its #include's):
     ('    <script src="fabric.min.js"></script> \n', ''),
+    ('    <script src="score-engine-data.js"></script>\n', ''),
     ("    <script type=\"module\">import * as pdfjsLib from './pdf.min.mjs'; window.pdfjsLib = pdfjsLib;</script>\n", ''),
     ('    <script src="pdf-lib.min.js"></script> \n', ''),
     ('    <script src="fontkit.umd.min.js"></script> \n', ''),

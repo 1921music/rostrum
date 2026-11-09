@@ -33,6 +33,7 @@ import "./font.js";
 import { Menu } from "./menu.js";
 import { Layout } from "./layout.js";
 import "./score.js";
+import "./music.js";
 import { ScreenPanel } from "./panel.js";
 import { initFabric } from "./canvas.js";
 import { SharedBuffer } from "./sharedBuffer.js";
@@ -51,6 +52,8 @@ window.pdfjsLib.GlobalWorkerOptions.workerPort = new Worker("pdf.worker.min.mjs"
 // #include src/canvas.js minified
 // #include src/common.js minified
 // #include src/menu.js minified
+// #include lib/score-engine-data.js
+// #include src/music.js minified
 // #include src/icon.js minified
 // #include src/score.js minified
 // #include src/layout.js minified

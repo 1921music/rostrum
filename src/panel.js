@@ -996,10 +996,11 @@ class DetailsPanel extends Panel {
       let nameInput = helm(
         `<input type="text" style="font-size:1.5em;text-align:center;margin-bottom:.5em;width:100%;box-sizing:border-box;border:none;border-radius:var(--borderRadius);background:white;">`
       );
-      nameInput.value = score.name.replace(/\.pdf$/i, "");
+      nameInput.value = score.name.replace(/\.(pdf|mscz|mxl|musicxml|xml)$/i, "");
       listen(nameInput, "change", () => {
         let newName = nameInput.value.trim();
-        if (!newName.toLowerCase().endsWith(".pdf")) newName += ".pdf";
+        const extension = score.music ? '.mscz' : '.pdf';
+        if (!newName.toLowerCase().endsWith(extension)) newName += extension;
         score.name = newName;
         score.setTitle();
       });
@@ -3874,6 +3875,86 @@ class CurtainPanel extends Panel {
   }
 }
 
+class TransposePanel extends Panel {
+  constructor(cell) {
+    super(cell);
+    this.body.innerHTML = `<div><button data-step="-1">− 半音</button> <output></output> <button data-step="1">＋ 半音</button></div>
+      <p><button data-reset>原調に戻す</button></p><label>音名表記 <select><option value="readable">読みやすさ優先</option><option value="preserve">元の表記を尊重</option></select></label><p role="status"></p>`;
+    this.body.addEventListener('click', e => {
+      if (!e.target.matches('button')) return;
+      const music = _score_?.music;
+      if (!music) return;
+      this.change(e.target.hasAttribute('data-reset') ? 0 : music.transpose + Number(e.target.dataset.step));
+    });
+    this.body.querySelector('select').addEventListener('change', () => this.change(_score_?.music?.transpose));
+  }
+  async change(value) {
+    const status = this.body.querySelector('[role=status]');
+    status.textContent = '移調しています…';
+    try { await _score_.transposeMusic(value, this.body.querySelector('select').value); status.textContent = ''; }
+    catch (error) { status.textContent = error.message; }
+    this.sync();
+  }
+  sync() {
+    const music = _score_?.music;
+    if (!music) return;
+    this.body.querySelector('output').textContent = music.transpose ? `${music.transpose > 0 ? '+' : ''}${music.transpose}` : '原調';
+    this.body.querySelector('select').value = music.native.viewTransposeSpelling;
+    for (const button of this.body.querySelectorAll('[data-step]'))
+      button.disabled = _score_.musicBusy || Math.abs(music.transpose + Number(button.dataset.step)) > 12;
+  }
+  show() { super.show(); this.sync(); return this; }
+}
+
+class PlaybackPanel extends Panel {
+  constructor(cell) {
+    super(cell);
+    this.body.innerHTML = `<button data-play>再生</button> <button data-stop>停止</button> <output></output>
+      <p><label>音量 <input data-master type="range" min="0" max="100" value="80"></label></p>
+      <div data-mixer style="max-height:40vh;overflow:auto"></div><p role="status"></p>`;
+    this.body.querySelector('[data-play]').onclick = async () => {
+      const player = _score_?.music?.player; if (!player) return;
+      try { if (player.state === 'playing') await player.pause(); else await player.play(); }
+      catch (error) { player.fail(error); }
+      this.sync();
+    };
+    this.body.querySelector('[data-stop]').onclick = () => _score_?.music?.player.stop();
+    this.body.querySelector('[data-master]').oninput = e => {
+      _score_?.music?.player.setVolume(Number(e.target.value) / 100); _score_?.setDirty();
+    };
+    this.listeners.push(listen(document, 'musicPlayback', () => this.sync()));
+  }
+  sync() {
+    const player = _score_?.music?.player; if (!player) return;
+    const play = this.body.querySelector('[data-play]');
+    play.textContent = player.state === 'playing' ? '一時停止' : '再生';
+    play.disabled = _score_.musicBusy || player.state === 'loading' || !player.timeline;
+    this.body.querySelector('output').textContent = `${Math.floor(player.position)} / ${Math.floor(player.timeline?.duration || 0)} 秒`;
+    this.body.querySelector('[role=status]').textContent = player.error || '';
+  }
+  show() {
+    super.show();
+    const player = _score_?.music?.player;
+    if (player) this.body.querySelector('[data-master]').value = player.volume * 100;
+    const mixer = this.body.querySelector('[data-mixer]'); mixer.replaceChildren();
+    player?.timeline?.parts.forEach((part, i) => {
+      const row = document.createElement('div'), label = document.createElement('span');
+      label.textContent = part.name; row.append(label);
+      for (const [key, name] of [['volume', '音量'], ['pan', 'パン'], ['mute', 'ミュート'], ['solo', 'ソロ']]) {
+        const control = document.createElement('input'), title = document.createElement('label');
+        const toggle = key === 'mute' || key === 'solo';
+        control.type = toggle ? 'checkbox' : 'range'; control.min = 0; control.max = 127;
+        control.setAttribute('aria-label', `${part.name} ${name}`);
+        if (toggle) control.checked = player.mixer[i][key]; else control.value = player.mixer[i][key];
+        control.oninput = () => { player.setMixer(i, { [key]: toggle ? control.checked : Number(control.value) }); _score_?.setDirty(); };
+        title.append(name, control); row.append(title);
+      }
+      mixer.append(row);
+    });
+    this.sync(); return this;
+  }
+}
+
 let panels = window._panels_ = {
   // This structure maps every Panel to its class.
   // Panels are instantiated on demand, and the
@@ -3882,6 +3963,8 @@ let panels = window._panels_ = {
   // minus the "Panel" portion, and starting with
   // lowercase. ex: GridPanel -> grid: instance
   Panel,
+  TransposePanel,
+  PlaybackPanel,
   AboutPanel,
   AddPanel,
   BookPanel,

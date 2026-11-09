@@ -447,6 +447,8 @@ class Menu {
           svgPath: iconPaths["New Score"],
         },
         close: { name: "Close", svgPath: iconPaths["Close"] },
+        transpose: { name: "Transpose", svgPath: iconPaths["Piano"], enabled: false },
+        playback: { name: "Playback", svgPath: iconPaths["Metronome"], enabled: false },
         print: { name: "Print", svgPath: iconPaths["Print"] },
         details: { name: "Details", svgPath: iconPaths["Details"], stash: { quality: 3, pgFit: "Center", bkColorIdx: 0 }, storage: "score" },
       },
@@ -461,6 +463,14 @@ class Menu {
     };
 
     this.listen("score/up", () => this.activateRing(rings.score));
+    this.listen(['score/transpose/up', 'score/playback/up'], cell => {
+      if (!_score_?.music) return;
+      const panel = panels[cell.name + 'Panel'].get(cell);
+      panel.show(); panel.setPosition(this.grip);
+    });
+    this.listen(['score/transpose/out', 'score/playback/out'], cell => {
+      if (_score_?.music) this.openPanel(cell);
+    });
 
     this.listen("score/save/up", async (cell) => {
        this.activateCell(cell);
@@ -494,7 +504,7 @@ class Menu {
       // fly-away animation, and shouldn't find _score_ already gone.
       _menu_.closePanels();
       await _score_?.dispose();
-      _menu_.enableCells(["ink", "page", "layout", "score/save", "score/close", "score/details", "score/print"], false);
+      _menu_.enableCells(["ink", "page", "layout", "score/save", "score/close", "score/details", "score/print", "score/transpose", "score/playback"], false);
       document.dispatchEvent(new CustomEvent("scoreClosed"));
     });
 

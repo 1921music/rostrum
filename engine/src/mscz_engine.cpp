@@ -636,7 +636,10 @@ bool Session::rostrumInfo(std::string& out, std::string& error, bool hideAnnotat
         std::string svg(reinterpret_cast<const char*>(bytes.constData()), bytes.size());
         if (svg.find("https://1921music.github.io/rostrum/ns") == std::string::npos) return;
         JsonObject i;
-        i["svg"] = svg; i["page"] = pageIndex(image->findPage());
+        auto* parent = image->parentItem();
+        while (parent && !parent->isPage()) parent = parent->parentItem();
+        if (!parent) return;
+        i["svg"] = svg; i["page"] = pageIndex(toPage(parent));
         i["x"] = image->pagePos().x() * sx; i["y"] = image->pagePos().y() * sy;
         const double unit = image->sizeIsSpatium() ? image->spatium() : DPMM;
         i["width"] = image->size().width() * unit * sx;
@@ -646,7 +649,7 @@ bool Session::rostrumInfo(std::string& out, std::string& error, bool hideAnnotat
     });
     root["pages"] = pages; root["anchors"] = anchors; root["images"] = images;
     root["settings"] = score->metaTag(u"rostrum:settings");
-    const auto bytes = JsonDocument(root).toJson(JsonDocument::Compact);
+    const auto bytes = JsonDocument(root).toJson(JsonDocument::Format::Compact);
     out.assign(reinterpret_cast<const char*>(bytes.constData()), bytes.size());
     return true;
 }
