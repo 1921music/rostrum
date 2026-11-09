@@ -3719,7 +3719,8 @@ class MagnifyPanel extends Panel {
     return this;
   }
 
-  updateMagnifier(fracX, fracY, pg) {
+  async updateMagnifier(fracX, fracY, pg) {
+    const request = this.magRequest = (this.magRequest || 0) + 1;
     // @fracX, @fracY are fractional coordinates (0 to 1) relative to displayed page
     // Store coordinates if provided
     if (fracX !== undefined) {
@@ -3740,6 +3741,9 @@ class MagnifyPanel extends Panel {
 
     if (!pg?.canvas) return;
 
+    const background = pg.mozCanvas || (pg.musicSvg ? await pg.score.music.pageImage(pg.mozPn) : null);
+    if (request !== this.magRequest || !pg.canvas || pg.score.disposed) return;
+
     let canvas = pg.canvas;
     let zoom = window._menu_.magnifier.zoom;
     let destW = 300, destH = 300;
@@ -3750,15 +3754,15 @@ class MagnifyPanel extends Panel {
     ctx.clearRect(0, 0, destW, destH);
 
     // Draw from mozCanvas (PDF rendering) first as background
-    if (pg.mozCanvas) {
-      let srcW = pg.mozCanvas.width;
-      let srcH = pg.mozCanvas.height;
+    if (background) {
+      let srcW = background.width;
+      let srcH = background.height;
       let srcX = fracX * srcW;
       let srcY = fracY * srcH;
       let sourceW = (destCSSW / zoom) * (srcW / pg.width);
       let sourceH = (destCSSH / zoom) * (srcH / pg.height);
       ctx.drawImage(
-        pg.mozCanvas,
+        background,
         srcX - sourceW/2, srcY - sourceH/2,
         sourceW, sourceH,
         0, 0, destW, destH
@@ -3878,8 +3882,8 @@ class CurtainPanel extends Panel {
 class TransposePanel extends Panel {
   constructor(cell) {
     super(cell);
-    this.body.innerHTML = `<div><button data-step="-1">− 半音</button> <output></output> <button data-step="1">＋ 半音</button></div>
-      <p><button data-reset>原調に戻す</button></p><label>音名表記 <select><option value="readable">読みやすさ優先</option><option value="preserve">元の表記を尊重</option></select></label><p role="status"></p>`;
+    this.body.innerHTML = `<div><button data-step="-1">- semitone</button> <output></output> <button data-step="1">+ semitone</button></div>
+      <p><button data-reset>Original key</button></p><label>Spelling <select><option value="readable">Readable</option><option value="preserve">Preserve</option></select></label><p role="status"></p>`;
     this.body.addEventListener('click', e => {
       if (!e.target.matches('button')) return;
       const music = _score_?.music;
@@ -3890,7 +3894,7 @@ class TransposePanel extends Panel {
   }
   async change(value) {
     const status = this.body.querySelector('[role=status]');
-    status.textContent = '移調しています…';
+    status.textContent = 'Transposing...';
     try { await _score_.transposeMusic(value, this.body.querySelector('select').value); status.textContent = ''; }
     catch (error) { status.textContent = error.message; }
     this.sync();
@@ -3898,7 +3902,7 @@ class TransposePanel extends Panel {
   sync() {
     const music = _score_?.music;
     if (!music) return;
-    this.body.querySelector('output').textContent = music.transpose ? `${music.transpose > 0 ? '+' : ''}${music.transpose}` : '原調';
+    this.body.querySelector('output').textContent = music.transpose ? `${music.transpose > 0 ? '+' : ''}${music.transpose}` : 'Original key';
     this.body.querySelector('select').value = music.native.viewTransposeSpelling;
     for (const button of this.body.querySelectorAll('[data-step]'))
       button.disabled = _score_.musicBusy || Math.abs(music.transpose + Number(button.dataset.step)) > 12;
@@ -3909,8 +3913,8 @@ class TransposePanel extends Panel {
 class PlaybackPanel extends Panel {
   constructor(cell) {
     super(cell);
-    this.body.innerHTML = `<button data-play>再生</button> <button data-stop>停止</button> <output></output>
-      <p><label>音量 <input data-master type="range" min="0" max="100" value="80"></label></p>
+    this.body.innerHTML = `<button data-play>Play</button> <button data-stop>Stop</button> <output></output>
+      <p><label>Volume <input data-master type="range" min="0" max="100" value="80"></label></p>
       <div data-mixer style="max-height:40vh;overflow:auto"></div><p role="status"></p>`;
     this.body.querySelector('[data-play]').onclick = async () => {
       const player = _score_?.music?.player; if (!player) return;
@@ -3927,9 +3931,9 @@ class PlaybackPanel extends Panel {
   sync() {
     const player = _score_?.music?.player; if (!player) return;
     const play = this.body.querySelector('[data-play]');
-    play.textContent = player.state === 'playing' ? '一時停止' : '再生';
+    play.textContent = player.state === 'playing' ? 'Pause' : 'Play';
     play.disabled = _score_.musicBusy || player.state === 'loading' || !player.timeline;
-    this.body.querySelector('output').textContent = `${Math.floor(player.position)} / ${Math.floor(player.timeline?.duration || 0)} 秒`;
+    this.body.querySelector('output').textContent = `${Math.floor(player.position)} / ${Math.floor(player.timeline?.duration || 0)} s`;
     this.body.querySelector('[role=status]').textContent = player.error || '';
   }
   show() {
@@ -3940,7 +3944,7 @@ class PlaybackPanel extends Panel {
     player?.timeline?.parts.forEach((part, i) => {
       const row = document.createElement('div'), label = document.createElement('span');
       label.textContent = part.name; row.append(label);
-      for (const [key, name] of [['volume', '音量'], ['pan', 'パン'], ['mute', 'ミュート'], ['solo', 'ソロ']]) {
+      for (const [key, name] of [['volume', 'Volume'], ['pan', 'Pan'], ['mute', 'Mute'], ['solo', 'Solo']]) {
         const control = document.createElement('input'), title = document.createElement('label');
         const toggle = key === 'mute' || key === 'solo';
         control.type = toggle ? 'checkbox' : 'range'; control.min = 0; control.max = 127;

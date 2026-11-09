@@ -23,6 +23,7 @@ test('extension packages local score modules with WASM-only CSP permission', asy
     expect(packaged.toString()).not.toMatch(/\beval\s*\(|new Function\s*\(/);
   }
   const html = fs.readFileSync(path.join(extensionDir, 'build/podium.html'), 'utf8');
+  expect(html.slice(0, 1024)).toMatch(/<meta charset="utf-8">/i);
   expect(html).not.toMatch(/<script[^>]*>\s*[^<\s]/);
 });
 
@@ -60,6 +61,7 @@ test('real MV3 extension renders, transposes, plays and saves scores offline wit
     await page.goto(`${origin}/build/podium.html`);
     await page.waitForFunction(() => !!window._Score_ && !!window._menu_);
     expect(await page.evaluate(() => chrome.runtime.id)).toBe(extensionId);
+    expect(await page.evaluate(() => document.characterSet)).toBe('UTF-8');
     await context.setOffline(true);
 
     const before = await page.evaluate(async xml => {
@@ -74,9 +76,12 @@ test('real MV3 extension renders, transposes, plays and saves scores offline wit
       return { originalPitch, records: await score.musicRecords() };
     }, xml);
     await page.locator('[data-tag="TransposePanel"] [data-step="1"]').click();
+    await expect(page.locator('[data-tag="TransposePanel"] [data-reset]')).toHaveText('Original key');
     await expect.poll(() => page.evaluate(() => _score_.music.transpose)).toBe(1);
     await expect.poll(() => page.evaluate(() => _score_.musicBusy)).toBe(false);
     await page.evaluate(() => _menu_.notify('score/playback/up'));
+    await expect(page.locator('[data-tag="PlaybackPanel"] [data-play]')).toHaveText('Play');
+    await expect(page.locator('[data-tag="PlaybackPanel"] [data-stop]')).toHaveText('Stop');
     await page.locator('[data-tag="PlaybackPanel"] [data-play]').click();
     await expect.poll(() => page.evaluate(() => _score_.music.player.state)).toBe('playing');
     await expect.poll(() => page.evaluate(() => _score_.music.player.sources.size)).toBeGreaterThan(0);
@@ -118,17 +123,22 @@ test('real MV3 extension renders, transposes, plays and saves scores offline wit
         .map(a => a.finished.catch(() => {})));
     });
     await expect.poll(() => page.evaluate(() => {
-      const canvas = _score_.pgs[0].mozCanvas;
-      if (!canvas?.isConnected) return null;
-      return [...canvas.getContext('2d').getImageData(0, 0, 1, 1).data];
-    })).toEqual([255, 255, 255, 255]);
+      const svg = _score_.pgs[0].musicSvg;
+      return !!svg?.isConnected && getComputedStyle(svg).backgroundColor === 'rgb(255, 255, 255)';
+    })).toBe(true);
     await page.screenshot({ path: testInfo.outputPath('extension-score.png'), animations: 'disabled' });
 
-    const pdf = await page.evaluate(async () => {
+    await page.evaluate(async () => {
       const document = await PDFLib.PDFDocument.create(); document.addPage([300, 400]);
-      const score = await new _Score_().init('Local', null, 'extension.pdf', await document.save());
-      await score.pgUse(1, false);
-      return { name: score.saveName, pages: score.pgs.length, transpose: _menu_.rings.score.cells.transpose.enabled };
+      const file = new File([await document.save()], 'extension.pdf', { type: 'application/pdf' });
+      window.showOpenFilePicker = async () => [{ name: file.name, getFile: async () => file }];
+      window.__openPromise = _FileSrc_.openActiveScore(_menu_.rings.score.cells.open);
+    });
+    await page.getByText('Revert', { exact: true }).click();
+    await page.evaluate(() => window.__openPromise);
+    const pdf = await page.evaluate(async () => {
+      await _score_.pgUse(1, false);
+      return { name: _score_.saveName, pages: _score_.pgs.length, transpose: _menu_.rings.score.cells.transpose.enabled };
     });
     expect(pdf).toEqual({ name: 'extension.pdf', pages: 1, transpose: false });
     expect(await page.evaluate(() => window.__cspViolations)).toEqual([]);

@@ -237,6 +237,16 @@ class Pg {
 
   async renderPdfAux(canvas, signal) {
     // renderPdf's body, run once Score.renderGate has given it the cpu.
+    if (this.score.music) {
+      if (this.score.disposed || signal?.aborted) throw new DOMException('Render cancelled', 'AbortError');
+      const svg = this.score.music.pageSvgElement(this.mozPn);
+      Object.assign(svg.style, { display: 'block', background: 'white', pointerEvents: 'none', fontSize: '1em',
+        width: this.width / _pxPerEm_ + 'em', height: this.height / _pxPerEm_ + 'em' });
+      if (this.musicSvg) this.musicSvg.replaceWith(svg); else canvas.wrapperEl.append(svg);
+      this.musicSvg = svg;
+      this.rendering = false; this.setZoom(this.zoom);
+      return;
+    }
     let mozPg = await this.score.mozDoc.getPage(this.mozPn);
     if(this.score.disposed || signal?.aborted)
       throw new DOMException("Inflation aborted", "AbortError");
@@ -357,7 +367,7 @@ class Pg {
   renderIfNeeded() {
     // A pg inflated with render == false (by toPdf) has no pdf drawn. If a layout
     // has since started displaying it, draw its pdf now.
-    if(!this.inflated || !this.mozPn || this.mozCanvas) return Promise.resolve();
+    if(!this.inflated || !this.mozPn || this.mozCanvas || this.musicSvg) return Promise.resolve();
     this.renderPromise ??= this.renderPdf(this.canvas).catch(err => {
       if(err.name != 'AbortError') console.warn(`Failed to render page ${this.mozPn}:`, err);
     }).finally(() => this.renderPromise = null);
@@ -428,6 +438,7 @@ class Pg {
          await this.renderPdf(canvas);
          if(signal?.aborted) {
            this.mozCanvas?.remove();
+           this.musicSvg?.remove();
            throw new DOMException("Inflation aborted","AbortError");   
          }
       }
@@ -576,6 +587,7 @@ class Pg {
       this.canvas = null;
       this.mozCanvas?.remove();
       this.mozCanvas = null;
+      this.musicSvg?.remove(); this.musicSvg = null;
       this.score.music?.releasePage(this.mozPn);
       this.elm = null;
       this.grid = null;
@@ -637,9 +649,12 @@ class Pg {
     let fabBlob = await new Promise(res => fabCanvas.toBlob(res));
     if(cancelled() || !fabBlob) return null;
     let pdfBlob = null;
-    if(this.mozCanvas) {
+    if(this.mozCanvas || this.musicSvg) {
       let pdfCanvas = helm(`<canvas width="${maxW}" height="${maxH}"></canvas>`);
-      pdfCanvas.getContext("2d").drawImage(this.mozCanvas, 0, 0, maxW, maxH);
+      const ctx = pdfCanvas.getContext('2d'); ctx.fillStyle = 'white'; ctx.fillRect(0, 0, maxW, maxH);
+      const background = this.mozCanvas || await score.music.pageImage(this.mozPn);
+      if(cancelled()) return null;
+      ctx.drawImage(background, 0, 0, maxW, maxH);
       pdfBlob = await new Promise(res => pdfCanvas.toBlob(res));
       if(cancelled() || !pdfBlob) return null;
     }
@@ -695,9 +710,10 @@ class Pg {
       let emHeight = this.height * zoom * this.stretch / _pxPerEm_ + "em";
       this.canvas.setDimensions({ width: emWidth, height: emHeight}, { cssOnly: true });
       if (this.grid) this.grid.setZoom(zoom);
-      if (this.mozCanvas) {
-        this.mozCanvas.style.width = emWidth;
-        this.mozCanvas.style.height = emHeight;
+      const background = this.mozCanvas || this.musicSvg;
+      if (background) {
+        background.style.width = emWidth;
+        background.style.height = emHeight;
       }
       return this.canvas.requestRenderAll();
     }

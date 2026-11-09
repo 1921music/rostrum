@@ -50,8 +50,13 @@ test.beforeEach(async ({ page }) => {
     if (url.startsWith('http://127.0.0.1:9876/')) return route.continue();
     external.push(url); return route.abort();
   });
+  // Opening the source tabs loads the GIS script; mock that UI dependency too.
+  await page.route('https://accounts.google.com/gsi/client', route => route.fulfill({
+    contentType: 'application/javascript', body: 'window.google = { accounts: { oauth2: {} } };',
+  }));
   page.on('request', request => {
-    if (/^https?:/.test(request.url()) && !request.url().startsWith('http://127.0.0.1:9876/')) external.push(request.url());
+    if (/^https?:/.test(request.url()) && !request.url().startsWith('http://127.0.0.1:9876/')
+      && request.url() !== 'https://accounts.google.com/gsi/client') external.push(request.url());
   });
   page.__external = external;
   await page.goto('/podium.html');
@@ -192,7 +197,9 @@ test('packaged scores render and export a PDF while offline', async ({ page, con
     const result = await page.evaluate(async xml => {
       const score = await new _Score_().init('Local', null, 'offline.musicxml', new TextEncoder().encode(xml));
       const pg = await score.pgUse(1, false);
-      const pixels = pg.mozCanvas.getContext('2d').getImageData(0, 0, pg.mozCanvas.width, pg.mozCanvas.height).data;
+      const canvas = document.createElement('canvas'); canvas.width = pg.width * 2; canvas.height = pg.height * 2;
+      const ctx = canvas.getContext('2d'); ctx.drawImage(await score.music.pageImage(1), 0, 0, canvas.width, canvas.height);
+      const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
       let ink = 0;
       for (let i = 0; i < pixels.length; i += 4) if (pixels[i + 3] > 0 && pixels[i] < 128) ++ink;
       const pdf = await score.toPdf('pdf');
@@ -201,4 +208,99 @@ test('packaged scores render and export a PDF while offline', async ({ page, con
     expect(result.ink).toBeGreaterThan(100);
     expect(result.header).toBe('%PDF-');
   } finally { await context.setOffline(false); }
+});
+
+test('score pages share bundled fonts and rehearsal text fits its frame', async ({ page }) => {
+  test.setTimeout(90000);
+  const mscx = fs.readFileSync(path.join(__dirname, 'fixtures/font-score.mscx'));
+  const bytes = zip({ 'score.mscx': mscx, 'META-INF/container.xml': '<container><rootfiles><rootfile full-path="score.mscx"/></rootfiles></container>' });
+  await page.evaluate(async bytes => {
+    await new _Score_().init('Local', null, 'fonts.mscz', new Uint8Array(bytes));
+  }, [...bytes]);
+  await expect.poll(() => page.evaluate(() => _score_.pgs[0].musicSvg?.getBoundingClientRect().width || 0)).toBeGreaterThan(100);
+  await page.evaluate(async () => {
+    await Promise.all(document.getAnimations().filter(a => a.effect?.getComputedTiming().iterations !== Infinity)
+      .map(a => a.finished.catch(() => {})));
+  });
+  const result = await page.evaluate(async () => {
+    const score = _score_;
+    const pg = await score.pgUse(1, false), svg = pg.musicSvg;
+    const fontsBefore = document.fonts.size;
+    const clone = score.music.pageSvgElement(1);
+    const fontCountStable = fontsBefore === document.fonts.size;
+    const ids = new Set([...svg.querySelectorAll('[id]')].map(n => n.id));
+    const uniqueIds = [...clone.querySelectorAll('[id]')].every(n => !ids.has(n.id));
+    const measured = [...svg.querySelectorAll('text')].filter(n => ['Intro', 'Bridge 1'].includes(n.textContent)).map(n => {
+      const style = getComputedStyle(n), ctx = document.createElement('canvas').getContext('2d');
+      ctx.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+      return { text: n.textContent, svg: n.getComputedTextLength(), canvas: ctx.measureText(n.textContent).width,
+        family: style.fontFamily };
+    });
+    const rectangles = [...svg.querySelectorAll('rect,polygon,polyline,path')].filter(n => {
+      if (n.closest('defs,clipPath')) return false;
+      if (n.tagName === 'rect') return true;
+      const points = n.getAttribute('points');
+      if (points) return [4, 5].includes(points.trim().split(/\s+/).length);
+      const d = n.getAttribute('d') || '';
+      return !/[CQAS]/i.test(d) && [3, 4].includes((d.match(/L/g) || []).length);
+    }).map(n => n.getBoundingClientRect()).filter(r => r.width > 0 && r.height > 0);
+    const frames = [...svg.querySelectorAll('text')].filter(n => ['Intro', 'Bridge 1'].includes(n.textContent)).map(text => {
+      const t = text.getBoundingClientRect();
+      const distance = r => Math.hypot(r.x + r.width / 2 - t.x - t.width / 2, r.y + r.height / 2 - t.y - t.height / 2);
+      const f = rectangles.sort((a, b) => distance(a) - distance(b))[0];
+      return { text: text.textContent, fits: !!f && t.left >= f.left - 1 && t.right <= f.right + 1,
+        textBox: { left: t.left, right: t.right, width: t.width }, frameBox: f && { left: f.left, right: f.right, width: f.width } };
+    });
+    const css = score.music.native.mscz.textFonts.svgFontCss(svg.outerHTML);
+    await pg.getThumbElm(true);
+    return { measured, frames, fontCountStable, uniqueIds, mounted: svg.isConnected,
+      fontDataInPage: svg.outerHTML.includes('data:font/'), exportFonts: css.includes('@font-face'), thumbnail: !!pg.pdfUrl,
+      families: [...svg.querySelectorAll('[font-family]')].map(n => n.getAttribute('font-family')) };
+  });
+  fs.writeFileSync(path.join(__dirname, '../build/font-debug.svg'), await page.evaluate(() => _score_.pgs[0].musicSvg.outerHTML));
+  await page.screenshot({ path: 'build/font-debug.png', animations: 'disabled' });
+  expect(result.mounted).toBe(true);
+  expect(result.fontCountStable).toBe(true);
+  expect(result.fontDataInPage).toBe(false);
+  expect(result.uniqueIds).toBe(true);
+  expect(result.exportFonts).toBe(true);
+  expect(result.thumbnail).toBe(true);
+  expect(result.measured.map(m => m.text)).toEqual(['Intro', 'Bridge 1']);
+  // SVG and Canvas quantize glyph positions slightly differently at the
+  // engine's 1200-DPI coordinates; keep the error below 1% (subpixel on screen).
+  for (const m of result.measured) {
+    expect(m.family).toContain('mscz-text-');
+    expect(Math.abs(m.svg - m.canvas)).toBeLessThan(Math.max(1, m.canvas * 0.01));
+  }
+  expect(result.frames).toHaveLength(2);
+  expect(result.frames.every(f => f.fits), JSON.stringify(result.frames)).toBe(true);
+  expect(result.families.some(f => f.includes('Leland Text'))).toBe(true);
+});
+
+test('Open uses the selected PDF filename after a notation score', async ({ page }) => {
+  test.setTimeout(90000);
+  await page.evaluate(async xml => {
+    await new _Score_().init('Local', null, 'previous.musicxml', new TextEncoder().encode(xml));
+    const pdf = await PDFLib.PDFDocument.create(); pdf.addPage([300, 400]);
+    const file = new File([await pdf.save()], 'selected.pdf', { type: 'application/pdf' });
+    window.showOpenFilePicker = async () => [{ name: file.name, getFile: async () => file }];
+    window.__openPromise = _FileSrc_.openActiveScore(_menu_.rings.score.cells.open);
+  }, xml);
+  await page.getByText('Revert', { exact: true }).click();
+  await page.evaluate(() => window.__openPromise);
+  expect(await page.evaluate(() => ({ name: _score_.name, music: !!_score_.music, pages: _score_.pgs.length })))
+    .toEqual({ name: 'selected.pdf', music: false, pages: 1 });
+});
+
+test('Open panel accepts and renders a PDF selected from Local', async ({ page }) => {
+  const bytes = await page.evaluate(async () => {
+    const pdf = await PDFLib.PDFDocument.create(); pdf.addPage([300, 400]);
+    return [...await pdf.save()];
+  });
+  await page.evaluate(() => _menu_.notify('score/open/up'));
+  const panel = page.locator('[data-tag="OpenPanel"]');
+  await panel.getByText('Local', { exact: true }).click();
+  await panel.locator('input[type="file"]').setInputFiles({ name: 'local.pdf', mimeType: 'application/pdf', buffer: Buffer.from(bytes) });
+  await expect.poll(() => page.evaluate(() => _score_?.name)).toBe('local.pdf');
+  await expect.poll(() => page.evaluate(() => !!_score_?.pgs[0].mozCanvas)).toBe(true);
 });

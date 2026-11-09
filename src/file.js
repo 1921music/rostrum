@@ -298,18 +298,18 @@ class FileSrc {
           // dismissed picker). Shade only the loading, once a file has been picked.
           let picking = !score.fileHandle && src.source == Score.sources.local;
           if (!picking) _shade_.show("Downloading file");
-          let data, size, created, modified;
+          let data, size, created, modified, name = score.name, path = score.path, fileHandle = score.fileHandle;
           if (score.fileHandle) {
             let file = await score.fileHandle.getFile();
             data = await file.arrayBuffer();
             size = data.byteLength;
             modified = file.lastModified;
+            name = file.name;
           } else {
-            ({ data, size, created, modified } = await src.getFile(score.path, score.name));
+            ({ data, size, created, modified, name = score.name, path = score.path, fileHandle } = await src.getFile(score.path, score.name));
           }
           if (picking) _shade_.show("Opening file");
-          let fileHandle = score.fileHandle;
-          score = await new Score().init(score.source, score.path, score.name, data);
+          score = await new Score().init(score.source, path, name, data);
           if (fileHandle) score.fileHandle = fileHandle;
           Score.visit(score, { size, created, modified });
           toast("File reverted.");

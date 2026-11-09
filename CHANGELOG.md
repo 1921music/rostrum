@@ -2,6 +2,13 @@
 
 ## Unreleased — MSCZ support
 
+- Share bundled fonts across inline SVG score pages so chord symbols and framed
+  rehearsal text use the same fonts as layout. Rasterize only for thumbnails,
+  magnification and export.
+- Use English score panels and declare UTF-8 before embedded license text.
+- Fix Open retaining the previous score's extension when a different file type
+  is selected, including opening a PDF after a notation score.
+
 - Open MSCZ, MusicXML and MXL in the existing score layouts.
 - Add score-ring transposition and offline GM playback/mixing panels.
 - Save notation scores as original-key MSCZ with display settings and editable,

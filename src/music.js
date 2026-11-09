@@ -7,6 +7,7 @@ export { MusicDocument, isMusicScore, ROSTRUM_SVG_NS };
 const ROSTRUM_SVG_NS = "https://1921music.github.io/rostrum/ns";
 const isMusicScore = name => /\.(mscz|mxl|musicxml|xml)$/i.test(name || '');
 let musicEnginePromise;
+let musicSvgSequence = 0;
 async function musicEngine() {
   return musicEnginePromise ??= (async () => {
     const payload = globalThis._scoreEngineAssets_;
@@ -74,13 +75,43 @@ class MusicDocument {
   }
   async pageImage(pn) {
     if (!this.svgs.has(pn)) this.svgs.set(pn, (async () => {
-      const svg = this.native.pageSvg(pn - 1, { dpi: 72 });
-      const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+      const element = this.pageSvgElement(pn);
+      let css = this.native.mscz.textFonts?.svgFontCss(element.outerHTML) || '';
+      // Rostrum's editor fonts may also be explicitly named by a score.
+      for (const [family, resource] of Object.entries(globalThis.fontData || {})) {
+        if (!element.outerHTML.includes(family)) continue;
+        const bytes = typeof resource === 'function' ? resource() : resource;
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += 32768) binary += String.fromCharCode(...bytes.subarray(i, i + 32768));
+        css += `@font-face{font-family:${JSON.stringify(family)};src:url(data:font/otf;base64,${btoa(binary)})}`;
+      }
+      const style = document.createElementNS("http://www.w3.org/2000/svg", 'style');
+      style.textContent = css; element.prepend(style);
+      const url = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(element)], { type: 'image/svg+xml' }));
       try {
         const image = new Image(); image.src = url; await image.decode(); return image;
       } finally { URL.revokeObjectURL(url); }
     })());
     return this.svgs.get(pn);
+  }
+  pageSvgElement(pn) {
+    const xml = new DOMParser().parseFromString(this.native.pageSvg(pn - 1, { dpi: 72, fonts: 0 }), 'image/svg+xml');
+    const svg = document.importNode(xml.documentElement, true);
+    const prefix = `rostrum-page-${musicSvgSequence++}-`;
+    const ids = new Map([...svg.querySelectorAll('[id]')].map(node => [node.id, prefix + node.id]));
+    for (const node of [svg, ...svg.querySelectorAll('*')]) {
+      for (const attr of [...node.attributes]) {
+        if (attr.name === 'id') attr.value = ids.get(attr.value) || attr.value;
+        else if (attr.localName === 'href' && attr.value.startsWith('#')) attr.value = '#' + (ids.get(attr.value.slice(1)) || attr.value.slice(1));
+        else attr.value = attr.value.replace(/url\(#([^)]*)\)/g, (match, id) => ids.has(id) ? `url(#${ids.get(id)})` : match);
+      }
+      const family = node.getAttribute('font-family');
+      const backend = this.native.mscz.textFonts;
+      if (family && backend && !family.includes(backend.prefix)) node.setAttribute('font-family', backend.family(family));
+    }
+    const page = this.info.pages[pn - 1];
+    svg.setAttribute('width', page.width); svg.setAttribute('height', page.height);
+    return svg;
   }
   releasePage(pn) { this.svgs.delete(pn); }
   nearest(page, x, y) {

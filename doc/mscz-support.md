@@ -4,6 +4,16 @@ Rostrum reads `.mscz`, `.musicxml`, `.xml` (score-partwise) and `.mxl` in
 the same page layouts as PDF. Scores are processed locally. The score ring has
 Transpose and Playback panels; PDF keeps its existing controls.
 
+On-screen score backgrounds are inline SVG. All pages share the score engine's
+registered FontFace objects, including the bundled music/text fonts; pages do
+not embed or register their own font copies. This keeps browser text measurement
+and visible text rendering on the same fonts. Thumbnails, the magnifier and PDF
+export create a temporary self-contained SVG image only when a raster image is
+needed, then release it with the page cache.
+
+The score panels use English labels. UTF-8 is declared at the start of the HTML,
+before the embedded license, including standalone and extension builds.
+
 ## Saving
 
 All notation-score saves produce MSCZ. A MusicXML/MXL source is saved under a
@@ -67,6 +77,9 @@ The browser tests
 block unexpected external requests and cover MusicXML/MXL conversion, SVG and
 text restoration, original-key saving, transposition, playback, mixer settings,
 and simulated MSCX image movement/scaling.
+They also cover shared font registrations, rehearsal text/frame bounds, English
+panel labels and PDF opening through both the Local tab and the active-score
+Open action. Selecting a different file uses its actual name, format and handle.
 
 ## Verifying the extension
 
