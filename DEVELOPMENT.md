@@ -189,6 +189,11 @@ so an optional model from a wink build is not carried into the stable build.
 Git tree without pushing. The deployer verifies that the built source commit is
 the checked-out commit and preserves the other published variant.
 
+HTML navigations fetch with `cache: 'no-store'` and refresh the offline copy;
+offline/network failures and HTTP errors fall back to the last cached document.
+Worker installation also bypasses the HTTP cache. An older cache-first worker
+can be migrated by opening the app once with a new query string.
+
 Service worker caches are isolated by registration scope. Installing or updating
 one variant does not delete the other's offline cache. The two apps share the
 origin's browser storage, including saved UI settings, recent files and the shared

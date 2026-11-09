@@ -494,7 +494,7 @@ def podium_page_patches(canonical):
      "        document.querySelector('link[rel=manifest]').href = 'manifest.webmanifest';\n"
      "        if ('serviceWorker' in navigator) {\n"
      "          window.addEventListener('load', () => {\n"
-     "            navigator.serviceWorker.register('sw.js')\n"
+     "            navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })\n"
      '              .then(registration => {\n'
      "                console.log('Rostrum: Service Worker registered with scope:', registration.scope);\n"
      '              })\n'
@@ -882,6 +882,9 @@ if args.pages:
     if worker.count(stamp) != 1:
         sys.exit(f'Error: cache name not found exactly once in src/sw.js: {stamp!r}')
     worker = worker.replace(stamp, f"let CACHE_NAME = 'rostrum-v1.0.0-{page_digest}';")
+    worker, replaced = re.subn(r'let urlsToCache = \[.*?\];', "let urlsToCache = [\n  './',\n  './index.html',\n];", worker, count=1, flags=re.DOTALL)
+    if replaced != 1:
+        sys.exit('Error: app precache list not found in src/sw.js')
     doc_stamp = 'const docToCache = [];'
     if worker.count(doc_stamp) != 1:
         sys.exit(f'Error: precache list not found exactly once in src/sw.js: {doc_stamp!r}')

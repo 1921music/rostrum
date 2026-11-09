@@ -2,6 +2,9 @@
 
 ## Unreleased — MSCZ support
 
+- Fetch HTML from the network on reload, bypassing stale HTTP/service-worker
+  caches and refreshing the offline copy. Keep offline and server-error fallbacks.
+  Precache only real Pages entry points and bypass HTTP cache during worker updates.
 - Bundle the Japanese guide, media and music font beside local HTML and in the
   extension. App → Guide reads the bundled copy offline without file-URL probes
   or falling back to the external English guide.

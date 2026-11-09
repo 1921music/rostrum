@@ -53,7 +53,7 @@ test("the static-host build references everything relatively", async () => {
   expect(html).toContain('<link rel="manifest" data-href="manifest.webmanifest" />');
   expect(html).toContain("document.querySelector('link[rel=manifest]').href = 'manifest.webmanifest'");
   expect(html).toContain('<link rel="apple-touch-icon" href="icon192.png">');
-  expect(html).toContain("navigator.serviceWorker.register('sw.js')");
+  expect(html).toContain("navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })");
   // The deployment's own URL is not known at build time, so claiming another
   // site as canonical would be wrong.
   expect(html).not.toContain('rel="canonical"');
@@ -70,6 +70,7 @@ test("the static-host build references everything relatively", async () => {
 
   const worker = fs.readFileSync(path.join(pagesDir, "sw.js"), "utf8");
   expect(worker).not.toMatch(/urlsToCache\s*=\s*\[[^\]]*['"]\//);
+  expect(worker).not.toContain("'./podium.html'");
   expect(fs.existsSync(path.join(pagesDir, "podauth.html"))).toBe(true);
 });
 

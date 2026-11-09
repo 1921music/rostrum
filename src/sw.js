@@ -28,7 +28,12 @@ self.addEventListener('install', (event) => {
       .then((cache) => {
         console.log('Podium: Cache opened');
         return Promise.all([...urlsToCache, ...docToCache]
-          .map((url) => cache.add(url).catch(() => {})));
+          .map(async (url) => {
+            try {
+              const response = await fetch(new Request(url, { cache: 'reload' }));
+              if (response.ok) await cache.put(url, response);
+            } catch { /* Keep optional/offline resources from blocking installation. */ }
+          }));
       })
       .then(() => self.skipWaiting())
   );
@@ -51,13 +56,40 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch event - serve from cache, fallback to network
+// Fetch event - fresh HTML with offline fallback; cache-first for other assets.
 self.addEventListener('fetch', (event) => {
   // Only handle GET requests — never intercept POST/PUT/etc. (e.g. OAuth token exchanges)
   if (event.request.method !== 'GET') return;
   // A nested experimental deployment has its own worker and cache.
   if (new URL(event.request.url).pathname.startsWith(
       new URL('wink-page-turn/', self.registration.scope).pathname)) return;
+
+  // Reloads must reach the published HTML even when this worker has not changed.
+  // Bypass the HTTP cache as well as Cache Storage; retain the last successful
+  // response for offline use. Query-string restart URLs refresh the canonical
+  // app entry without accumulating one cache entry per restart.
+  if (event.request.mode === 'navigate' && new URL(event.request.url).origin === self.location.origin) {
+    event.respondWith((async () => {
+      const cache = await caches.open(CACHE_SCOPE + CACHE_NAME);
+      const url = new URL(event.request.url);
+      const entry = urlsToCache.some(path => new URL(path, self.registration.scope).pathname === url.pathname);
+      const key = new URL(url);
+      if (entry) key.search = '';
+      try {
+        const response = await fetch(event.request, { cache: 'no-store' });
+        if (response.ok) {
+          if (!url.search || entry) await cache.put(key.href, response.clone());
+          return response;
+        }
+        return await cache.match(key.href) || response;
+      } catch (error) {
+        const saved = await cache.match(key.href);
+        if (saved) return saved;
+        throw error;
+      }
+    })());
+    return;
+  }
 
   // Leave media alone: do not answer it, do not cache it. A <video> is fetched
   // with Range requests, which arrive as 206 responses, and the Cache API
@@ -72,7 +104,7 @@ self.addEventListener('fetch', (event) => {
 
   // Never cache the manifest - always fetch fresh
   if (event.request.url.endsWith('manifest.json') || event.request.url.endsWith('manifest.webmanifest')) {
-    event.respondWith(fetch(event.request));
+    event.respondWith(fetch(event.request, { cache: 'no-store' }));
     return;
   }
 
