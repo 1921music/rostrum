@@ -109,7 +109,20 @@ test('real MV3 extension renders, transposes, plays and saves scores offline wit
       expect(restored.records[i].dx).toBeCloseTo(before.records[i].dx, 2);
       expect(restored.records[i].dy).toBeCloseTo(before.records[i].dy, 2);
     }
-    await page.screenshot({ path: testInfo.outputPath('extension-score.png') });
+    // A layout can still be flying into place when its data promises resolve.
+    // Check the mounted background, not just the in-memory score model.
+    await page.evaluate(async () => {
+      _menu_.closePanels();
+      await Promise.all(document.getAnimations()
+        .filter(a => a.effect?.getComputedTiming().iterations !== Infinity)
+        .map(a => a.finished.catch(() => {})));
+    });
+    await expect.poll(() => page.evaluate(() => {
+      const canvas = _score_.pgs[0].mozCanvas;
+      if (!canvas?.isConnected) return null;
+      return [...canvas.getContext('2d').getImageData(0, 0, 1, 1).data];
+    })).toEqual([255, 255, 255, 255]);
+    await page.screenshot({ path: testInfo.outputPath('extension-score.png'), animations: 'disabled' });
 
     const pdf = await page.evaluate(async () => {
       const document = await PDFLib.PDFDocument.create(); document.addPage([300, 400]);
