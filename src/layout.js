@@ -1995,6 +1995,13 @@ class ScrollLayout extends Layout {
       );
       this.pgGoTo(pn, true);
     } else {
+      if (animated) {
+        // A one-page scroll skips the page-turn animation, but still needs
+        // its initial position (the layout is centered around its origin).
+        const pz = this.userPz();
+        if (pz) Object.assign(this.elm.style, pz);
+        else this.place();
+      }
       await this.pgGoTo(pn, false); // (awaited so the pgs are mounted when build() resolves)
     }
   }

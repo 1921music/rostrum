@@ -2,6 +2,9 @@
 
 ## Unreleased — MSCZ support
 
+- Skip PWA manifest loading and service-worker registration in standalone
+  `file://` HTML. Center single-page Horizontal/Vertical layouts on opening,
+  including when the layout is configured to show two pages.
 - Fix PDF worker startup from standalone `file://` HTML, including PDFs opened
   through Recent. Test Local and Recent opening in source, packaged web, local
   HTML and the actual MV3 extension, checking rendered PDF content.

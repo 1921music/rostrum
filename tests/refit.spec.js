@@ -236,6 +236,33 @@ test("every layout snaps back to the state it was built in", async ({ page }) =>
   }
 });
 
+test("one-page scroll restores user pan and zoom across layout switches and quiet rebuilds", async ({ page }) => {
+  await page.evaluate(() => {
+    _menu_.rings.score.cells.new.stash.pages = 1;
+    _menu_.notify('score/new/up');
+  });
+  await expect.poll(() => page.evaluate(() => _score_?.pgs.length)).toBe(1);
+  for (const key of ['horizontal', 'vertical']) {
+    const result = await page.evaluate(async key => {
+      const cell = _menu_.rings.layout.cells[key];
+      cell.stash.pgShow = 2;
+      await _Layout_.open(cell);
+      const moved = { left: '420px', top: '310px', fontSize: '1.25em' };
+      Object.assign(_Layout_.activeLayout.elm.style, moved);
+      _Layout_.activeLayout.elm.classList.add('pz-set');
+      await _Layout_.open(_menu_.rings.layout.cells.table);
+      await _Layout_.open(cell);
+      const layout = _Layout_.activeLayout;
+      const read = () => Object.fromEntries(Object.keys(moved).map(k => [k, layout.elm.style[k]]));
+      const reopened = read();
+      await layout.build(false);
+      return { moved, reopened, rebuilt: read() };
+    }, key);
+    expect(result.reopened, key).toEqual(result.moved);
+    expect(result.rebuilt, key).toEqual(result.moved);
+  }
+});
+
 test("two fingers on a real score never turn a page", async ({ page }) => {
   // The bug this guards: a pinch ends with two fingers lifting, and the layout
   // read the second lift as a tap on the score. Pinching low on a page and

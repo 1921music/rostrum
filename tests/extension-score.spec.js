@@ -36,8 +36,9 @@ for (const packaged of ['source', 'web', 'file', 'extension']) test(`${packaged}
   const context = await chromium.launchPersistentContext(testInfo.outputPath('profile'), {
     channel: 'chromium', headless: true,
     args: [`--disable-extensions-except=${extensionDir}`, `--load-extension=${extensionDir}`],
+    viewport: packaged === 'file' ? { width: 795, height: 900 } : { width: 1280, height: 800 },
   });
-  const external = [], errors = [];
+  const external = [], errors = [], startupErrors = [], pwaRequests = [];
   try {
     await context.route('**/*', route => {
       const url = route.request().url();
@@ -51,10 +52,20 @@ for (const packaged of ['source', 'web', 'file', 'extension']) test(`${packaged}
     });
     const page = await context.newPage();
     page.on('pageerror', error => errors.push(error.message));
+    page.on('console', message => {
+      if (/manifest|Service Worker registration failed/i.test(message.text())) startupErrors.push(message.text());
+    });
+    page.on('request', request => {
+      if (/manifest\.webmanifest|\/sw\.js$/.test(request.url())) pwaRequests.push(request.url());
+    });
     await page.goto(packaged === 'extension' ? `chrome-extension://${id}/build/podium.html`
       : packaged === 'file' ? pathToFileURL(path.join(sourceDir, 'build/podium.html')).href
       : `http://127.0.0.1:9876/${packaged === 'source' ? 'pod' : 'podium'}.html`);
     await page.waitForFunction(() => !!window._Score_ && !!window._menu_);
+    await page.evaluate(() => {
+      _menu_.rings.layout.stash.active = 'horizontal';
+      Object.assign(_menu_.rings.layout.cells.horizontal.stash, { pgShow: 2, fit: 'Auto', pz: null });
+    });
     const bytes = await page.evaluate(async () => {
       const doc = await PDFLib.PDFDocument.create();
       doc.addPage([300, 400]).drawText('PDF regression test');
@@ -75,6 +86,25 @@ for (const packaged of ['source', 'web', 'file', 'extension']) test(`${packaged}
     });
     await expect.poll(renderedInk).toBeGreaterThan(100);
     await expect(panel).toHaveCount(0);
+    const checkCentered = async () => {
+      await page.evaluate(async () => {
+        await Promise.all(document.getAnimations().filter(a => a.effect?.getComputedTiming().iterations !== Infinity)
+          .map(a => a.finished.catch(() => {})));
+      });
+      const box = await page.evaluate(() => {
+        const layout = _Layout_.activeLayout, r = layout.layout.getBoundingClientRect();
+        return { x: r.x, y: r.y, right: r.right, bottom: r.bottom,
+          cx: r.x + r.width / 2, cy: r.y + r.height / 2, w: innerWidth, h: innerHeight, pages: layout.cell.geo.pgShow };
+      });
+      expect(box.pages).toBe(1);
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.y).toBeGreaterThanOrEqual(0);
+      expect(box.right).toBeLessThanOrEqual(box.w + 1);
+      expect(box.bottom).toBeLessThanOrEqual(box.h + 1);
+      expect(Math.abs(box.cx - box.w / 2)).toBeLessThan(2);
+      expect(Math.abs(box.cy - box.h / 2)).toBeLessThan(2);
+    };
+    await checkCentered();
     await page.evaluate(bytes => {
       const file = new File([new Uint8Array(bytes)], 'recent.pdf', { type: 'application/pdf' });
       window.__pickCount = 0;
@@ -88,9 +118,14 @@ for (const packaged of ['source', 'web', 'file', 'extension']) test(`${packaged}
     await panel.locator('.Flv-list__file[data-name="first.pdf"]').click();
     await expect.poll(() => page.evaluate(() => _score_?.name)).toBe('recent.pdf');
     await expect.poll(renderedInk).toBeGreaterThan(100);
+    await checkCentered();
     expect(await page.evaluate(() => window.__pickCount)).toBe(1);
     expect(errors).toEqual([]);
     expect(external).toEqual([]);
+    if (packaged === 'file') {
+      expect(startupErrors).toEqual([]);
+      expect(pwaRequests).toEqual([]);
+    }
   } finally { await context.close(); }
 });
 

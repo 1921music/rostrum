@@ -476,7 +476,7 @@ def podium_page_patches(canonical):
      '<https:/\\/www.gnu.org/licenses/>.\n-->\n\n<!--\n{LICENSE}-->\n'),
     ('    <title id="title">Rostrum</title>\n',
      (f'    <link rel="canonical" href="{canonical}">\n' if canonical else '') +
-     '    <link rel="manifest" href="manifest.webmanifest" />\n'
+     '    <link rel="manifest" data-href="manifest.webmanifest" />\n'
      '    <link rel="apple-touch-icon" href="icon192.png">\n'
      '    <meta name="apple-mobile-web-app-capable" content="yes">\n'
      '    <meta name="apple-mobile-web-app-title" content="Rostrum">\n'
@@ -489,17 +489,20 @@ def podium_page_patches(canonical):
     ('    <script src="fontkit.umd.min.js"></script> \n', ''),
     ('    <script src="main.js" type="module"></script> \n',
      '    <script>\n'
-     '      // Register service worker for PWA functionality\n'
-     "      if ('serviceWorker' in navigator) {\n"
-     "        window.addEventListener('load', () => {\n"
-     "          navigator.serviceWorker.register('sw.js')\n"
-     '            .then(registration => {\n'
-     "              console.log('Rostrum: Service Worker registered with scope:', registration.scope);\n"
-     '            })\n'
-     '            .catch(error => {\n'
-     "              console.log('Rostrum: Service Worker registration failed:', error);\n"
-     '            });\n'
-     '        });\n'
+     '      // PWA resources require HTTP(S); standalone file:// HTML is offline already.\n'
+     "      if (location.protocol === 'http:' || location.protocol === 'https:') {\n"
+     "        document.querySelector('link[rel=manifest]').href = 'manifest.webmanifest';\n"
+     "        if ('serviceWorker' in navigator) {\n"
+     "          window.addEventListener('load', () => {\n"
+     "            navigator.serviceWorker.register('sw.js')\n"
+     '              .then(registration => {\n'
+     "                console.log('Rostrum: Service Worker registered with scope:', registration.scope);\n"
+     '              })\n'
+     '              .catch(error => {\n'
+     "                console.log('Rostrum: Service Worker registration failed:', error);\n"
+     '              });\n'
+     '          });\n'
+     '        }\n'
      '      }\n'
      '    </script>\n'
      '    <script type="module">\n'
