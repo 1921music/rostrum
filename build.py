@@ -526,6 +526,40 @@ def git_commit():
         return 'unknown'  # built outside a working tree, or without git
     return (head + '-dirty') if dirty else head
 
+def bundle_local_guide(destination, extension=False):
+    """Ship Japanese prose and media beside local HTML, without file:// fetch probes."""
+    guide_dir = os.path.join(destination, 'guidebook')
+    os.makedirs(guide_dir, exist_ok=True)
+    compressed = os.path.isfile(os.path.join('build', 'doc-assets', 'podium-icon.webp'))
+    media_dir = os.path.join('build', 'doc-assets') if compressed else os.path.join('doc', 'assets')
+    shutil.copytree(media_dir, os.path.join(guide_dir, 'assets'), dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns('.*'))
+    with open(os.path.join('doc', 'Guidebook.ja.html'), encoding='utf-8') as source:
+        guide = source.read()
+    if compressed:
+        guide = re.sub(r'(src="assets/[^\"]+)\.jpg"', r'\1.webp"', guide)
+    font = os.path.join('build', 'BravuraText.otf')
+    if not os.path.isfile(font): font = os.path.join('lib', 'BravuraText.otf')
+    shutil.copyfile(font, os.path.join(guide_dir, 'assets', 'BravuraText.otf'))
+    guide = guide.replace('https://cdn.jsdelivr.net/gh/steinbergmedia/bravura@master/redist/otf/Bravura.otf',
+                          'assets/BravuraText.otf')
+    if extension:
+        scripts = []
+        def extract(match):
+            scripts.append(match.group(1))
+            return '<script src="guidebook.js"></script>'
+        guide = re.sub(r'<script>(.*?)</script>', extract, guide, flags=re.DOTALL)
+        guide = guide.replace('onclick="playVideo(this.parentElement)"', 'data-guide-action="play"')
+        guide = guide.replace('onclick="closeVideo(event, this.parentElement)"', 'data-guide-action="close"')
+        scripts.append("document.addEventListener('click', event => { const button = event.target.closest('[data-guide-action]'); "
+                       "if (!button) return; if (button.dataset.guideAction === 'play') playVideo(button.parentElement); "
+                       "else closeVideo(event, button.parentElement); });")
+        with open(os.path.join(guide_dir, 'guidebook.js'), 'w', encoding='utf-8') as script:
+            script.write('\n'.join(scripts))
+    with open(os.path.join(guide_dir, 'Guidebook.ja.html'), 'w', encoding='utf-8-sig') as target:
+        target.write(guide)
+
+
 def build_podium_page(outFileName, canonical="https://1921music.github.io/rostrum/"):
     with open("src/pod.html", encoding='utf-8') as f:
         page = f.read()
@@ -549,6 +583,9 @@ def build_podium_page(outFileName, canonical="https://1921music.github.io/rostru
     # says when, the commit says from what. Matched loosely because the Packager
     # minifies the spacing away.
     stamped = packaged.getvalue()
+    if os.path.basename(outFileName) == 'podium.html':
+        bundle_local_guide(os.path.dirname(outFileName))
+        stamped = stamped.replace('</head>', '<script>window._podiumGuideJa_ = "guidebook/Guidebook.ja.html";</script>\n</head>')
     for name, value in (
             ('_podiumBuild_', datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')),
             ('_podiumCommit_', git_commit())):
@@ -628,6 +665,7 @@ if args.extension:
     extension_html = re.sub(r'\s*<link rel="apple-touch-icon"[^>]*>', '', extension_html)
     with open(os.path.join(extension_app_dir, 'podium.html'), 'w', encoding='utf-8', newline='\n') as extension_page:
         extension_page.write(extension_html)
+    bundle_local_guide(extension_app_dir, extension=True)
     if args.verbose: print('-- personal extension podium.html (re)built.')
 
 if args.podium:

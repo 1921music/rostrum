@@ -176,6 +176,49 @@ for (const packaged of ['source', 'web', 'file', 'extension']) test(`${packaged}
   } finally { await context.close(); }
 });
 
+for (const packaged of ['file', 'extension']) test(`${packaged}: App → Guide opens the bundled Japanese guide offline`, async ({}, testInfo) => {
+  const manifest = JSON.parse(fs.readFileSync(builtManifest, 'utf8'));
+  const id = crypto.createHash('sha256').update(Buffer.from(manifest.key, 'base64')).digest('hex').slice(0, 32)
+    .replace(/[0-9a-f]/g, c => String.fromCharCode(97 + parseInt(c, 16)));
+  const context = await chromium.launchPersistentContext(testInfo.outputPath('profile'), {
+    channel: 'chromium', headless: true,
+    args: [`--disable-extensions-except=${extensionDir}`, `--load-extension=${extensionDir}`],
+  });
+  const external = [], errors = [];
+  try {
+    await context.route('**/*', route => {
+      if (/^https?:/.test(route.request().url())) { external.push(route.request().url()); return route.abort(); }
+      return route.continue();
+    });
+    const page = await context.newPage();
+    context.on('weberror', event => errors.push(event.error().message));
+    await page.goto(packaged === 'file' ? pathToFileURL(path.join(sourceDir, 'build/podium.html')).href
+      : `chrome-extension://${id}/build/podium.html`);
+    await page.waitForFunction(() => !!window._menu_);
+    await context.setOffline(true);
+    const popup = packaged === 'extension' ? context.waitForEvent('page') : null;
+    await page.evaluate(() => {
+      localStorage.setItem('podium-guide-language', 'en');
+      _menu_.op.emv = { clientX: 500, clientY: 100 };
+      _menu_.notify('app/guide/out');
+    });
+    const guidePage = popup ? await popup : page;
+    const guide = packaged === 'extension' ? guidePage : page.frameLocator('[data-tag="GuidePanel"] iframe');
+    await expect(guide.locator('html')).toHaveAttribute('lang', 'ja');
+    expect(await guide.locator('title').textContent()).toContain('ガイドブック');
+    const firstImage = guide.locator('img').first();
+    await firstImage.scrollIntoViewIfNeeded();
+    await expect.poll(() => firstImage.evaluate(img => img.complete && img.naturalWidth > 0)).toBe(true);
+    await guide.locator('body').evaluate(() => {
+      for (const img of document.images) img.loading = 'eager';
+    });
+    await expect.poll(() => guide.locator('body').evaluate(() => [...document.images].every(img => img.complete && img.naturalWidth > 0))).toBe(true);
+    expect(await guide.locator('body').innerText()).toContain('譜面');
+    expect(external).toEqual([]);
+    expect(errors).toEqual([]);
+  } finally { await context.close(); }
+});
+
 test('real MV3 extension renders, transposes, plays and saves scores offline without CSP violations', async ({}, testInfo) => {
   test.setTimeout(120000);
   const manifest = JSON.parse(fs.readFileSync(builtManifest, 'utf8'));

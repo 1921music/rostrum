@@ -14,6 +14,11 @@ needed, then release it with the page cache.
 The score panels use English labels. UTF-8 is declared at the start of the HTML,
 before the embedded license, including standalone and extension builds.
 
+The local HTML and extension builds ship the Japanese guide with its media and
+music font in a sibling `guidebook/` directory. Keep `build/guidebook/` alongside
+`build/podium.html` when copying the local app. App → Guide opens this copy
+offline; the extension opens its own packaged guide in a new tab.
+
 Local Recent entries keep up to 20 file snapshots in IndexedDB, so they can be
 opened without a file picker after reloading the standalone HTML. Saving updates
 the snapshot; clearing Recent also deletes these copies. External edits require

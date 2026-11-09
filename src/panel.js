@@ -1296,9 +1296,9 @@ class GuidePanel extends Panel {
   // Which guidebooks exist depends on how Rostrum was deployed. The web app
   // publishes the English one beside the page, where a relative URL keeps it
   // same-origin; a static-host deployment carries whichever translations were
-  // built into it; the extension and a page saved to disk carry none, and have
-  // to borrow the published copy (which is served with "frame-ancestors *", so
-  // it will embed). An absence has to be found before the iframe is pointed at
+  // built into it. Local HTML and extension packages explicitly name their
+  // bundled Japanese guide, so file:// needs no forbidden HEAD probe.
+  // An absence has to be found before the iframe is pointed at
   // it: a 404 body fires the load event just as a guidebook would, and would be
   // displayed in its place.
   // In preference order: a deployment that carries a translation leads with it,
@@ -1346,6 +1346,7 @@ class GuidePanel extends Panel {
     // @return the real URL of each guidebook this deployment can show, keyed by
     //   language. English always has one, falling back to the published copy.
     if (this.urls) return this.urls;
+    if (window._podiumGuideJa_) return this.urls = { ja: new URL(window._podiumGuideJa_, location.href).href };
     if (this.isExtension) return this.urls = { en: this.publishedUrl };
     let urls = {};
     for (let [language, name] of Object.entries(this.localNames)) {
@@ -1442,7 +1443,8 @@ class GuidePanel extends Panel {
     if (GuidePanel.isExtension) {
       // Extension: open in new tab (cross-origin iframe restrictions prevent embedding)
       if (this.guideWin && !this.guideWin.closed) this.guideWin.focus();
-      else  this.guideWin = window.open(GuidePanel.publishedUrl, "podium-guidebook");
+      else this.guideWin = window.open(window._podiumGuideJa_
+        ? new URL(window._podiumGuideJa_, location.href).href : GuidePanel.publishedUrl, "podium-guidebook");
       return this;
     }
     super.show();
