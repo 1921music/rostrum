@@ -8,24 +8,31 @@ const ROSTRUM_SVG_NS = "https://1921music.github.io/rostrum/ns";
 const isMusicScore = name => /\.(mscz|mxl|musicxml|xml)$/i.test(name || '');
 let musicEnginePromise;
 async function musicEngine() {
-  if (globalThis.chrome?.runtime?.id)
-    throw new Error('この拡張版ではMSCZ／MusicXMLはまだ利用できません。Web版で開いてください。');
   return musicEnginePromise ??= (async () => {
     const payload = globalThis._scoreEngineAssets_;
     if (!payload) throw new Error('Score engine assets are missing. Build the score engine first.');
     const decode = async s => new Uint8Array(await new Response(new Blob([
       Uint8Array.from(atob(s), c => c.charCodeAt(0))
     ]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
-    const moduleBytes = await decode(payload.module);
-    let binary = '';
-    for (let i = 0; i < moduleBytes.length; i += 32768)
-      binary += String.fromCharCode(...moduleBytes.subarray(i, i + 32768));
-    const api = await import('data:text/javascript;base64,' + btoa(binary));
+    const extension = !!globalThis.chrome?.runtime?.id;
+    let api, Playback;
+    if (extension) {
+      api = await import(new URL('./score-engine/mscz.js', location.href).href);
+      ({ Playback } = await import(new URL('./score-engine/playback.js', location.href).href));
+    } else {
+      const moduleBytes = await decode(payload.module);
+      let binary = '';
+      for (let i = 0; i < moduleBytes.length; i += 32768)
+        binary += String.fromCharCode(...moduleBytes.subarray(i, i + 32768));
+      api = await import('data:text/javascript;base64,' + btoa(binary));
+      Playback = api.Playback;
+    }
     const resources = await Promise.all(payload.resources.map(async r => ({ name: r.name, bytes: await decode(r.data) })));
     const engine = await api.load({ wasmBinary: await decode(payload.wasm), resources,
       playbackAssets: { wasm: await decode(payload.playback.wasm),
-        worker: new TextDecoder().decode(await decode(payload.playback.worker)) } });
-    return { engine, Playback: api.Playback };
+        worker: extension ? null : new TextDecoder().decode(await decode(payload.playback.worker)),
+        workerURL: extension ? new URL('./score-engine/playback-worker.js', location.href).href : null } });
+    return { engine, Playback };
   })().catch(error => { musicEnginePromise = null; throw error; });
 }
 

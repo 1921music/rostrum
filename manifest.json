@@ -1,5 +1,8 @@
 {
   "manifest_version": 3,
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
   "name": "Rostrum (personal pCloud build)",
   "version": "1.0.0",
   "description": "Rostrum sheet-music studio with pCloud OAuth support.",

@@ -569,6 +569,10 @@ if args.extension:
     build_podium_page("build/podium.html")
     extension_dir = os.path.join('build', 'extension')
     extension_app_dir = os.path.join(extension_dir, 'build')
+    # Check dependencies before replacing an existing unpacked extension.
+    score_modules = os.path.join('lib', 'score-engine')
+    if not os.path.isfile(os.path.join(score_modules, 'mscz-engine.js')):
+        sys.exit('Missing extension score modules; regenerate with build_score_engine.py.')
     # Everything under extension_dir is generated below, so start from nothing:
     # the page's scripts are numbered, and a build that emits fewer of them than
     # the last one would otherwise leave stale scripts behind to be packaged.
@@ -578,6 +582,7 @@ if args.extension:
     os.makedirs(extension_app_dir, exist_ok=True)
     shutil.copyfile('manifest.json', os.path.join(extension_dir, 'manifest.json'))
     shutil.copyfile('extension-background.js', os.path.join(extension_dir, 'extension-background.js'))
+    shutil.copytree(score_modules, os.path.join(extension_app_dir, 'score-engine'))
     for pdf_module in ('pdf.min.mjs', 'pdf.worker.min.mjs'):
         with open(os.path.join('lib', pdf_module), encoding='utf-8') as source_file:
             pdf_source = source_file.read()
