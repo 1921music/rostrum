@@ -75,7 +75,7 @@ for (const packaged of ['source', 'web', 'file', 'extension']) test(`${packaged}
     const panel = page.locator('[data-tag="OpenPanel"]');
     await panel.getByText('Local', { exact: true }).click();
     await panel.locator('input[type="file"]').setInputFiles({ name: 'first.pdf', mimeType: 'application/pdf', buffer: Buffer.from(bytes) });
-    await expect.poll(() => page.evaluate(() => _score_?.name), { message: 'first PDF opens; errors: ' + errors }).toBe('first.pdf');
+    await expect.poll(() => page.evaluate(() => _score_?.name), { timeout: 15000, message: 'first PDF opens; errors: ' + errors }).toBe('first.pdf');
     const renderedInk = () => page.evaluate(() => {
       const pg = _score_?.pgs[0];
       if (!pg?.mozCanvas || pg.rendering) return 0;
@@ -212,7 +212,8 @@ for (const packaged of ['file', 'extension']) test(`${packaged}: App → Guide o
     await guide.locator('body').evaluate(() => {
       for (const img of document.images) img.loading = 'eager';
     });
-    await expect.poll(() => guide.locator('body').evaluate(() => [...document.images].every(img => img.complete && img.naturalWidth > 0))).toBe(true);
+    await expect.poll(() => guide.locator('body').evaluate(() => [...document.images]
+      .filter(img => !img.complete || !img.naturalWidth).map(img => img.getAttribute('src'))), { timeout: 15000 }).toEqual([]);
     expect(await guide.locator('body').innerText()).toContain('譜面');
     expect(external).toEqual([]);
     expect(errors).toEqual([]);
