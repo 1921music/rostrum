@@ -40,6 +40,10 @@ Navigate to `https://localhost:9876/pod.html` to use the application.
 
 ### Build System
 
+MSCZ/MusicXML integration and rebuilding its vendored WASM engine are described
+in [doc/mscz-support.md](doc/mscz-support.md). The regular build uses the
+checked-in engine payload and requires no C++ toolchain.
+
 This project uses a custom Python-based build system.
 
 ### Personal Chrome extension
@@ -50,6 +54,13 @@ unpacked extension from `chrome://extensions`:
 ```bash
 mise exec -- npm run build:extension
 ```
+
+The extension also supports MSCZ/MusicXML/MXL scores. It packages its score
+modules and audio Worker as local files and permits bundled WebAssembly via
+`'wasm-unsafe-eval'`, without allowing JavaScript eval or remote scripts.
+Run `mise exec -- npm run test:extension` to verify it in a real MV3 browser
+context. See [score support](doc/mscz-support.md) for engine asset regeneration
+and an optional project-local Playwright browser installation.
 
 The personal build supports pCloud OAuth in the extension context. The web build supports Direct Login. OAuth is the
 recommended sign-in method and its access token is kept in

@@ -6,6 +6,7 @@
     "pretest": "python build.py --font",
     "test": "playwright test",
     "test:headed": "playwright test --headed",
+    "test:extension": "python build.py --extension && playwright test tests/extension-score.spec.js",
     "probe:pcloud-web": "node tests/static-server.js",
     "build:extension": "python build.py --extension"
   },

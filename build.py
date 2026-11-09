@@ -476,29 +476,33 @@ def podium_page_patches(canonical):
      '<https:/\\/www.gnu.org/licenses/>.\n-->\n\n<!--\n{LICENSE}-->\n'),
     ('    <title id="title">Rostrum</title>\n',
      (f'    <link rel="canonical" href="{canonical}">\n' if canonical else '') +
-     '    <link rel="manifest" href="manifest.webmanifest" />\n'
+     '    <link rel="manifest" data-href="manifest.webmanifest" />\n'
      '    <link rel="apple-touch-icon" href="icon192.png">\n'
      '    <meta name="apple-mobile-web-app-capable" content="yes">\n'
      '    <meta name="apple-mobile-web-app-title" content="Rostrum">\n'
      '    <title id="title">Rostrum</title>\n'),
     # the libraries are included by main.js itself (see its #include's):
     ('    <script src="fabric.min.js"></script> \n', ''),
+    ('    <script src="score-engine-data.js"></script>\n', ''),
     ("    <script type=\"module\">import * as pdfjsLib from './pdf.min.mjs'; window.pdfjsLib = pdfjsLib;</script>\n", ''),
     ('    <script src="pdf-lib.min.js"></script> \n', ''),
     ('    <script src="fontkit.umd.min.js"></script> \n', ''),
     ('    <script src="main.js" type="module"></script> \n',
      '    <script>\n'
-     '      // Register service worker for PWA functionality\n'
-     "      if ('serviceWorker' in navigator) {\n"
-     "        window.addEventListener('load', () => {\n"
-     "          navigator.serviceWorker.register('sw.js')\n"
-     '            .then(registration => {\n'
-     "              console.log('Rostrum: Service Worker registered with scope:', registration.scope);\n"
-     '            })\n'
-     '            .catch(error => {\n'
-     "              console.log('Rostrum: Service Worker registration failed:', error);\n"
-     '            });\n'
-     '        });\n'
+     '      // PWA resources require HTTP(S); standalone file:// HTML is offline already.\n'
+     "      if (location.protocol === 'http:' || location.protocol === 'https:') {\n"
+     "        document.querySelector('link[rel=manifest]').href = 'manifest.webmanifest';\n"
+     "        if ('serviceWorker' in navigator) {\n"
+     "          window.addEventListener('load', () => {\n"
+     "            navigator.serviceWorker.register('sw.js')\n"
+     '              .then(registration => {\n'
+     "                console.log('Rostrum: Service Worker registered with scope:', registration.scope);\n"
+     '              })\n'
+     '              .catch(error => {\n'
+     "                console.log('Rostrum: Service Worker registration failed:', error);\n"
+     '              });\n'
+     '          });\n'
+     '        }\n'
      '      }\n'
      '    </script>\n'
      '    <script type="module">\n'
@@ -521,6 +525,40 @@ def git_commit():
     except (OSError, subprocess.CalledProcessError):
         return 'unknown'  # built outside a working tree, or without git
     return (head + '-dirty') if dirty else head
+
+def bundle_local_guide(destination, extension=False):
+    """Ship Japanese prose and media beside local HTML, without file:// fetch probes."""
+    guide_dir = os.path.join(destination, 'guidebook')
+    os.makedirs(guide_dir, exist_ok=True)
+    compressed = os.path.isfile(os.path.join('build', 'doc-assets', 'podium-icon.webp'))
+    media_dir = os.path.join('build', 'doc-assets') if compressed else os.path.join('doc', 'assets')
+    shutil.copytree(media_dir, os.path.join(guide_dir, 'assets'), dirs_exist_ok=True,
+                    ignore=shutil.ignore_patterns('.*'))
+    with open(os.path.join('doc', 'Guidebook.ja.html'), encoding='utf-8') as source:
+        guide = source.read()
+    if compressed:
+        guide = re.sub(r'(src="assets/[^\"]+)\.jpg"', r'\1.webp"', guide)
+    font = os.path.join('build', 'BravuraText.otf')
+    if not os.path.isfile(font): font = os.path.join('lib', 'BravuraText.otf')
+    shutil.copyfile(font, os.path.join(guide_dir, 'assets', 'BravuraText.otf'))
+    guide = guide.replace('https://cdn.jsdelivr.net/gh/steinbergmedia/bravura@master/redist/otf/Bravura.otf',
+                          'assets/BravuraText.otf')
+    if extension:
+        scripts = []
+        def extract(match):
+            scripts.append(match.group(1))
+            return '<script src="guidebook.js"></script>'
+        guide = re.sub(r'<script>(.*?)</script>', extract, guide, flags=re.DOTALL)
+        guide = guide.replace('onclick="playVideo(this.parentElement)"', 'data-guide-action="play"')
+        guide = guide.replace('onclick="closeVideo(event, this.parentElement)"', 'data-guide-action="close"')
+        scripts.append("document.addEventListener('click', event => { const button = event.target.closest('[data-guide-action]'); "
+                       "if (!button) return; if (button.dataset.guideAction === 'play') playVideo(button.parentElement); "
+                       "else closeVideo(event, button.parentElement); });")
+        with open(os.path.join(guide_dir, 'guidebook.js'), 'w', encoding='utf-8') as script:
+            script.write('\n'.join(scripts))
+    with open(os.path.join(guide_dir, 'Guidebook.ja.html'), 'w', encoding='utf-8-sig') as target:
+        target.write(guide)
+
 
 def build_podium_page(outFileName, canonical="https://1921music.github.io/rostrum/"):
     with open("src/pod.html", encoding='utf-8') as f:
@@ -545,6 +583,9 @@ def build_podium_page(outFileName, canonical="https://1921music.github.io/rostru
     # says when, the commit says from what. Matched loosely because the Packager
     # minifies the spacing away.
     stamped = packaged.getvalue()
+    if os.path.basename(outFileName) == 'podium.html':
+        bundle_local_guide(os.path.dirname(outFileName))
+        stamped = stamped.replace('</head>', '<script>window._podiumGuideJa_ = "guidebook/Guidebook.ja.html";</script>\n</head>')
     for name, value in (
             ('_podiumBuild_', datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')),
             ('_podiumCommit_', git_commit())):
@@ -568,6 +609,13 @@ if args.extension:
     build_podium_page("build/podium.html")
     extension_dir = os.path.join('build', 'extension')
     extension_app_dir = os.path.join(extension_dir, 'build')
+    # Check dependencies before replacing an existing unpacked extension.
+    score_modules = os.path.join('lib', 'score-engine')
+    score_module_names = ('mscz.js', 'mscz-engine.js', 'text-fonts.js', 'playback.js', 'playback-worker.js', 'mscz-synth.js')
+    missing_score_modules = [name for name in score_module_names if not os.path.isfile(os.path.join(score_modules, name))]
+    if missing_score_modules:
+        sys.exit('Missing extension score modules: ' + ', '.join(missing_score_modules)
+                 + '; regenerate with build_score_engine.py.')
     # Everything under extension_dir is generated below, so start from nothing:
     # the page's scripts are numbered, and a build that emits fewer of them than
     # the last one would otherwise leave stale scripts behind to be packaged.
@@ -577,6 +625,7 @@ if args.extension:
     os.makedirs(extension_app_dir, exist_ok=True)
     shutil.copyfile('manifest.json', os.path.join(extension_dir, 'manifest.json'))
     shutil.copyfile('extension-background.js', os.path.join(extension_dir, 'extension-background.js'))
+    shutil.copytree(score_modules, os.path.join(extension_app_dir, 'score-engine'))
     for pdf_module in ('pdf.min.mjs', 'pdf.worker.min.mjs'):
         with open(os.path.join('lib', pdf_module), encoding='utf-8') as source_file:
             pdf_source = source_file.read()
@@ -616,6 +665,7 @@ if args.extension:
     extension_html = re.sub(r'\s*<link rel="apple-touch-icon"[^>]*>', '', extension_html)
     with open(os.path.join(extension_app_dir, 'podium.html'), 'w', encoding='utf-8', newline='\n') as extension_page:
         extension_page.write(extension_html)
+    bundle_local_guide(extension_app_dir, extension=True)
     if args.verbose: print('-- personal extension podium.html (re)built.')
 
 if args.podium:

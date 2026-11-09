@@ -1995,6 +1995,13 @@ class ScrollLayout extends Layout {
       );
       this.pgGoTo(pn, true);
     } else {
+      if (animated) {
+        // A one-page scroll skips the page-turn animation, but still needs
+        // its initial position (the layout is centered around its origin).
+        const pz = this.userPz();
+        if (pz) Object.assign(this.elm.style, pz);
+        else this.place();
+      }
       await this.pgGoTo(pn, false); // (awaited so the pgs are mounted when build() resolves)
     }
   }
@@ -2803,6 +2810,7 @@ e.taken = true ;
          this.bMarkTimer.cancel();
          // (no active pg if a newer build superseded this pgGoTo: nothing to drag)
          if(!cursor && !this.active) return;
+         if(this.score.music) return;
          if(!cursor) cursor = new this.Organizer(e, this);
          cursor.mv(emv);
        }

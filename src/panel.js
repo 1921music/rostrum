@@ -996,10 +996,11 @@ class DetailsPanel extends Panel {
       let nameInput = helm(
         `<input type="text" style="font-size:1.5em;text-align:center;margin-bottom:.5em;width:100%;box-sizing:border-box;border:none;border-radius:var(--borderRadius);background:white;">`
       );
-      nameInput.value = score.name.replace(/\.pdf$/i, "");
+      nameInput.value = score.name.replace(/\.(pdf|mscz|mxl|musicxml|xml)$/i, "");
       listen(nameInput, "change", () => {
         let newName = nameInput.value.trim();
-        if (!newName.toLowerCase().endsWith(".pdf")) newName += ".pdf";
+        const extension = score.music ? '.mscz' : '.pdf';
+        if (!newName.toLowerCase().endsWith(extension)) newName += extension;
         score.name = newName;
         score.setTitle();
       });
@@ -1295,9 +1296,9 @@ class GuidePanel extends Panel {
   // Which guidebooks exist depends on how Rostrum was deployed. The web app
   // publishes the English one beside the page, where a relative URL keeps it
   // same-origin; a static-host deployment carries whichever translations were
-  // built into it; the extension and a page saved to disk carry none, and have
-  // to borrow the published copy (which is served with "frame-ancestors *", so
-  // it will embed). An absence has to be found before the iframe is pointed at
+  // built into it. Local HTML and extension packages explicitly name their
+  // bundled Japanese guide, so file:// needs no forbidden HEAD probe.
+  // An absence has to be found before the iframe is pointed at
   // it: a 404 body fires the load event just as a guidebook would, and would be
   // displayed in its place.
   // In preference order: a deployment that carries a translation leads with it,
@@ -1345,6 +1346,7 @@ class GuidePanel extends Panel {
     // @return the real URL of each guidebook this deployment can show, keyed by
     //   language. English always has one, falling back to the published copy.
     if (this.urls) return this.urls;
+    if (window._podiumGuideJa_) return this.urls = { ja: new URL(window._podiumGuideJa_, location.href).href };
     if (this.isExtension) return this.urls = { en: this.publishedUrl };
     let urls = {};
     for (let [language, name] of Object.entries(this.localNames)) {
@@ -1441,7 +1443,8 @@ class GuidePanel extends Panel {
     if (GuidePanel.isExtension) {
       // Extension: open in new tab (cross-origin iframe restrictions prevent embedding)
       if (this.guideWin && !this.guideWin.closed) this.guideWin.focus();
-      else  this.guideWin = window.open(GuidePanel.publishedUrl, "podium-guidebook");
+      else this.guideWin = window.open(window._podiumGuideJa_
+        ? new URL(window._podiumGuideJa_, location.href).href : GuidePanel.publishedUrl, "podium-guidebook");
       return this;
     }
     super.show();
@@ -1899,6 +1902,7 @@ class StoragePanel extends Panel {
               });
           } else if (tag == "Recent") {
             localStorage.setItem("recent", []);
+            await FileSrc.clearLocalRecent();
             for (let src of Object.values(Score.sources))
               localStorage.setItem(src, "");
             toast("Recent list cleared");
@@ -3718,7 +3722,8 @@ class MagnifyPanel extends Panel {
     return this;
   }
 
-  updateMagnifier(fracX, fracY, pg) {
+  async updateMagnifier(fracX, fracY, pg) {
+    const request = this.magRequest = (this.magRequest || 0) + 1;
     // @fracX, @fracY are fractional coordinates (0 to 1) relative to displayed page
     // Store coordinates if provided
     if (fracX !== undefined) {
@@ -3739,6 +3744,9 @@ class MagnifyPanel extends Panel {
 
     if (!pg?.canvas) return;
 
+    const background = pg.mozCanvas || (pg.musicSvg ? await pg.score.music.pageImage(pg.mozPn) : null);
+    if (request !== this.magRequest || !pg.canvas || pg.score.disposed) return;
+
     let canvas = pg.canvas;
     let zoom = window._menu_.magnifier.zoom;
     let destW = 300, destH = 300;
@@ -3749,15 +3757,15 @@ class MagnifyPanel extends Panel {
     ctx.clearRect(0, 0, destW, destH);
 
     // Draw from mozCanvas (PDF rendering) first as background
-    if (pg.mozCanvas) {
-      let srcW = pg.mozCanvas.width;
-      let srcH = pg.mozCanvas.height;
+    if (background) {
+      let srcW = background.width;
+      let srcH = background.height;
       let srcX = fracX * srcW;
       let srcY = fracY * srcH;
       let sourceW = (destCSSW / zoom) * (srcW / pg.width);
       let sourceH = (destCSSH / zoom) * (srcH / pg.height);
       ctx.drawImage(
-        pg.mozCanvas,
+        background,
         srcX - sourceW/2, srcY - sourceH/2,
         sourceW, sourceH,
         0, 0, destW, destH
@@ -3874,6 +3882,125 @@ class CurtainPanel extends Panel {
   }
 }
 
+class MusicPanel extends Panel {
+  static css = css('MusicPanels', `
+    .MusicPanel { min-width:0; box-sizing:border-box; max-width:calc(100vw - 3em); padding:.5em; }
+    .TransposePanel { width:22em; }
+    .PlaybackPanel { width:28em; }
+    .MusicPanel button, .MusicPanel select { font:inherit; }
+    .MusicPanel button { padding:.25em .5em; white-space:nowrap; }
+    .MusicPanel p { margin:.75em 0; }
+    .MusicPanel [role=status]:empty { display:none; }
+    .TransposePanel__steps { display:grid; grid-template-columns:1fr auto 1fr; gap:.5em; align-items:center; }
+    .TransposePanel output { white-space:nowrap; min-width:6em; }
+    .TransposePanel__spelling, .PlaybackPanel__master { display:flex; gap:.75em; align-items:center; }
+    .TransposePanel select { flex:1; min-width:0; }
+    .PlaybackPanel__transport { display:flex; align-items:center; justify-content:center; gap:.5em; }
+    .PlaybackPanel__master input { flex:1; min-width:0; }
+    .PlaybackPanel__part { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,.6fr) auto auto;
+      gap:.5em .75em; padding:.75em 0; border-top:1px solid #8886; align-items:center; text-align:left; }
+    .PlaybackPanel__part-name { grid-column:1 / -1; overflow-wrap:anywhere; }
+    .PlaybackPanel__part label { display:flex; align-items:center; gap:.25em; white-space:nowrap; }
+    .PlaybackPanel__part label:has(input[type=range]) { display:grid; gap:.25em; }
+    .PlaybackPanel__part input[type=range] { width:100%; min-width:0; margin:0; }
+  `);
+  show() {
+    super.show(() => { if (this.elm.isConnected) this.constrain(); });
+    return this;
+  }
+  constrain() {
+    super.constrain();
+    const box = this.panel.getBoundingClientRect();
+    const dx = box.left < 8 ? 8 - box.left : box.right > innerWidth - 8 ? innerWidth - 8 - box.right : 0;
+    const dy = box.top < 8 ? 8 - box.top : box.bottom > innerHeight - 8 ? innerHeight - 8 - box.bottom : 0;
+    this.elm.style.left = this.elm.offsetLeft + dx + 'px';
+    this.elm.style.top = this.elm.offsetTop + dy + 'px';
+  }
+}
+
+class TransposePanel extends MusicPanel {
+  constructor(cell) {
+    super(cell);
+    this.body.classList.add('MusicPanel', 'TransposePanel');
+    this.body.innerHTML = `<div class="TransposePanel__steps"><button data-step="-1">- semitone</button> <output></output> <button data-step="1">+ semitone</button></div>
+      <p><button data-reset>Original key</button></p><label class="TransposePanel__spelling">Spelling <select><option value="readable">Readable</option><option value="preserve">Preserve</option></select></label><p role="status"></p>`;
+    this.body.addEventListener('click', e => {
+      if (!e.target.matches('button')) return;
+      const music = _score_?.music;
+      if (!music) return;
+      this.change(e.target.hasAttribute('data-reset') ? 0 : music.transpose + Number(e.target.dataset.step));
+    });
+    this.body.querySelector('select').addEventListener('change', () => this.change(_score_?.music?.transpose));
+  }
+  async change(value) {
+    const status = this.body.querySelector('[role=status]');
+    status.textContent = 'Transposing...';
+    try { await _score_.transposeMusic(value, this.body.querySelector('select').value); status.textContent = ''; }
+    catch (error) { status.textContent = error.message; }
+    this.sync();
+  }
+  sync() {
+    const music = _score_?.music;
+    if (!music) return;
+    this.body.querySelector('output').textContent = music.transpose ? `${music.transpose > 0 ? '+' : ''}${music.transpose}` : 'Original key';
+    this.body.querySelector('select').value = music.native.viewTransposeSpelling;
+    for (const button of this.body.querySelectorAll('[data-step]'))
+      button.disabled = _score_.musicBusy || Math.abs(music.transpose + Number(button.dataset.step)) > 12;
+  }
+  show() { super.show(); this.sync(); return this; }
+}
+
+class PlaybackPanel extends MusicPanel {
+  constructor(cell) {
+    super(cell);
+    this.body.classList.add('MusicPanel', 'PlaybackPanel');
+    this.body.innerHTML = `<div class="PlaybackPanel__transport"><button data-play>Play</button> <button data-stop>Stop</button> <output></output></div>
+      <p><label class="PlaybackPanel__master">Volume <input data-master type="range" min="0" max="100" value="80"></label></p>
+      <div data-mixer style="max-height:40vh;overflow:auto"></div><p role="status"></p>`;
+    this.body.querySelector('[data-play]').onclick = async () => {
+      const player = _score_?.music?.player; if (!player) return;
+      try { if (player.state === 'playing') await player.pause(); else await player.play(); }
+      catch (error) { player.fail(error); }
+      this.sync();
+    };
+    this.body.querySelector('[data-stop]').onclick = () => _score_?.music?.player.stop();
+    this.body.querySelector('[data-master]').oninput = e => {
+      _score_?.music?.player.setVolume(Number(e.target.value) / 100); _score_?.setDirty();
+    };
+    this.listeners.push(listen(document, 'musicPlayback', () => this.sync()));
+  }
+  sync() {
+    const player = _score_?.music?.player; if (!player) return;
+    const play = this.body.querySelector('[data-play]');
+    play.textContent = player.state === 'playing' ? 'Pause' : 'Play';
+    play.disabled = _score_.musicBusy || player.state === 'loading' || !player.timeline;
+    this.body.querySelector('output').textContent = `${Math.floor(player.position)} / ${Math.floor(player.timeline?.duration || 0)} s`;
+    this.body.querySelector('[role=status]').textContent = player.error || '';
+  }
+  show() {
+    super.show();
+    const player = _score_?.music?.player;
+    if (player) this.body.querySelector('[data-master]').value = player.volume * 100;
+    const mixer = this.body.querySelector('[data-mixer]'); mixer.replaceChildren();
+    player?.timeline?.parts.forEach((part, i) => {
+      const row = document.createElement('div'), label = document.createElement('span');
+      row.className = 'PlaybackPanel__part'; label.className = 'PlaybackPanel__part-name';
+      label.textContent = part.name; row.append(label);
+      for (const [key, name] of [['volume', 'Volume'], ['pan', 'Pan'], ['mute', 'Mute'], ['solo', 'Solo']]) {
+        const control = document.createElement('input'), title = document.createElement('label');
+        const toggle = key === 'mute' || key === 'solo';
+        control.type = toggle ? 'checkbox' : 'range'; control.min = 0; control.max = 127;
+        control.setAttribute('aria-label', `${part.name} ${name}`);
+        if (toggle) control.checked = player.mixer[i][key]; else control.value = player.mixer[i][key];
+        control.oninput = () => { player.setMixer(i, { [key]: toggle ? control.checked : Number(control.value) }); _score_?.setDirty(); };
+        title.append(name, control); row.append(title);
+      }
+      mixer.append(row);
+    });
+    this.sync(); return this;
+  }
+}
+
 let panels = window._panels_ = {
   // This structure maps every Panel to its class.
   // Panels are instantiated on demand, and the
@@ -3882,6 +4009,8 @@ let panels = window._panels_ = {
   // minus the "Panel" portion, and starting with
   // lowercase. ex: GridPanel -> grid: instance
   Panel,
+  TransposePanel,
+  PlaybackPanel,
   AboutPanel,
   AddPanel,
   BookPanel,

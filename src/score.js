@@ -23,6 +23,7 @@
 import { clamp, clearChildren, delay, dialog, fontUnmap, helm, inflate, listen, rotatePoint, toast, unlisten } from "./common.js";
 import { Grid } from "./canvas.js";
 import { Layout } from "./layout.js";
+import { MusicDocument, isMusicScore, ROSTRUM_SVG_NS } from "./music.js";
 import { Panel, panels, EditPanel } from "./panel.js";
 export { Grid, Pg, Score };
 
@@ -164,7 +165,7 @@ class Pg {
   // object: pencil/pen/rastrum/...; control rendering keys off it, see
   // canvas.js) and "podiumStash" (the tool settings it was drawn with, which
   // its panel loads when it is selected).
-  static customProps = ["flatten", "podiumType", "podiumStash"];
+  static customProps = ["flatten", "podiumType", "podiumStash", "rostrumAnchor", "rostrumId"];
 
   // Default color used to pad pages < maxWidth and/or maxHeight:
   static paddingColor = "#fff";
@@ -236,6 +237,16 @@ class Pg {
 
   async renderPdfAux(canvas, signal) {
     // renderPdf's body, run once Score.renderGate has given it the cpu.
+    if (this.score.music) {
+      if (this.score.disposed || signal?.aborted) throw new DOMException('Render cancelled', 'AbortError');
+      const svg = this.score.music.pageSvgElement(this.mozPn);
+      Object.assign(svg.style, { display: 'block', background: 'white', pointerEvents: 'none', fontSize: '1em',
+        width: this.width / _pxPerEm_ + 'em', height: this.height / _pxPerEm_ + 'em' });
+      if (this.musicSvg) this.musicSvg.replaceWith(svg); else canvas.wrapperEl.append(svg);
+      this.musicSvg = svg;
+      this.rendering = false; this.setZoom(this.zoom);
+      return;
+    }
     let mozPg = await this.score.mozDoc.getPage(this.mozPn);
     if(this.score.disposed || signal?.aborted)
       throw new DOMException("Inflation aborted", "AbortError");
@@ -249,7 +260,7 @@ class Pg {
     this.mozCanvas = mozCanvas;
     let ctx = mozCanvas.getContext("2d", { willReadFrequently: true });
     let renderTask = this.renderTask = mozPg.render({
-      annotationMode: pdfjsLib.AnnotationMode.DISABLE,
+      annotationMode: this.score.music ? 0 : pdfjsLib.AnnotationMode.DISABLE,
       canvasContext: ctx,
       viewport: viewport,
     });
@@ -356,7 +367,7 @@ class Pg {
   renderIfNeeded() {
     // A pg inflated with render == false (by toPdf) has no pdf drawn. If a layout
     // has since started displaying it, draw its pdf now.
-    if(!this.inflated || !this.mozPn || this.mozCanvas) return Promise.resolve();
+    if(!this.inflated || !this.mozPn || this.mozCanvas || this.musicSvg) return Promise.resolve();
     this.renderPromise ??= this.renderPdf(this.canvas).catch(err => {
       if(err.name != 'AbortError') console.warn(`Failed to render page ${this.mozPn}:`, err);
     }).finally(() => this.renderPromise = null);
@@ -427,6 +438,7 @@ class Pg {
          await this.renderPdf(canvas);
          if(signal?.aborted) {
            this.mozCanvas?.remove();
+           this.musicSvg?.remove();
            throw new DOMException("Inflation aborted","AbortError");   
          }
       }
@@ -575,6 +587,8 @@ class Pg {
       this.canvas = null;
       this.mozCanvas?.remove();
       this.mozCanvas = null;
+      this.musicSvg?.remove(); this.musicSvg = null;
+      this.score.music?.releasePage(this.mozPn);
       this.elm = null;
       this.grid = null;
       this.inflated = false;
@@ -635,9 +649,12 @@ class Pg {
     let fabBlob = await new Promise(res => fabCanvas.toBlob(res));
     if(cancelled() || !fabBlob) return null;
     let pdfBlob = null;
-    if(this.mozCanvas) {
+    if(this.mozCanvas || this.musicSvg) {
       let pdfCanvas = helm(`<canvas width="${maxW}" height="${maxH}"></canvas>`);
-      pdfCanvas.getContext("2d").drawImage(this.mozCanvas, 0, 0, maxW, maxH);
+      const ctx = pdfCanvas.getContext('2d'); ctx.fillStyle = 'white'; ctx.fillRect(0, 0, maxW, maxH);
+      const background = this.mozCanvas || await score.music.pageImage(this.mozPn);
+      if(cancelled()) return null;
+      ctx.drawImage(background, 0, 0, maxW, maxH);
       pdfBlob = await new Promise(res => pdfCanvas.toBlob(res));
       if(cancelled() || !pdfBlob) return null;
     }
@@ -693,9 +710,10 @@ class Pg {
       let emHeight = this.height * zoom * this.stretch / _pxPerEm_ + "em";
       this.canvas.setDimensions({ width: emWidth, height: emHeight}, { cssOnly: true });
       if (this.grid) this.grid.setZoom(zoom);
-      if (this.mozCanvas) {
-        this.mozCanvas.style.width = emWidth;
-        this.mozCanvas.style.height = emHeight;
+      const background = this.mozCanvas || this.musicSvg;
+      if (background) {
+        background.style.width = emWidth;
+        background.style.height = emHeight;
       }
       return this.canvas.requestRenderAll();
     }
@@ -1372,7 +1390,16 @@ class Score {
     if (activate)
       for (let c of Object.values(_menu_.rings.layout.cells)) c.stash.pz = null;
 
-    if (pdfData) {
+    if (pdfData && isMusicScore(name)) {
+      this.size = pdfData.byteLength;
+      this.music = this.mozDoc = await MusicDocument.open(pdfData, name);
+      if (activate) {
+        const defaults = JSON.parse(_menu_.stashDefaults);
+        Object.assign(_menu_.rings.page.cells.numbers.stash, defaults.page?.cells?.numbers);
+        Object.assign(_menu_.rings.score.cells.details.stash, defaults.score?.cells?.details);
+      }
+      await this.initMusic(activate);
+    } else if (pdfData) {
       this.size = pdfData.byteLength;
       if (!window.pdfjsLib) {
         // mozilla pdfjsLib is loaded from mozSrc and mozWorkerSrc (strings
@@ -1381,7 +1408,14 @@ class Score {
         mozSrc = null; // allow gc
         window.pdfjsLib = await import(pdfUrl);
         URL.revokeObjectURL(pdfUrl);
-        let mozWorkerUrl = URL.createObjectURL(await inflate(mozWorkerSrc));
+        const workerScript = await inflate(mozWorkerSrc);
+        // A file:// document has an opaque origin. Chromium rejects a module
+        // worker fetched from its blob:null URL as a cross-origin redirect.
+        // A self-contained data URL works from the standalone HTML as well.
+        const localFile = location.protocol === 'file:';
+        let mozWorkerUrl = localFile
+          ? await bytesToBase64DataUrl(await workerScript.arrayBuffer(), 'application/javascript')
+          : URL.createObjectURL(workerScript);
         let mozWorker = new Worker(mozWorkerUrl, { type: "module" });
         // A module worker fetches its script asynchronously, so the blob URL
         // must stay valid until that fetch lands — revoking right after the
@@ -1389,7 +1423,7 @@ class Score {
         // an error) proves the script has loaded and executed, so it's safe to
         // release the URL then and let the source blob be GC'd.
         let revokeListeners = listen(mozWorker, ["message", "error"], () => {
-          URL.revokeObjectURL(mozWorkerUrl);
+          if (!localFile) URL.revokeObjectURL(mozWorkerUrl);
           unlisten(revokeListeners);
         });
         window.pdfjsLib.GlobalWorkerOptions.workerPort = mozWorker;
@@ -1511,6 +1545,160 @@ class Score {
     return this.disposePromise;
   }
 
+  async initMusic(activate = true) {
+    const records = [];
+    for (const image of this.music.originalImages) {
+      const xml = new DOMParser().parseFromString(image.svg, 'image/svg+xml');
+      const metadata = xml.getElementsByTagNameNS(ROSTRUM_SVG_NS, 'annotation')[0];
+      if (!metadata) throw new Error('Unsupported Rostrum annotation; original file remains unchanged.');
+      const data = JSON.parse(metadata.textContent);
+      if (data.version !== 1 || !data.object || !data.bounds) throw new Error('Unsupported annotation version.');
+      const a = this.music.anchor(image.key, image.staff) || this.music.nearest(image.page, image.x, image.y);
+      const scale = image.width / data.bounds.width;
+      // Each image occurrence is independent, including MuseScore copies that
+      // share one image resource and its embedded metadata.
+      data.object.rostrumId = crypto.randomUUID();
+      records.push({ ...data, key: a.key, staff: a.staff, sp: a.sp / scale,
+        spY: a.spY / (image.height / data.bounds.height),
+        dx: (image.x - a.x) / a.sp, dy: (image.y - a.y) / a.spY });
+    }
+    const settings = this.music.settings;
+    if (activate && settings.menu) _menu_.stashFromJsonObj(settings.menu, 'score');
+    this.music.bookmarks = Array.isArray(settings.bookmarks) ? settings.bookmarks.filter(b =>
+      typeof b.key === 'string' && Number.isInteger(b.staff) && typeof b.color === 'string' && CSS.supports('color', b.color)) : [];
+    if (activate) this.quality = _menu_.rings.score.cells.details.stash.quality ?? this.quality;
+    if (Number.isInteger(settings.transpose) && settings.transpose >= -12 && settings.transpose <= 12) {
+      this.music.native.setViewTransposeSemitones(settings.transpose, settings.spelling === 'preserve' ? 'preserve' : 'readable');
+      this.music.transpose = settings.transpose;
+      this.music.refresh();
+    }
+    await this.buildMusicPages(records);
+    if (this.music.info.anchors.length) {
+      const player = this.music.player;
+      player.setScore(this.music.native);
+      if (Number.isFinite(settings.volume)) player.setVolume(settings.volume);
+      if (Array.isArray(settings.mixer)) settings.mixer.slice(0, player.mixer.length).forEach((m, i) => {
+        if (Number.isInteger(m.volume) && m.volume >= 0 && m.volume <= 127 && Number.isInteger(m.pan) && m.pan >= 0 && m.pan <= 127)
+          player.setMixer(i, { volume: m.volume, pan: m.pan, mute: !!m.mute, solo: !!m.solo });
+      });
+    }
+  }
+
+  async buildMusicPages(records) {
+    const pages = this.music.info.pages;
+    this.pgs = pages.map((p, i) => new Pg(this, p.width, p.height, { objects: [] }, i + 1));
+    for (const bookmark of this.music.bookmarks || []) {
+      const a = this.music.anchor(bookmark.key, bookmark.staff);
+      if (a) this.pgs[a.page].bookmark = bookmark.color;
+    }
+    for (const r of records) {
+      const a = this.music.anchor(r.key, r.staff);
+      if (!a) throw new Error('An annotation anchor is missing; annotations were not discarded.');
+      const objects = await new Promise(resolve => fabric.util.enlivenObjects([r.object], resolve));
+      const obj = objects[0];
+      if (!obj) throw new Error('Could not restore an annotation.');
+      const sx = a.sp / r.sp, sy = a.spY / (r.spY ?? r.sp);
+      const matrix = fabric.util.multiplyTransformMatrices([sx, 0, 0, sy,
+        a.x + r.dx * a.sp - r.bounds.left * sx, a.y + r.dy * a.spY - r.bounds.top * sy], obj.calcTransformMatrix());
+      const transform = fabric.util.qrDecompose(matrix);
+      obj.set({ flipX: false, flipY: false, scaleX: transform.scaleX, scaleY: transform.scaleY,
+        angle: transform.angle, skewX: transform.skewX, skewY: 0, rostrumAnchor: { key: a.key, staff: a.staff } });
+      obj.setPositionByOrigin({ x: transform.translateX, y: transform.translateY }, 'center', 'center');
+      this.pgs[a.page].json.objects.push(obj.toObject(Pg.customProps));
+    }
+    this.pgRefresh();
+  }
+
+  async musicRecords() {
+    const records = [];
+    this.music.bookmarks = this.pgs.flatMap((pg, page) => {
+      const a = pg.bookmark && this.music.info.anchors.find(a => a.page === page);
+      return a ? [{ key: a.key, staff: a.staff, color: pg.bookmark }] : [];
+    });
+    for (let page = 0; page < this.pgs.length; ++page) {
+      const pg = this.pgs[page];
+      const inflated = pg.inflated;
+      ++pg.tempHolds;
+      try {
+        await pg.inflate(false, false);
+        pg.canvas.discardActiveObject();
+        for (const obj of pg.canvas.getObjects()) {
+          const bounds = obj.getBoundingRect(true, true);
+          const previous = obj.rostrumAnchor && this.music.anchor(obj.rostrumAnchor.key, obj.rostrumAnchor.staff);
+          const a = previous?.page === page ? previous : this.music.nearest(page, bounds.left, bounds.top);
+          obj.rostrumAnchor = { key: a.key, staff: a.staff };
+          obj.rostrumId ||= crypto.randomUUID();
+          records.push({ version: 1, id: obj.rostrumId, object: obj.toObject(Pg.customProps), bounds,
+            sp: a.sp, spY: a.spY, key: a.key, staff: a.staff,
+            dx: (bounds.left - a.x) / a.sp, dy: (bounds.top - a.y) / a.spY,
+            drawing: obj.toSVG() });
+        }
+      } finally {
+        --pg.tempHolds;
+        if (!inflated) pg.tempDeflate();
+      }
+    }
+    return records;
+  }
+
+  async transposeMusic(semitones, spelling = this.music.native.viewTransposeSpelling) {
+    if (this.musicBusy) return;
+    this.musicBusy = true;
+    const music = this.music;
+    try {
+      const records = await this.musicRecords();
+      music.player.stop();
+      music.native.setViewTransposeSemitones(semitones, spelling);
+      music.transpose = semitones;
+      music.refresh();
+      Layout.activeLayout?.destructor(); Layout.activeLayout = null;
+      for (const pg of this.pgs) pg.deflate(true);
+      await this.buildMusicPages(records);
+      music.player.setScore(music.native, true);
+      await Layout.open(_menu_.rings.layout.cells[_menu_.rings.layout.stash.active || 'book']);
+      this.setDirty();
+    } finally { this.musicBusy = false; document.dispatchEvent(new Event('musicPlayback')); }
+  }
+
+  get saveName() { return this.music ? this.name.replace(/\.(mscz|mxl|musicxml|xml)$/i, '') + '.mscz' : this.name; }
+
+  async toFile() {
+    if (!this.music) return this.toPdf();
+    if (this.disposePromise) throw new Error('Cannot save a disposed score');
+    if (this.musicBusy) throw new Error('Wait for transposition to finish before saving.');
+    const pending = this.toMusicFile();
+    this.pendingExports.add(pending);
+    try { return await pending; } finally { this.pendingExports.delete(pending); }
+  }
+
+  async toMusicFile() {
+    const records = await this.musicRecords();
+    const annotations = records.map(r => {
+      const xml = document.implementation.createDocument("http://www.w3.org/2000/svg", 'svg');
+      const svg = xml.documentElement;
+      svg.setAttributeNS("http://www.w3.org/2000/xmlns/", 'xmlns:xlink', "http://www.w3.org/1999/xlink");
+      svg.setAttribute('viewBox', `${r.bounds.left} ${r.bounds.top} ${r.bounds.width} ${r.bounds.height}`);
+      svg.setAttribute('width', r.bounds.width); svg.setAttribute('height', r.bounds.height);
+      const metadata = xml.createElementNS("http://www.w3.org/2000/svg", 'metadata');
+      const annotation = xml.createElementNS(ROSTRUM_SVG_NS, 'rostrum:annotation');
+      const { drawing, ...data } = r;
+      annotation.textContent = JSON.stringify(data);
+      metadata.append(annotation); svg.append(metadata);
+      const drawingDoc = new DOMParser().parseFromString(`<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">${drawing}</svg>`, 'image/svg+xml');
+      if (drawingDoc.querySelector('parsererror')) throw new Error('Could not serialize an annotation as SVG.');
+      for (const node of [...drawingDoc.documentElement.childNodes]) svg.append(xml.importNode(node, true));
+      return { key: r.key, staff: r.staff, dx: r.dx, dy: r.dy,
+        width: r.bounds.width / r.sp, height: r.bounds.height / (r.spY ?? r.sp),
+        svg: new XMLSerializer().serializeToString(xml) };
+    });
+    if (this === _score_) Layout.activeLayout?.capturePz();
+    return this.music.native.saveRostrum({ annotations, settings: JSON.stringify({ version: 1,
+      transpose: this.music.transpose, spelling: this.music.native.viewTransposeSpelling,
+      volume: this.music.player.volume, mixer: this.music.player.mixer,
+      bookmarks: this.music.bookmarks,
+      menu: _menu_.stashToJsonObj('score') }) });
+  }
+
   async disposeAux() {
     await Promise.allSettled([...this.pendingExports]);
     this.disposed = true;
@@ -1556,6 +1744,7 @@ class Score {
     // clear any pg from paste cell...could be left over from previous score, if any
     _menu_.rings.page.cells.paste.pg = null ;
     _menu_.enableCells("page/paste", false);
+    this.updateMusicMenu();
     this.pgRefresh();
     // Sync quality to stash so InfoPanel slider shows correct value
     _menu_.rings.score.cells.details.stash.quality = this.quality;
@@ -1571,6 +1760,13 @@ class Score {
     _menu_.activateRing(_menu_.rings.score) ;
     await Layout.open(cell);
     return this;
+  }
+
+  updateMusicMenu() {
+    const menu = _menu_;
+    menu.enableCells(['score/transpose', 'score/playback'], !!this.music);
+    menu.enableCells(['page/copy', 'page/merge', 'page/add', 'page/import', 'page/flatten'], !this.music);
+    if (this.music) menu.enableCells(['page/cut', 'page/paste', 'page/undo'], false);
   }
 
   async bindScore(pdfData, pn = null) {
@@ -1699,6 +1895,7 @@ class Score {
     if(Score.activeScore === this) {
       _menu_.enableCells("page/undo", this.undoStack.length > 0);
       _menu_.enableCells("page/cut", this.pgs.length > 1); // forbid cutting last pg, otherwise allow
+      if (this.music) this.updateMusicMenu();
       let detailsCell = _menu_.rings.score?.cells.details;
       if (detailsCell && panels[detailsCell.key]) panels[detailsCell.key].refresh();
     }
@@ -1901,7 +2098,7 @@ class Score {
       // it next calls waitForTick by calling our monkey-patched setTimeout
       _shade_.onCancel = () => { window.cancelPdf = true; };
       let srcPLibDoc = null;
-      if (this.mozDoc) {
+      if (this.mozDoc && !this.music) {
         try {
           // Try loading without ignoreEncryption - getData() should return decrypted data from PDF.js
           srcPLibDoc = await PDFLib.PDFDocument.load(await this.mozDoc.getData());
@@ -1961,10 +2158,18 @@ class Score {
         _shade_.update(`Building page ${j + 1} of ${pns.length} (${percent}%)`);
         let pg = this.pgs[pn-1];
         // if pg is "backed" by a page in mozDoc (1-based), copy page to dstDoc, otherwise add a new "empty" page
-        if (pg.mozPn) {
+        if (pg.mozPn && !this.music) {
           pLibPg = dstPLibDoc.addPage((await dstPLibDoc.copyPages(srcPLibDoc, [pg.mozPn-1]))[0]);
         } else {
           pLibPg = dstPLibDoc.addPage([pg.width, pg.height]);
+          if (this.music) {
+            const canvas = document.createElement('canvas');
+            canvas.width = pg.width * this.quality; canvas.height = pg.height * this.quality;
+            const ctx = canvas.getContext('2d'); ctx.fillStyle = 'white'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(await this.music.pageImage(pg.mozPn), 0, 0, canvas.width, canvas.height);
+            const png = await dstPLibDoc.embedPng(canvas.toDataURL('image/png'));
+            pLibPg.drawImage(png, { x: 0, y: 0, width: pg.width, height: pg.height });
+          }
           if (pg.background) {
             let hex = pg.background.replace("#", "");
             let r = parseInt(hex.slice(0, 2), 16) / 255;

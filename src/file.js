@@ -246,6 +246,9 @@ class FileSrc
 class FileSrc {
   static refs = null;
 
+  static rememberLocal(file) { return FileSrc.get(Score.sources.local).remember(file); }
+  static clearLocalRecent() { return FileSrc.get(Score.sources.local).clearRecent(); }
+
   // ref is string or singleton instance
   static get(ref) {
     // FileSrc.refs is a 2-way mapping between Score.sources (strings that
@@ -298,18 +301,18 @@ class FileSrc {
           // dismissed picker). Shade only the loading, once a file has been picked.
           let picking = !score.fileHandle && src.source == Score.sources.local;
           if (!picking) _shade_.show("Downloading file");
-          let data, size, created, modified;
+          let data, size, created, modified, name = score.name, path = score.path, fileHandle = score.fileHandle;
           if (score.fileHandle) {
             let file = await score.fileHandle.getFile();
             data = await file.arrayBuffer();
             size = data.byteLength;
             modified = file.lastModified;
+            name = file.name;
           } else {
-            ({ data, size, created, modified } = await src.getFile(score.path, score.name));
+            ({ data, size, created, modified, name = score.name, path = score.path, fileHandle } = await src.getFile(picking ? null : score.path, picking ? null : score.name));
           }
           if (picking) _shade_.show("Opening file");
-          let fileHandle = score.fileHandle;
-          score = await new Score().init(score.source, score.path, score.name, data);
+          score = await new Score().init(score.source, path, name, data);
           if (fileHandle) score.fileHandle = fileHandle;
           Score.visit(score, { size, created, modified });
           toast("File reverted.");
@@ -327,7 +330,8 @@ class FileSrc {
     let score = _score_;
     let src = FileSrc.get(score.source);
     // If no source, or source doesn't support saving (like URL/WWW), show the save panel
-    if (!src || typeof src.putFile != 'function') {
+    if (!src || typeof src.putFile != 'function' || (score.music && !score.music.savedAsMscz
+        && !/\.mscz$/i.test(score.music.name) && !(src instanceof LocalSrc))) {
       let panel = panels[cell.name + "Panel"].get(cell);
       if (panel.elm.style.visibility != "visible") {
         panel.show();
@@ -338,10 +342,12 @@ class FileSrc {
 
     // For local files, reuse the file handle from open (if available) for instant save.
     // Otherwise, get a new handle via file picker while still in user gesture.
-    let handle = score.fileHandle || null;
+    const nativeHandle = !score.music || /\.mscz$/i.test(score.music.name) || score.music.savedAsMscz;
+    let handle = score.name === score.saveName && nativeHandle
+      && (!score.fileHandle?.name || score.fileHandle.name === score.saveName) ? score.fileHandle || null : null;
     if (!handle && src instanceof LocalSrc && src.getFileHandle) {
       try {
-        handle = await src.getFileHandle(score.name);
+        handle = await src.getFileHandle(score.saveName);
         score.fileHandle = handle; // remember for next save
       } catch (error) {
         if (error.name == 'AbortError') return; // User cancelled
@@ -354,8 +360,11 @@ class FileSrc {
     // to save: this seems like a more natural ui experience.
     return new Promise(async (accept, reject) => {
       try {
-        let data = await score.toPdf();
-        await src.putFile(score.path, score.name, data, handle);
+        let data = await score.toFile();
+        const saved = await src.putFile(score.path, score.saveName, data, handle);
+        score.update({ name: saved?.name || score.saveName });
+        if (src instanceof LocalSrc) await src.remember(new File([data], score.name, { lastModified: saved?.modified || Date.now() }));
+        if (score.music) score.music.savedAsMscz = true;
         Score.visit(score, { size: data.length, modified: Date.now() });
         score.setDirty(false);
         toast("File saved.");
@@ -393,21 +402,69 @@ class FileSrc {
 
 class LocalSrc extends FileSrc {
   source = Score.sources.local;
+  recentFiles = new Map();
+
+  async recentStore(mode, run) {
+    const open = indexedDB.open('rostrum-local-recent', 1);
+    open.onupgradeneeded = () => open.result.createObjectStore('files', { keyPath: 'name' });
+    const db = await idbRequest(open);
+    try {
+      const transaction = db.transaction('files', mode);
+      const done = new Promise((resolve, reject) => {
+        transaction.oncomplete = resolve;
+        transaction.onabort = () => reject(transaction.error || new Error('Recent storage failed'));
+        transaction.onerror = () => reject(transaction.error);
+      });
+      const [result] = await Promise.all([run(transaction.objectStore('files')), done]);
+      return result;
+    } finally { db.close(); }
+  }
+
+  async remember(file) {
+    this.recentFiles.delete(file.name);
+    this.recentFiles.set(file.name, file);
+    while (this.recentFiles.size > 20) this.recentFiles.delete(this.recentFiles.keys().next().value);
+    try {
+      await this.recentStore('readwrite', async store => {
+        await idbRequest(store.put({ name: file.name, file, visited: Date.now() }));
+        const entries = await idbRequest(store.getAll());
+        for (const entry of entries.sort((a, b) => b.visited - a.visited).slice(20)) store.delete(entry.name);
+      });
+    } catch (error) {
+      console.warn('Could not persist local Recent file', error);
+      toast('Local Recent is available only until this tab is closed.');
+    }
+  }
+
+  async clearRecent() {
+    this.recentFiles.clear();
+    await this.recentStore('readwrite', store => idbRequest(store.clear()));
+  }
 
   async getFile(path, name, mode) {
+    // Recent stores a local copy, since an <input type=file> grants no reusable
+    // path or file handle. Never turn a Recent click into a different file picker.
+    if (name) {
+      let file = this.recentFiles.get(name);
+      if (!file) file = (await this.recentStore('readonly', store => idbRequest(store.get(name))))?.file;
+      if (!file) throw new Error('This older Recent entry has no local copy. Open the file once from the Local tab.', { cause: 'fileSrc' });
+      return { path: null, name: file.name, data: await file.arrayBuffer(), size: file.size, modified: file.lastModified };
+    }
     if (window.showOpenFilePicker) {
       let types = mode == "copy"
         ? [{ description: "Image Files", accept: { "image/jpeg": [".jpg", ".jpeg"], "image/png": [".png"] } }]
-        : [{ description: "PDF Files", accept: { "application/pdf": [".pdf"] } }];
+        : mode === 'merge' ? [{ description: "PDF Files", accept: { "application/pdf": [".pdf"] } }]
+        : [{ description: "Scores", accept: { "application/pdf": [".pdf"], "application/octet-stream": [".mscz", ".mxl", ".musicxml", ".xml"] } }];
       let [handle] = await showOpenFilePicker({ types });
       let file = await handle.getFile();
       await checkFileSize(file.name, file.size);
       let data = await file.arrayBuffer();
+      await this.remember(file);
       return { path: null, name: file.name, data: data, created: null, modified: file.lastModified, size: data.byteLength, fileHandle: handle };
     }
     return new Promise((accept, reject) => {
       let input = helm('<input type="file" style="display:hidden;"></input>');
-      input.accept = mode == "copy" ? "image/jpeg, image/png" : ".pdf, application/pdf";
+      input.accept = mode == "copy" ? "image/jpeg, image/png" : mode === 'merge' ? '.pdf' : ".pdf,.mscz,.mxl,.musicxml,.xml";
       _body_.append(input);
       listen(
         input,
@@ -423,6 +480,7 @@ class LocalSrc extends FileSrc {
             return reject(error);
           }
           let data = await file.arrayBuffer();
+          await this.remember(file);
           return accept({ path: null, name: file.name, data: data, created: null, modified: file.lastModified, size: data.byteLength });
         },
         { once: true }
@@ -441,7 +499,7 @@ class LocalSrc extends FileSrc {
             {
               description: "Rostrum Files",
               accept: {
-                "application/pdf": [".pdf"],
+                [name.toLowerCase().endsWith('.mscz') ? 'application/x-musescore' : 'application/pdf']: [name.toLowerCase().endsWith('.mscz') ? '.mscz' : '.pdf'],
               },
             },
           ],
@@ -455,7 +513,7 @@ class LocalSrc extends FileSrc {
       return { name: file.name, modified: file.lastModified };
     } else {
       // Try Web Share API first (works on iOS with "Save to Files" option)
-      let file = new File([data], name, { type: 'application/pdf' });
+      let file = new File([data], name, { type: name.toLowerCase().endsWith('.mscz') ? 'application/x-musescore' : 'application/pdf' });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         try {
           await navigator.share({ files: [file] });
@@ -466,7 +524,7 @@ class LocalSrc extends FileSrc {
         }
       }
       // Fallback: download approach (Android Chrome, Firefox)
-      let blob = new Blob([data], { type: 'application/pdf' });
+      let blob = new Blob([data], { type: file.type });
       let url = URL.createObjectURL(blob);
       let link = document.createElement('a');
       link.download = name;
@@ -491,7 +549,7 @@ class LocalSrc extends FileSrc {
         {
           description: "Rostrum Files",
           accept: {
-            "application/pdf": [".pdf"],
+            [name.toLowerCase().endsWith('.mscz') ? 'application/x-musescore' : 'application/pdf']: [name.toLowerCase().endsWith('.mscz') ? '.mscz' : '.pdf'],
           },
         },
       ],
@@ -1666,7 +1724,7 @@ class ODriveSrc extends CachedSrc {
         headers: {
           "Content-Length": sliceLen,
           "Content-Range": `bytes ${cursor}-${cursor + sliceLen - 1}/${dataLen}`,
-          "Content-Type": "application/pdf",
+          "Content-Type": name.toLowerCase().endsWith('.mscz') ? 'application/x-musescore' : 'application/pdf',
         },
         body: slice,
       });
@@ -2305,7 +2363,7 @@ class PCloudSrc extends CachedSrc {
      host_permissions.
   **/
   async getFileFromContentHost(file) {
-    let link = await this.request("getfilelink", { fileid: file.id, contenttype: "application/pdf" });
+    let link = await this.request("getfilelink", { fileid: file.id, contenttype: 'application/octet-stream' });
     if (!link.hosts?.length || !link.path) srcErr("pCloud returned no download location.");
     let response = await fetch(`https://${link.hosts[0]}${link.path}`, { referrerPolicy: "no-referrer" });
     if (!response.ok) srcErr(`pCloud download failed with HTTP ${response.status}.`);
@@ -2320,7 +2378,7 @@ class PCloudSrc extends CachedSrc {
     // Access-Control-Allow-Headers field. A simple request works in the
     // extension too, so there is no platform branch here.
     let form = new FormData();
-    form.append("file", new Blob([data], { type: "application/pdf" }), name);
+    form.append("file", new Blob([data], { type: name.toLowerCase().endsWith('.mscz') ? 'application/x-musescore' : 'application/pdf' }), name);
     await this.request("uploadfile", { folderid: dir.id, nopartial: 1 }, {
       method: "POST",
       body: form,
@@ -2419,7 +2477,7 @@ class LocalFileView {
     inputElm.draggable = true;
     inputElm.style.visibility = 'hidden';
     // the input element's "accept" attribute is different for "copy" and "open" modes.
-    inputElm.accept = this.mode == "copy" ? "image/jpeg, image/png" : ".pdf, application/pdf";
+    inputElm.accept = this.mode == "copy" ? "image/jpeg, image/png" : this.mode === 'merge' ? '.pdf' : ".pdf,.mscz,.mxl,.musicxml,.xml";
     this.elm.appendChild(inputElm);
 
 
@@ -2463,6 +2521,7 @@ class LocalFileView {
         else {
           if(await checkUnsaved()) {
             try {
+              await FileSrc.rememberLocal(file);
               let score = await new Score().init(Score.sources.local, null, file.name, await file.arrayBuffer());
               Score.visit(score, visitUpdate);
               toast("File opened");
@@ -2503,16 +2562,17 @@ class LocalFileView {
       _shade_.onCancel = () => { throw new Error() };
 
       score.source = Score.sources.local;
-      let data = await score.toPdf();
+      let handle = await this.src.getFileHandle(score.saveName);
+      let data = await score.toFile();
 
       // Get file handle. MUST be called from a user gesture context.
       // Although toPdf is async, it usually completes quickly enough to 
       // preserve the gesture for the file picker.
-      let handle = await this.src.getFileHandle(score.name);
-
-      let { name, modified } = await this.src.putFile(score.path, score.name, data, handle);
+      let { name, modified } = await this.src.putFile(score.path, score.saveName, data, handle);
+      await FileSrc.rememberLocal(new File([data], name, { lastModified: modified }));
       score.fileHandle = handle; // remember for future quick-saves
       score.update({ source: this.source, name: name, path: null });
+      if (score.music) score.music.savedAsMscz = true;
       Score.visit(score, { size: data.length, modified: modified });
       score.setDirty(false);
       toast("File saved");
@@ -2732,13 +2792,14 @@ class FileListView {
     let ext = this.extensionRegex.exec(name)[1];
     if (ext) {
       ext = ext.toLowerCase();
-      let exts = this.mode == "copy" ? { jpeg: 1, jpg: 1, png: 1 } : { pdf: 1 };
+      let exts = this.mode == "copy" ? { jpeg: 1, jpg: 1, png: 1 } : this.mode === 'merge' ? { pdf: 1 } : { pdf: 1, mscz: 1, mxl: 1, musicxml: 1, xml: 1 };
       if (exts[ext]) return ext;
     }
     return null;
   }
 
   async checkExt(name, ext = ".pdf") {
+    if (this.mode === 'save' && _score_?.music) return name.replace(/\.(mscz|mxl|musicxml|xml|pdf)$/i, '') + '.mscz';
     // ext should include the leading dot "."
     checkPath(name);
     if (name.toLowerCase().endsWith(ext)) return name;
@@ -2980,7 +3041,7 @@ class FileListView {
           toast("File downloaded");
         }
       } catch (error) {
-        if (!error.handled) errDialog(error, "Error: failed to download file from cloud server.");
+        if (!error.handled) errDialog(error, source === Score.sources.local ? 'Error opening local Recent file.' : 'Error: failed to download file from cloud server.');
       } finally {
         _shade_.hide();
         this.panel.hide();
@@ -3120,7 +3181,7 @@ class FileSystemView extends FileListView {
       if (!_score_) return;
       this.fsvSave.classList.remove("void");
       this.flvList__frame.classList.add("Flv-list__frame--save-mode");
-      this.fsvSave__file.value = _score_.name;
+      this.fsvSave__file.value = _score_.saveName;
       let uploadButton = new ButtonGroup({}, { Upload: { svg: "Upload" } }, async () => await this.putFile(this.fsvSave__file.value));
       uploadButton.elm.style = "position:absolute;right:4em;top:4.5em;";
       this.uploadButton.replaceWith(uploadButton.elm);
@@ -3317,9 +3378,10 @@ class FileSystemView extends FileListView {
         );
       _shade_.show("Uploading file");
       let score = _score_;
-      let data = await _score_.toPdf();
+      let data = await _score_.toFile();
       await this.src.putFile(this.path, name, data);
       score.update({ source: this.source, name: name, path: this.path });
+      if (score.music) score.music.savedAsMscz = true;
       Score.visit(score, { size: data.length, modified: Date.now() });
       score.setDirty(false);
       await this.setPath(this.path, true);

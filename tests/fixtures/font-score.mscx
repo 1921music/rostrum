@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<museScore version="4.60">
+  <programVersion>4.6.0</programVersion>
+  <Score>
+    <Division>480</Division>
+    <Style>
+      <defaultFontFace>Edwin</defaultFontFace><titleFontFace>Edwin</titleFontFace>
+      <rehearsalMarkFontFace>Edwin</rehearsalMarkFontFace>
+      <musicalTextFont>Leland Text</musicalTextFont>
+      <chordSymbolAFontFace>Leland Text</chordSymbolAFontFace>
+    </Style>
+    <Part>
+      <Staff id="1"><StaffType group="pitched"><name>stdNormal</name></StaffType></Staff>
+      <Instrument id="piano"><trackName>Piano</trackName><minPitchP>0</minPitchP><maxPitchP>127</maxPitchP><minPitchA>0</minPitchA><maxPitchA>127</maxPitchA><Channel><program value="0"/></Channel></Instrument>
+    </Part>
+    <Staff id="1">
+      <VBox><height>15</height><Text><style>title</style><text>Shared fonts</text></Text></VBox>
+      <Measure><voice>
+        <KeySig><concertKey>0</concertKey><actualKey>0</actualKey></KeySig>
+        <TimeSig><sigN>4</sigN><sigD>4</sigD></TimeSig>
+        <RehearsalMark><text>Intro</text></RehearsalMark>
+        <Harmony><harmonyInfo><root>14</root><name>maj7</name></harmonyInfo></Harmony>
+        <Chord><durationType>whole</durationType><Note><pitch>60</pitch><tpc>14</tpc></Note></Chord>
+      </voice></Measure>
+      <Measure><voice>
+        <RehearsalMark><text>Bridge 1</text></RehearsalMark>
+        <Harmony><harmonyInfo><root>21</root><name>m7</name></harmonyInfo></Harmony>
+        <Chord><durationType>whole</durationType><Note><pitch>67</pitch><tpc>15</tpc></Note></Chord>
+      </voice></Measure>
+    </Staff>
+  </Score>
+</museScore>

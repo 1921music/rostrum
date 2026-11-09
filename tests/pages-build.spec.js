@@ -22,6 +22,7 @@ test("the static-host build runs from a subdirectory", async ({ page }) => {
   await page.goto("/pages/index.html");
   await expect(page).toHaveTitle(/^Rostrum/);
   await expect.poll(() => page.evaluate(() => typeof window._FileSrc_)).toBe("function");
+  await expect(page.locator('link[rel="manifest"]')).toHaveAttribute('href', 'manifest.webmanifest');
   expect(errors).toEqual([]);
 });
 
@@ -49,7 +50,8 @@ test("the service worker takes the subdirectory as its scope", async ({ page }) 
 
 test("the static-host build references everything relatively", async () => {
   const html = fs.readFileSync(pageFile, "utf8");
-  expect(html).toContain('<link rel="manifest" href="manifest.webmanifest" />');
+  expect(html).toContain('<link rel="manifest" data-href="manifest.webmanifest" />');
+  expect(html).toContain("document.querySelector('link[rel=manifest]').href = 'manifest.webmanifest'");
   expect(html).toContain('<link rel="apple-touch-icon" href="icon192.png">');
   expect(html).toContain("navigator.serviceWorker.register('sw.js')");
   // The deployment's own URL is not known at build time, so claiming another
