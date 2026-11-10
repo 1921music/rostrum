@@ -411,6 +411,7 @@ for (const layoutKey of ['book', 'horizontal', 'vertical']) test(`playback follo
     .replaceAll('<measure number="2">', '<measure number="2"><print new-page="yes"/>');
   await page.evaluate(async ({ xml, layoutKey }) => {
     _menu_.rings.layout.stash.active = layoutKey;
+    if (layoutKey !== 'book') _menu_.rings.layout.cells[layoutKey].stash.pgShow = 2;
     await new _Score_().init('Local', null, 'pages.musicxml', new TextEncoder().encode(xml));
   }, { xml, layoutKey });
   const sample = async (time, expectedPage) => {
@@ -422,10 +423,55 @@ for (const layoutKey of ['book', 'horizontal', 'vertical']) test(`playback follo
       const music = _score_.music, system = music.player.tracking.system;
       const pg = _score_.pgs.find(pg => pg.mozPn === system.page + 1);
       const rect = pg.musicSvg?.getBoundingClientRect();
-      return { page: system.page, highlighted: pg.musicSvg?.querySelectorAll('.mscz-playing').length > 0,
+      return { page: system.page, selected: Number(_score_.numbers.pn), highlighted: pg.musicSvg?.querySelectorAll('.mscz-playing').length > 0,
         visible: !!rect && rect.right > 0 && rect.left < innerWidth && rect.bottom > 0 && rect.top < innerHeight };
-    })).toEqual({ page: expectedPage, highlighted: true, visible: true });
+    })).toEqual({ page: expectedPage, selected: expectedPage + 1, highlighted: true, visible: true });
   };
   await sample(0.1, 0); await sample(2.1, 1); await sample(6.1, 0);
+  await page.evaluate(() => {
+    const m = _score_.music;
+    m.autoScroll = false; m.player.context.currentTime = 8.1; m.player.notify();
+  });
+  expect(await page.evaluate(() => Number(_score_.numbers.pn))).toBe(1);
+  await page.evaluate(() => {
+    const m = _score_.music;
+    m.autoScroll = true; m.player.state = 'paused'; m.view.resetFollow();
+  });
+  expect(await page.evaluate(() => Number(_score_.numbers.pn))).toBe(1);
+  await page.evaluate(() => {
+    const m = _score_.music;
+    m.player.state = 'playing'; m.view.resetFollow();
+  });
+  await expect.poll(() => page.evaluate(() => Number(_score_.numbers.pn))).toBe(2);
   await page.evaluate(() => { const p = _score_.music.player; p.stop(); p.context = null });
+});
+
+
+for (const layoutKey of ['book', 'horizontal']) test(`real audio turns the visible page and returns on repeat in ${layoutKey}`, async ({ page }) => {
+  const xml = fs.readFileSync(path.join(__dirname, '../engine/test/playback.musicxml'), 'utf8')
+    .replaceAll('<measure number="2">', '<measure number="2"><print new-page="yes"/>')
+    .replaceAll('</part>', '<measure number="3"><print new-page="yes"/><note><rest/><duration>4</duration><type>whole</type></note></measure><measure number="4"><print new-page="yes"/><note><rest/><duration>4</duration><type>whole</type></note></measure></part>');
+  await page.evaluate(async ({ xml, layoutKey }) => {
+    _menu_.rings.layout.stash.active = layoutKey;
+    if (layoutKey === 'horizontal') _menu_.rings.layout.cells.horizontal.stash.pgShow = 2;
+    await new _Score_().init('Local', null, 'audio-pages.musicxml', new TextEncoder().encode(xml));
+    await _score_.music.player.play();
+  }, { xml, layoutKey });
+  const shown = () => page.evaluate(() => {
+    const music = _score_.music, layout = _Layout_.activeLayout;
+    const pg = _score_.pgs.find(pg => pg.mozPn === music.player.tracking.system?.page + 1);
+    const inFront = [...(pg?.musicSvg?.querySelectorAll('.mscz-playing') || [])].some(group => {
+      const r = group.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
+      return x >= 0 && x < innerWidth && y >= 0 && y < innerHeight && pg.elm.contains(document.elementFromPoint(x, y));
+    });
+    const positioned = layout.cell.key === 'book'
+      ? layout.slots.slice(2, 4).some(slot => slot.contains(pg?.elm))
+      : layout.snapIndex === Number(_score_.numbers.pn) - 1
+        && (Number(_score_.numbers.pn) === 1 || _score_.pgs[0].elm.getBoundingClientRect().right <= layout.frame.getBoundingClientRect().left + 1);
+    return { page: Number(_score_.numbers.pn), inFront, positioned };
+  });
+  await expect.poll(shown, { timeout: 15000 }).toEqual({ page: 2, inFront: true, positioned: true });
+  await page.screenshot({ path: `build/playback-page-turn-${layoutKey}.png` });
+  await expect.poll(shown, { timeout: 10000 }).toEqual({ page: 1, inFront: true, positioned: true });
+  await page.evaluate(() => _score_.music.player.stop());
 });

@@ -1595,9 +1595,12 @@ class Score {
     const pn = system.page + 1;
     let pg = this.pgs.find(pg => pg.mozPn === pn);
     if (!pg) return;
+    const pageNumber = this.pnOf(pg);
     const visible = pg.musicSvg?.isConnected && pg.musicSvg.getBoundingClientRect();
-    if (!visible || visible.right < 24 || visible.left > innerWidth - 24 || visible.bottom < 24 || visible.top > innerHeight - 24)
-      await layout.pgGoTo(this.pnOf(pg), false);
+    // A visible neighboring page still needs to become the active page. Use
+    // the layout's navigation so its sash/spread and page-number controls agree.
+    if (Number(this.numbers.pn) !== pageNumber || !visible || visible.right < 24 || visible.left > innerWidth - 24 || visible.bottom < 24 || visible.top > innerHeight - 24)
+      await layout.pgGoTo(pageNumber, false);
     if (this.disposed || layout !== Layout.activeLayout || serial !== this.musicFollowSerial || music.player.state !== 'playing' || !music.autoScroll) return;
     const rect = pg.musicSvg?.getBoundingClientRect();
     if (!rect?.width || !rect.height) return;

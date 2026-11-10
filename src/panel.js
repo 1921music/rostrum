@@ -3956,7 +3956,7 @@ class PlaybackPanel extends MusicPanel {
     this.body.classList.add('MusicPanel', 'PlaybackPanel');
     this.body.innerHTML = `<div class="PlaybackPanel__transport"><button data-play>Play</button> <button data-stop>Stop</button> <output></output></div>
       <p><label class="PlaybackPanel__master">Volume <input data-master type="range" min="0" max="100" value="80"></label></p>
-      <p><label><input data-follow type="checkbox" checked> Auto-scroll</label></p>
+      <p><label><input data-follow type="checkbox" checked> Auto-scroll / page turns</label></p>
       <div data-mixer style="max-height:40vh;overflow:auto"></div><p role="status"></p>`;
     this.body.querySelector('[data-play]').onclick = async () => {
       const player = _score_?.music?.player; if (!player) return;
