@@ -61,8 +61,8 @@ reordering, PDF merging/import and flattening are disabled for notation scores.
 Ordinary image drawing inherited from the Qt-free engine is incomplete; this
 first integration does not add support for arbitrary pre-existing score images.
 Playback supports play/pause/stop and part mixing, red noteheads, a smoothly moving
-red system-height cursor, and automatic scrolling/page turns. Paused seeking through
-the top toolbar or notehead taps is supported. Earlier sustained notes are not
+red system-height cursor, and automatic scrolling/page turns. Seeking through the top toolbar or notehead taps retains the previous playing/paused
+state. Dragging previews silently and resumes on release only if previously playing. Earlier sustained notes are not
 recreated after seeking; instrument and controller state is restored.
 
 The web/PWA, standalone HTML and browser extension contain the engine, fonts

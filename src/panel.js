@@ -3982,7 +3982,7 @@ class PlaybackPanel extends MusicPanel {
     this.elm = helm(`<section class="PlaybackBar" data-tag="PlaybackPanel" aria-label="Playback controls">
       <button data-play>Play</button>
       <label><input data-follow type="checkbox" checked> Auto-scroll</label>
-      <label class="PlaybackBar__master"><span>Master volume</span><input data-master type="range" min="0" max="100" value="80" aria-label="Master volume"></label>
+      <label class="PlaybackBar__master"><span>Volume</span><input data-master type="range" min="0" max="100" value="80" aria-label="Volume"></label>
       <button data-mixer-button aria-expanded="false">Mixer</button>
       <div class="PlaybackBar__seek"><button data-rewind aria-label="Go to beginning">|&lt;</button>
       <input data-seek type="range" min="0" max="0" step="0.001" value="0" aria-label="Playback position"><output>0:00 / 0:00</output></div>
@@ -4001,8 +4001,7 @@ class PlaybackPanel extends MusicPanel {
     this.body.querySelector('[data-master]').oninput = e => {
       player.setVolume(Number(e.target.value) / 100); this.music.owner.setDirty();
     };
-    this.body.querySelector('[data-seek]').oninput = e => player.seek(Number(e.target.value));
-    this.body.querySelector('[data-rewind]').onclick = () => player.seek(0);
+    this.unbindSeek = this.music.view.bindSeek(this.body.querySelector('[data-seek]'), this.body.querySelector('[data-rewind]'));
     this.body.querySelector('[data-close]').onclick = () => this.close();
     this.body.querySelector('[data-mixer-button]').onclick = () => {
       if (this.mixerDialog.open) this.mixerDialog.close();
@@ -4019,7 +4018,7 @@ class PlaybackPanel extends MusicPanel {
   }
   noteDown(e) {
     if (!e.isPrimary) { this.tap = null; return; }
-    if (e.button !== 0 || !this.music.playbackMode || this.music.player.state !== 'paused' || _score_?.music !== this.music) return;
+    if (e.button !== 0 || !this.music.playbackMode || !this.music.player.canSeek || _score_?.music !== this.music) return;
     const pg = e.target.pg || e.target.closest('.canvas-container')?.pg;
     if (!pg || pg.score.music !== this.music) return;
     const id = this.music.view.noteAt(e.clientX,e.clientY,pg.musicSvg);
@@ -4039,11 +4038,11 @@ class PlaybackPanel extends MusicPanel {
     if (this.music.playbackMode && player.state === 'stopped') { this.close(); return; }
     const clock = t => `${Math.floor(t/60)}:${String(Math.floor(t%60)).padStart(2,'0')}`;
     this.body.querySelector('[data-play]').textContent = player.state === 'playing' ? 'Pause' : player.state === 'loading' ? 'Loading…' : 'Play';
-    this.body.querySelector('[data-play]').disabled = this.music.owner.musicBusy || player.state === 'loading' || !player.timeline;
+    this.body.querySelector('[data-play]').disabled = this.music.owner.musicBusy || player.state === 'loading' || !player.timeline || !!player.scrub;
     this.body.querySelector('[data-follow]').checked = this.music.autoScroll;
     this.body.querySelector('[data-master]').value = player.volume*100;
     const seek = this.body.querySelector('[data-seek]'); seek.max = player.timeline?.duration || 0; seek.value = player.position;
-    seek.disabled = this.body.querySelector('[data-rewind]').disabled = player.state !== 'paused';
+    seek.disabled = this.body.querySelector('[data-rewind]').disabled = !player.canSeek;
     this.body.querySelector('output').textContent = `${clock(player.position)} / ${clock(player.timeline?.duration || 0)}`;
     this.body.querySelector('[role=status]').textContent = player.error || '';
     this.body.querySelector('[data-mixer-button]').setAttribute('aria-expanded',String(this.mixerDialog.open));
@@ -4076,7 +4075,7 @@ class PlaybackPanel extends MusicPanel {
   close() {
     if (this.closed) return;
     this.closed = true; this.music.pendingFollow = null; this.music.playbackMode = false; this.music.playbackPanel = null;
-    this.music.player.stop(); this.mixerDialog.close(); this.mixerDialog.remove(); this.elm.remove();
+    this.music.player.stop(); this.unbindSeek?.(); this.mixerDialog.close(); this.mixerDialog.remove(); this.elm.remove();
     this.destructor(); if (panels[this.cell.key] === this) delete panels[this.cell.key];
   }
 }

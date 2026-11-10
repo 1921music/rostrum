@@ -41,8 +41,9 @@ for(const layoutKey of ['book','horizontal','vertical'])test(`${layoutKey}: mode
  await expect.poll(()=>page.evaluate(()=>Number(_score_.numbers.pn))).toBe(2);
  expect(await page.evaluate(()=>_score_.music.player.position)).toBe(8.3);
  await bar.locator('[data-play]').click();await expect.poll(()=>page.evaluate(()=>_score_.music.player.state)).toBe('playing');
- await expect(bar.locator('[data-seek]')).toBeDisabled();await expect(bar.locator('[data-rewind]')).toBeDisabled();
- expect(await page.evaluate(()=>_score_.music.player.seek(0))).toBe(false);
+ await expect(bar.locator('[data-seek]')).toBeEnabled();await expect(bar.locator('[data-rewind]')).toBeEnabled();
+ expect(await page.evaluate(()=>_score_.music.player.seek(8.5))).toBe(true);
+ await expect.poll(()=>page.evaluate(()=>_score_.music.player.state)).toBe('playing');
  await bar.locator('[data-play]').click();await expect(bar.locator('[data-seek]')).toBeEnabled();
  await bar.locator('[data-close]').click();await expect(bar).toHaveCount(0);
  expect(await page.evaluate(()=>_score_.music.player.state)).toBe('stopped');
@@ -72,4 +73,47 @@ test('dragging the toolbar slider scrubs silently and reveals the destination',a
  const state=await page.evaluate(()=>{const p=_score_.music.player;return{position:p.position,state:p.state,worker:p.worker||null};});
  expect(state.state).toBe('paused');expect(state.worker).toBe(null);
  expect(state.position).toBeGreaterThan(10);expect(state.position).toBeLessThan(12);
+});
+
+
+for(const layoutKey of ['book','horizontal','vertical'])test(`${layoutKey}: playing seek controls and note taps preserve playback`,async({page})=>{
+ test.setTimeout(60000);
+ await page.evaluate(async({xml,layoutKey})=>{
+  _menu_.rings.layout.stash.active=layoutKey;
+  if(layoutKey!=='book')_menu_.rings.layout.cells[layoutKey].stash.pgShow=1;
+  await new _Score_().init('Local',null,'playing-seek.musicxml',new TextEncoder().encode(xml));
+  _menu_.notify('score/playback/up');
+ },{xml,layoutKey});
+ await page.evaluate(async()=>{await Promise.all(document.getAnimations().filter(a=>a.effect?.getComputedTiming().iterations!==Infinity).map(a=>a.finished.catch(()=>{})));});
+ const bar=page.locator('[data-tag="PlaybackPanel"]'),seek=bar.locator('[data-seek]');
+ await bar.locator('[data-play]').click();await expect.poll(()=>page.evaluate(()=>_score_.music.player.state)).toBe('playing');
+ await expect(seek).toBeEnabled();await expect(bar.locator('[data-rewind]')).toBeEnabled();
+ await expect(bar.getByLabel('Volume',{exact:true})).toBeVisible();
+ const note=await page.evaluate(()=>_score_.music.player.timeline.visual.notes.find(n=>n.start===1&&n.visit===0));
+ const head=page.locator(`[data-note-id="${note.id}"]`).first(),box=await head.boundingBox();
+ await page.mouse.click(box.x+box.width/2,box.y+box.height/2);
+ await expect.poll(()=>page.evaluate(()=>_score_.music.player.state)).toBe('playing');
+ const tapped=await page.evaluate(()=>({position:_score_.music.player.position,page:Number(_score_.numbers.pn)}));
+ expect(tapped.position).toBeGreaterThan(0.8);expect(tapped.position).toBeLessThan(1.5);expect(tapped.page).toBe(1);
+ await bar.locator('[data-rewind]').click();await expect.poll(()=>page.evaluate(()=>_score_.music.player.state)).toBe('playing');
+ expect(await page.evaluate(()=>_score_.music.player.position)).toBeLessThan(0.6);
+ const r=await seek.boundingBox();
+ await page.mouse.move(r.x+8,r.y+r.height/2);await page.mouse.down();
+ await page.mouse.move(r.x+r.width*.4,r.y+r.height/2,{steps:4});
+ await page.evaluate(()=>window.dispatchEvent(new Event('blur')));await page.mouse.up();
+ await expect.poll(()=>page.evaluate(()=>_score_.music.player.state)).toBe('playing');
+ expect(await page.evaluate(()=>_score_.music.player.position)).toBeLessThan(0.8);
+ await page.mouse.move(r.x+8,r.y+r.height/2);await page.mouse.down();
+ await page.mouse.move(r.x+r.width*.55,r.y+r.height/2,{steps:8});
+ const held=await page.evaluate(()=>{const p=_score_.music.player;return{state:p.state,time:p.position,sources:p.sources.size,worker:p.worker||null};});
+ expect(held.state).toBe('paused');expect(held.sources).toBe(0);expect(held.worker).toBe(null);
+ await page.waitForTimeout(100);expect(await page.evaluate(()=>_score_.music.player.position)).toBe(held.time);
+ await page.mouse.up();await expect.poll(()=>page.evaluate(()=>_score_.music.player.state)).toBe('playing');
+ await expect.poll(()=>page.evaluate(()=>Number(_score_.numbers.pn))).toBe(2);
+ expect(await page.evaluate(()=>_score_.music.player.position)).toBeGreaterThan(10);
+ await page.screenshot({path:`build/playing-seek-${layoutKey}.png`});
+ // Closing while a drag is held must cancel automatic resume.
+ await page.mouse.move(r.x+r.width*.55,r.y+r.height/2);await page.mouse.down();
+ await page.evaluate(()=>_panels_.playback.close());await page.mouse.up();await page.waitForTimeout(150);
+ expect(await page.evaluate(()=>_score_.music.player.state)).toBe('stopped');await expect(bar).toHaveCount(0);
 });
