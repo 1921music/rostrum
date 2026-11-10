@@ -1588,10 +1588,41 @@ class Score {
     }
   }
 
-  async followMusic(system) {
+  musicStartPosition(top = 0) {
+    const systems = this.music.player.timeline?.visual?.systems || [];
+    const pages = [...this.pgs].sort((a,b) => Number(this.pnOf(b)===Number(this.numbers.pn))-Number(this.pnOf(a)===Number(this.numbers.pn)));
+    for (const pg of pages) {
+      let fallback = null;
+      if (!pg.musicSvg?.isConnected) continue;
+      const rect=pg.musicSvg.getBoundingClientRect();
+      if (rect.right<=0 || rect.left>=innerWidth || rect.bottom<=top || rect.top>=innerHeight) continue;
+      const seen=new Set();
+      for (const system of systems.filter(s=>s.page===pg.mozPn-1)) {
+        if(seen.has(system.id)) continue; seen.add(system.id);
+        const y=rect.top+system.bounds[1]*rect.height, bottom=y+system.bounds[3]*rect.height;
+        if(bottom<=top || y>=innerHeight) continue;
+        const anchors=system.anchors || [];
+        let time=system.start;
+        const left=(Math.max(0,rect.left)+8-rect.left)/rect.width;
+        for(let i=0;i<anchors.length;i++) {
+          if(anchors[i][1]>=left) {
+            const a=anchors[Math.max(0,i-1)], b=anchors[i];
+            time=b[1]>a[1] && a[1]<left ? a[0]+(b[0]-a[0])*(left-a[1])/(b[1]-a[1]) : b[0];
+            break;
+          }
+        }
+        if(y>=top && y<innerHeight-24) return time;
+        if(fallback==null) fallback=time;
+      }
+      if(fallback!=null) return fallback;
+    }
+    return systems.find(s=>s.page===Number(this.numbers.pn)-1)?.start ?? 0;
+  }
+
+  async followMusic(system, force = false) {
     const music = this.music, layout = Layout.activeLayout;
     const serial = this.musicFollowSerial = (this.musicFollowSerial || 0) + 1;
-    if (!music?.autoScroll || this !== _score_ || layout?.score !== this) return;
+    if ((!music?.autoScroll && !force) || this !== _score_ || layout?.score !== this) return;
     const pn = system.page + 1;
     let pg = this.pgs.find(pg => pg.mozPn === pn);
     if (!pg) return;
@@ -1601,13 +1632,14 @@ class Score {
     // the layout's navigation so its sash/spread and page-number controls agree.
     if (Number(this.numbers.pn) !== pageNumber || !visible || visible.right < 24 || visible.left > innerWidth - 24 || visible.bottom < 24 || visible.top > innerHeight - 24)
       await layout.pgGoTo(pageNumber, false);
-    if (this.disposed || layout !== Layout.activeLayout || serial !== this.musicFollowSerial || music.player.state !== 'playing' || !music.autoScroll) return;
+    if (this.disposed || layout !== Layout.activeLayout || serial !== this.musicFollowSerial || (music.player.state !== 'playing' && !(force && music.player.state === 'paused')) || (!music.autoScroll && !force)) return;
     const rect = pg.musicSvg?.getBoundingClientRect();
     if (!rect?.width || !rect.height) return;
     const [x, y, w, h] = system.bounds;
+    const safeTop = Math.max(24, (music.playbackPanel?.elm.getBoundingClientRect().bottom || 0) + 8);
     const top = rect.top + y * rect.height, bottom = top + h * rect.height;
     const left = rect.left + x * rect.width, right = left + w * rect.width;
-    const dy = top < 24 || bottom > innerHeight - 24 ? 24 - top : 0;
+    const dy = top < safeTop || bottom > innerHeight - 24 ? safeTop - top : 0;
     const dx = left < 24 || right > innerWidth - 24 ? 24 - left : 0;
     if (dy) layout.elm.style.top = layout.elm.offsetTop + dy + 'px';
     if (dx) layout.elm.style.left = layout.elm.offsetLeft + dx + 'px';

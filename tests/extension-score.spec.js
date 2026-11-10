@@ -219,7 +219,7 @@ test('real MV3 extension renders, transposes, plays and saves scores offline wit
     await expect.poll(() => page.evaluate(() => _score_.musicBusy)).toBe(false);
     await page.evaluate(() => _menu_.notify('score/playback/up'));
     await expect(page.locator('[data-tag="PlaybackPanel"] [data-play]')).toHaveText('Play');
-    await expect(page.locator('[data-tag="PlaybackPanel"] [data-stop]')).toHaveText('Stop');
+    await expect(page.locator('[data-tag="PlaybackPanel"] [data-close]')).toHaveText('×');
     await page.locator('[data-tag="PlaybackPanel"] [data-play]').click();
     await expect.poll(() => page.evaluate(() => _score_.music.player.state)).toBe('playing');
     await expect.poll(() => page.evaluate(() => _score_.music.player.sources.size)).toBeGreaterThan(0);
@@ -231,7 +231,9 @@ test('real MV3 extension renders, transposes, plays and saves scores offline wit
     expect(workers.every(url => url.startsWith(origin + '/'))).toBe(true);
     await page.locator('[data-tag="PlaybackPanel"] [data-play]').click();
     await expect.poll(() => page.evaluate(() => _score_.music.player.state)).toBe('paused');
-    await page.locator('[data-tag="PlaybackPanel"] [data-stop]').click();
+    await page.locator('[data-tag="PlaybackPanel"] [data-seek]').evaluate(n=>{n.value='2';n.dispatchEvent(new Event('input',{bubbles:true}));});
+    expect(await page.evaluate(()=>_score_.music.player.position)).toBe(2);
+    await page.locator('[data-tag="PlaybackPanel"] [data-close]').click();
     await expect.poll(() => page.evaluate(() => _score_.music.player.state)).toBe('stopped');
     await expect(page.locator('.mscz-playing')).toHaveCount(0);
 

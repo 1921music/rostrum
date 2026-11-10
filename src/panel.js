@@ -3951,59 +3951,133 @@ class TransposePanel extends MusicPanel {
 }
 
 class PlaybackPanel extends MusicPanel {
+  static barCss = css('PlaybackBar', `
+    .PlaybackBar { position:fixed;top:4px;left:50%;transform:translateX(-50%);z-index:500;
+      width:min(calc(100% - 16px),max(66.666vw,760px));box-sizing:border-box;
+      padding:8px 46px 8px 8px;background:var(--panel-bg,#fff);color:var(--color-text,#222);
+      border:1px solid #aaa;border-radius:8px;box-shadow:0 2px 8px #0002;font:13px system-ui,sans-serif;
+      display:flex;flex-wrap:wrap;align-items:center;gap:8px; }
+    .PlaybackBar button { font:inherit;min-height:32px;white-space:nowrap;padding:3px 7px; }
+    .PlaybackBar label { display:flex;align-items:center;gap:4px;white-space:nowrap; }
+    .PlaybackBar [data-master] { width:82px;min-width:0; }
+    .PlaybackBar__seek { display:flex;align-items:center;gap:6px;flex:1 1 250px;min-width:210px; }
+    .PlaybackBar [data-seek] { width:100%;min-width:50px;flex:1; }
+    .PlaybackBar output { white-space:nowrap;font-variant-numeric:tabular-nums; }
+    .PlaybackBar [data-close] { position:absolute;right:6px;top:7px;width:32px; }
+    .PlaybackBar [role=status]:empty { display:none; }
+    .PlaybackMixer { position:fixed;top:100px;left:auto;right:12px;margin:0;z-index:510;
+      width:min(420px,calc(100vw - 28px));max-height:65dvh;overflow:auto;border:1px solid #aaa;
+      border-radius:8px;background:var(--panel-bg,#fff);color:var(--color-text,#222);font:14px system-ui,sans-serif; }
+    .PlaybackMixer__header { display:flex;justify-content:space-between;align-items:center; }
+    @media(max-width:500px) {
+      .PlaybackBar { font-size:12px;gap:6px; }
+      .PlaybackBar [data-master] { width:60px; }
+      .PlaybackBar__master span { font-size:11px; }
+      .PlaybackBar__seek { flex-basis:210px; }
+    }
+  `);
   constructor(cell) {
     super(cell);
-    this.body.classList.add('MusicPanel', 'PlaybackPanel');
-    this.body.innerHTML = `<div class="PlaybackPanel__transport"><button data-play>Play</button> <button data-stop>Stop</button> <output></output></div>
-      <p><label class="PlaybackPanel__master">Volume <input data-master type="range" min="0" max="100" value="80"></label></p>
-      <p><label><input data-follow type="checkbox" checked> Auto-scroll / page turns</label></p>
-      <div data-mixer style="max-height:40vh;overflow:auto"></div><p role="status"></p>`;
-    this.body.querySelector('[data-play]').onclick = async () => {
-      const player = _score_?.music?.player; if (!player) return;
-      try { if (player.state === 'playing') await player.pause(); else await player.play(); }
-      catch (error) { player.fail(error); }
-      this.sync();
+    this.music = _score_.music;
+    this.elm = helm(`<section class="PlaybackBar" data-tag="PlaybackPanel" aria-label="Playback controls">
+      <button data-play>Play</button>
+      <label><input data-follow type="checkbox" checked> Auto-scroll</label>
+      <label class="PlaybackBar__master"><span>Master volume</span><input data-master type="range" min="0" max="100" value="80" aria-label="Master volume"></label>
+      <button data-mixer-button aria-expanded="false">Mixer</button>
+      <div class="PlaybackBar__seek"><button data-rewind aria-label="Go to beginning">|&lt;</button>
+      <input data-seek type="range" min="0" max="0" step="0.001" value="0" aria-label="Playback position"><output>0:00 / 0:00</output></div>
+      <button data-close aria-label="Exit playback mode">×</button><span role="status"></span></section>`);
+    this.body = this.panel = this.elm;
+    this.mixerDialog = helm(`<dialog class="MusicPanel PlaybackMixer" data-tag="PlaybackMixer" aria-label="Mixer"><div class="PlaybackMixer__header">Mixer <button data-mixer-close aria-label="Close mixer">×</button></div><div data-mixer></div></dialog>`);
+    this.elm.addEventListener('pointerdown', e => { e.taken = true; e.stopPropagation(); });
+    this.mixerDialog.addEventListener('pointerdown', e => { e.taken = true; e.stopPropagation(); });
+    const player = this.music.player;
+    this.body.querySelector('[data-play]').onclick = () => {
+      (player.state === 'playing' ? player.pause() : player.play()).catch(error => player.fail(error));
     };
     this.body.querySelector('[data-follow]').onchange = e => {
-      if (!_score_?.music) return;
-      _score_.music.autoScroll = e.target.checked; _score_.music.view.resetFollow();
+      this.music.autoScroll = e.target.checked; this.music.view.resetFollow();
     };
-    this.body.querySelector('[data-stop]').onclick = () => _score_?.music?.player.stop();
     this.body.querySelector('[data-master]').oninput = e => {
-      _score_?.music?.player.setVolume(Number(e.target.value) / 100); _score_?.setDirty();
+      player.setVolume(Number(e.target.value) / 100); this.music.owner.setDirty();
     };
+    this.body.querySelector('[data-seek]').oninput = e => player.seek(Number(e.target.value));
+    this.body.querySelector('[data-rewind]').onclick = () => player.seek(0);
+    this.body.querySelector('[data-close]').onclick = () => this.close();
+    this.body.querySelector('[data-mixer-button]').onclick = () => {
+      if (this.mixerDialog.open) this.mixerDialog.close();
+      else { this.mixerDialog.style.top = this.elm.getBoundingClientRect().bottom + 8 + 'px'; this.mixerDialog.show(); }
+      this.sync();
+    };
+    this.mixerDialog.querySelector('[data-mixer-close]').onclick = () => { this.mixerDialog.close(); this.sync(); };
     this.listeners.push(listen(document, 'musicPlayback', () => this.sync()));
+    this.listeners.push(listen(document, 'pointerdown', e => this.noteDown(e), { capture:true }));
+    this.listeners.push(listen(document, ['pointerup','pointercancel'], e => this.noteUp(e), { capture:true }));
+    this.listeners.push(listen(document, 'pointermove', e => {
+      if (this.tap && e.pointerId === this.tap.pointerId && Math.hypot(e.clientX-this.tap.x,e.clientY-this.tap.y)>8) this.tap.moved = true;
+    }, { capture:true }));
+  }
+  noteDown(e) {
+    if (!e.isPrimary) { this.tap = null; return; }
+    if (e.button !== 0 || !this.music.playbackMode || this.music.player.state !== 'paused' || _score_?.music !== this.music) return;
+    const pg = e.target.pg || e.target.closest('.canvas-container')?.pg;
+    if (!pg || pg.score.music !== this.music) return;
+    const id = this.music.view.noteAt(e.clientX,e.clientY,pg.musicSvg);
+    if (!id) return;
+    this.tap = { id, pointerId:e.pointerId, x:e.clientX, y:e.clientY };
+    e.taken = true; e.preventDefault(); e.stopImmediatePropagation();
+  }
+  noteUp(e) {
+    if (!this.tap || this.tap.pointerId !== e.pointerId) return;
+    const tap = this.tap; this.tap = null;
+    e.taken = true; e.preventDefault(); e.stopImmediatePropagation();
+    if (e.type === 'pointerup' && !tap.moved && Math.hypot(e.clientX-tap.x,e.clientY-tap.y)<8) this.music.player.seekNote(tap.id);
   }
   sync() {
-    const player = _score_?.music?.player; if (!player) return;
-    this.body.querySelector('[data-follow]').checked = _score_.music.autoScroll;
-    const play = this.body.querySelector('[data-play]');
-    play.textContent = player.state === 'playing' ? 'Pause' : 'Play';
-    play.disabled = _score_.musicBusy || player.state === 'loading' || !player.timeline;
-    this.body.querySelector('output').textContent = `${Math.floor(player.position)} / ${Math.floor(player.timeline?.duration || 0)} s`;
+    if (this.closed) return;
+    const player = this.music.player;
+    if (this.music.playbackMode && player.state === 'stopped') { this.close(); return; }
+    const clock = t => `${Math.floor(t/60)}:${String(Math.floor(t%60)).padStart(2,'0')}`;
+    this.body.querySelector('[data-play]').textContent = player.state === 'playing' ? 'Pause' : player.state === 'loading' ? 'Loading…' : 'Play';
+    this.body.querySelector('[data-play]').disabled = this.music.owner.musicBusy || player.state === 'loading' || !player.timeline;
+    this.body.querySelector('[data-follow]').checked = this.music.autoScroll;
+    this.body.querySelector('[data-master]').value = player.volume*100;
+    const seek = this.body.querySelector('[data-seek]'); seek.max = player.timeline?.duration || 0; seek.value = player.position;
+    seek.disabled = this.body.querySelector('[data-rewind]').disabled = player.state !== 'paused';
+    this.body.querySelector('output').textContent = `${clock(player.position)} / ${clock(player.timeline?.duration || 0)}`;
     this.body.querySelector('[role=status]').textContent = player.error || '';
+    this.body.querySelector('[data-mixer-button]').setAttribute('aria-expanded',String(this.mixerDialog.open));
   }
   show() {
-    super.show();
-    const player = _score_?.music?.player;
-    if (player) this.body.querySelector('[data-master]').value = player.volume * 100;
-    const mixer = this.body.querySelector('[data-mixer]'); mixer.replaceChildren();
-    player?.timeline?.parts.forEach((part, i) => {
-      const row = document.createElement('div'), label = document.createElement('span');
-      row.className = 'PlaybackPanel__part'; label.className = 'PlaybackPanel__part-name';
-      label.textContent = part.name; row.append(label);
-      for (const [key, name] of [['volume', 'Volume'], ['pan', 'Pan'], ['mute', 'Mute'], ['solo', 'Solo']]) {
-        const control = document.createElement('input'), title = document.createElement('label');
-        const toggle = key === 'mute' || key === 'solo';
-        control.type = toggle ? 'checkbox' : 'range'; control.min = 0; control.max = 127;
-        control.setAttribute('aria-label', `${part.name} ${name}`);
-        if (toggle) control.checked = player.mixer[i][key]; else control.value = player.mixer[i][key];
-        control.oninput = () => { player.setMixer(i, { [key]: toggle ? control.checked : Number(control.value) }); _score_?.setDirty(); };
-        title.append(name, control); row.append(title);
+    if (!this.music.player.timeline || this.music.owner.musicBusy) { this.close(); return this; }
+    _menu_.activateCell(null,_menu_.rings.ink); _menu_.activateCell(null,_menu_.rings.page);
+    this.music.player.stop();
+    _body_.append(this.elm,this.mixerDialog);
+    this.music.playbackPanel = this; this.music.playbackMode = true;
+    this.music.player.cue(this.music.owner.musicStartPosition(this.elm.getBoundingClientRect().bottom));
+    const rows = this.mixerDialog.querySelector('[data-mixer]');
+    this.music.player.timeline.parts.forEach((part,i) => {
+      const row = document.createElement('div'), name = document.createElement('span');
+      row.className = 'PlaybackPanel__part'; name.className = 'PlaybackPanel__part-name'; name.textContent = part.name; row.append(name);
+      for (const [key,label] of [['volume','Volume'],['pan','Pan'],['mute','Mute'],['solo','Solo']]) {
+        const title=document.createElement('label'), input=document.createElement('input'), toggle=key==='mute'||key==='solo';
+        input.type=toggle?'checkbox':'range'; input.min=0; input.max=127; input.setAttribute('aria-label',`${part.name} ${label}`);
+        if(toggle) input.checked=this.music.player.mixer[i][key]; else input.value=this.music.player.mixer[i][key];
+        input.oninput=()=>{this.music.player.setMixer(i,{[key]:toggle?input.checked:Number(input.value)});this.music.owner.setDirty();};
+        title.append(label,input); row.append(title);
       }
-      mixer.append(row);
+      rows.append(row);
     });
     this.sync(); return this;
+  }
+  constrain() {}
+  setPosition() {}
+  hide() { this.close(); }
+  close() {
+    if (this.closed) return;
+    this.closed = true; this.music.pendingFollow = null; this.music.playbackMode = false; this.music.playbackPanel = null;
+    this.music.player.stop(); this.mixerDialog.close(); this.mixerDialog.remove(); this.elm.remove();
+    this.destructor(); if (panels[this.cell.key] === this) delete panels[this.cell.key];
   }
 }
 

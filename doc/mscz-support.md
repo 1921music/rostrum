@@ -61,7 +61,9 @@ reordering, PDF merging/import and flattening are disabled for notation scores.
 Ordinary image drawing inherited from the Qt-free engine is incomplete; this
 first integration does not add support for arbitrary pre-existing score images.
 Playback supports play/pause/stop and part mixing, red noteheads, a smoothly moving
-red system-height cursor, and automatic scrolling/page turns. Seeking is not supported.
+red system-height cursor, and automatic scrolling/page turns. Paused seeking through
+the top toolbar or notehead taps is supported. Earlier sustained notes are not
+recreated after seeking; instrument and controller state is restored.
 
 The web/PWA, standalone HTML and browser extension contain the engine, fonts
 and EAS GM audio bank. They do not require an audio service. The MV3 extension

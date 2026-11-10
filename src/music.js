@@ -47,8 +47,8 @@ class MusicDocument {
     document.autoScroll = true;
     document.view = new PlaybackView(document.player, {
       getPages: () => document.owner?.pgs?.map(pg => pg.musicSvg).filter(Boolean) || [],
-      onSystem: system => {
-        if (document.autoScroll) document.owner?.followMusic(system).catch(error => console.error(error));
+      onSystem: (system, { seeking = false } = {}) => {
+        if (document.autoScroll || seeking) document.follow(system, seeking);
       }
     });
     try {
@@ -59,6 +59,20 @@ class MusicDocument {
       document.transpose = 0;
       return document;
     } catch (error) { document.native.close(); throw error; }
+  }
+  follow(system, force) {
+    this.pendingFollow = { system, force };
+    if (this.following) return;
+    this.following = true;
+    (async () => {
+      try {
+        while (this.pendingFollow) {
+          const next = this.pendingFollow; this.pendingFollow = null;
+          await this.owner?.followMusic(next.system, next.force);
+        }
+      } catch (error) { console.error(error); }
+      finally { this.following = false; }
+    })();
   }
   refresh() { this.info = this.native.rostrumInfo(); this.numPages = this.info.pages.length; this.svgs = new Map(); }
   async getPage(pn) {
@@ -131,5 +145,5 @@ class MusicDocument {
       .reduce((best, a) => Math.abs(a.x - x) < Math.abs(best.x - x) ? a : best);
   }
   anchor(key, staff) { return this.info.anchors.find(a => a.key === key && a.staff === staff); }
-  async destroy() { this.view.destroy(); this.player.stop(); await this.player.context?.close(); this.native.close(); this.svgs.clear(); }
+  async destroy() { this.playbackPanel?.close(); this.view.destroy(); this.player.stop(); await this.player.context?.close(); this.native.close(); this.svgs.clear(); }
 }

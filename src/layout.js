@@ -1183,7 +1183,7 @@ class BookLayout extends Layout {
     this.pagerLeft.build();
     this.pagerRight.build();
     // No page flip while the layout flies out of its cell: the two together stutter.
-    this.pgGoTo(_score_.numbers.pn, !animated);
+    await this.pgGoTo(_score_.numbers.pn, !animated);
     if(!animated) return;
 
     // 

@@ -463,13 +463,19 @@ class Menu {
     };
 
     this.listen("score/up", () => this.activateRing(rings.score));
-    this.listen(['score/transpose/up', 'score/playback/up'], cell => {
+    this.listen('score/transpose/up', cell => {
       if (!_score_?.music) return;
-      const panel = panels[cell.name + 'Panel'].get(cell);
+      const panel = panels.TransposePanel.get(cell);
       panel.show(); panel.setPosition(this.grip);
     });
-    this.listen(['score/transpose/out', 'score/playback/out'], cell => {
-      if (_score_?.music) this.openPanel(cell);
+    this.listen('score/transpose/out', cell => { if (_score_?.music) this.openPanel(cell); });
+    this.listen('score/playback/up', cell => {
+      if (!_score_?.music) return;
+      if (panels.playback) panels.playback.close();
+      else panels.PlaybackPanel.get(cell).show();
+    });
+    this.listen('score/playback/out', cell => {
+      if (_score_?.music && !panels.playback) panels.PlaybackPanel.get(cell).show();
     });
 
     this.listen("score/save/up", async (cell) => {
