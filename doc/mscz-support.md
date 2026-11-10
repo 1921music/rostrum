@@ -71,11 +71,28 @@ data: script modules or Blob script workers. No additional host permissions are 
 
 ## Building the engine
 
-`engine/` is an independent fork of mscz_webviewer, including its original
+`engine/` is a Git submodule of `https://github.com/1921music/mscz_webviewer`,
+pinned to a tested commit and including its original
 licenses and vendored source. Its own `.mise.toml` declares Emscripten, CMake,
 Ninja, Python and Node. The normal Rostrum build uses the checked-in generated
 `lib/score-engine-data.js` and generated modules under `lib/score-engine/`; it
 does not require WSL or a C++ compiler.
+
+Initialize it after cloning Rostrum (or use `git clone --recurse-submodules`):
+
+```sh
+git submodule update --init --recursive
+```
+
+The standalone viewer keeps its own UI and tests. Shared engine fixes and the
+opt-in Rostrum annotation/save APIs are maintained in mscz_webviewer rather than
+patched in Rostrum. To edit the engine, create a branch inside `engine/` (a
+submodule normally checks out a detached HEAD), or work in a separate clone.
+Commit and push engine changes there first; then check out that commit in
+`engine/`, regenerate the assets below, and commit the updated `engine` pointer
+and generated assets together in Rostrum. The pinned commit must be reachable
+from the shared remote so a fresh recursive clone can reproduce it. Updating
+mscz_webviewer does not automatically update Rostrum's pinned engine.
 
 After changing engine sources, run in a WSL environment with the pinned tools:
 
@@ -89,7 +106,19 @@ mise exec -- python build.py --podium
 mise exec -- npx playwright test tests/music-score.spec.js
 ```
 
-Commit both the regenerated payload and extension modules with engine changes.
+Commit the updated submodule pointer, regenerated payload and extension modules
+together. Run the standalone viewer browser suite against the same engine build
+before updating Rostrum:
+
+```sh
+cd engine
+MSCZ_WEB_DIR=/absolute/path/to/rostrum-wasm/web MSCZ_PLAYBACK=EAS mise exec -- npm run test:playback
+cd ..
+```
+
+Install the submodule's JavaScript test dependencies with `mise exec -- npm install`
+inside `engine/` before its first browser test run.
+
 The browser tests
 block unexpected external requests and cover MusicXML/MXL conversion, SVG and
 text restoration, original-key saving, transposition, playback, mixer settings,

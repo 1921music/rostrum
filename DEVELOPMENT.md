@@ -13,6 +13,7 @@ Install the pinned core toolchain and development dependencies without activatin
 mise in the shell:
 
 ```bash
+git submodule update --init --recursive
 mise install
 mise exec -- python -m pip install -r requirements-dev.txt
 mise exec -- npm install
@@ -41,7 +42,7 @@ Navigate to `https://localhost:9876/pod.html` to use the application.
 
 ### Build System
 
-MSCZ/MusicXML integration and rebuilding its vendored WASM engine are described
+MSCZ/MusicXML integration and rebuilding its submodule-based WASM engine are described
 in [doc/mscz-support.md](doc/mscz-support.md). The regular build uses the
 checked-in engine payload and requires no C++ toolchain.
 
