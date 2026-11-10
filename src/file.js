@@ -246,7 +246,6 @@ class FileSrc
 class FileSrc {
   static refs = null;
 
-  static rememberLocal(file) { return FileSrc.get(Score.sources.local).remember(file); }
   static clearLocalRecent() { return FileSrc.get(Score.sources.local).clearRecent(); }
 
   // ref is string or singleton instance
@@ -345,25 +344,20 @@ class FileSrc {
     const nativeHandle = !score.music || /\.mscz$/i.test(score.music.name) || score.music.savedAsMscz;
     let handle = score.name === score.saveName && nativeHandle
       && (!score.fileHandle?.name || score.fileHandle.name === score.saveName) ? score.fileHandle || null : null;
-    if (!handle && src instanceof LocalSrc && src.getFileHandle) {
-      try {
-        handle = await src.getFileHandle(score.saveName);
-        score.fileHandle = handle; // remember for next save
-      } catch (error) {
-        if (error.name == 'AbortError') return; // User cancelled
-        throw error;
-      }
-    }
 
     _shade_.show("Saving file");
     // Unlike openActiveScore (i.e. revert), we do not prompt user
     // to save: this seems like a more natural ui experience.
     return new Promise(async (accept, reject) => {
       try {
-        let data = await score.toFile();
-        const saved = await src.putFile(score.path, score.saveName, data, handle);
+        const pendingData = score.toFile();
+        const saved = await src.putFile(score.path, score.saveName, src instanceof LocalSrc ? pendingData : await pendingData, handle);
+        const data = await pendingData;
+        if (src instanceof LocalSrc) {
+          score.fileHandle = saved.fileHandle;
+          score.path = saved.path;
+        }
         score.update({ name: saved?.name || score.saveName });
-        if (src instanceof LocalSrc) await src.remember(new File([data], score.name, { lastModified: saved?.modified || Date.now() }));
         if (score.music) score.music.savedAsMscz = true;
         Score.visit(score, { size: data.length, modified: Date.now() });
         score.setDirty(false);
@@ -402,159 +396,140 @@ class FileSrc {
 
 class LocalSrc extends FileSrc {
   source = Score.sources.local;
-  recentFiles = new Map();
+  handles = new Map();
+  nativeUnavailable = false;
+
+  get supported() { return window._localFs_.supported && !this.nativeUnavailable; }
 
   async recentStore(mode, run) {
-    const open = indexedDB.open('rostrum-local-recent', 1);
-    open.onupgradeneeded = () => open.result.createObjectStore('files', { keyPath: 'name' });
+    const open = indexedDB.open('rostrum-local-recent', 2);
+    open.onupgradeneeded = () => {
+      // Version 1 held snapshots. They must never be reopened as the original.
+      if (open.result.objectStoreNames.contains('files')) open.result.deleteObjectStore('files');
+      if (!open.result.objectStoreNames.contains('handles')) open.result.createObjectStore('handles', { keyPath: 'id' });
+    };
     const db = await idbRequest(open);
     try {
-      const transaction = db.transaction('files', mode);
+      const transaction = db.transaction('handles', mode);
       const done = new Promise((resolve, reject) => {
         transaction.oncomplete = resolve;
         transaction.onabort = () => reject(transaction.error || new Error('Recent storage failed'));
         transaction.onerror = () => reject(transaction.error);
       });
-      const [result] = await Promise.all([run(transaction.objectStore('files')), done]);
+      const [result] = await Promise.all([run(transaction.objectStore('handles')), done]);
       return result;
     } finally { db.close(); }
   }
 
-  async remember(file) {
-    this.recentFiles.delete(file.name);
-    this.recentFiles.set(file.name, file);
-    while (this.recentFiles.size > 20) this.recentFiles.delete(this.recentFiles.keys().next().value);
+  async records() {
+    const records = await this.recentStore('readonly', store => idbRequest(store.getAll()));
+    for (const record of records) if (!this.handles.has(record.id)) this.handles.set(record.id, record.handle);
+    return records;
+  }
+
+  async getHandle(id) {
+    // Recent renders preload handles, keeping permission requests on the click's
+    // activation rather than waiting for another IndexedDB round trip.
+    if (this.supported && id && this.handles.has(id)) return this.handles.get(id);
+    // Also upgrades the old snapshot database in fallback browsers.
+    await this.records().catch(() => {});
+    return this.supported && id ? this.handles.get(id) || null : null;
+  }
+
+  async remember(file, handle = file.handle) {
+    try { await this.records(); } catch { /* Session-only access remains usable. */ }
+    if (!handle) return null;
+    let id;
+    for (const [key, saved] of this.handles) {
+      try { if (saved === handle || await saved.isSameEntry(handle)) { id = key; break; } } catch {}
+    }
+    id ||= crypto.randomUUID();
+    this.handles.set(id, handle);
     try {
       await this.recentStore('readwrite', async store => {
-        await idbRequest(store.put({ name: file.name, file, visited: Date.now() }));
+        await idbRequest(store.put({ id, name: file.name, handle, visited: Date.now() }));
         const entries = await idbRequest(store.getAll());
-        for (const entry of entries.sort((a, b) => b.visited - a.visited).slice(20)) store.delete(entry.name);
+        for (const entry of entries.sort((a, b) => b.visited - a.visited).slice(20)) {
+          store.delete(entry.id); this.handles.delete(entry.id);
+        }
       });
     } catch (error) {
-      console.warn('Could not persist local Recent file', error);
-      toast('Local Recent is available only until this tab is closed.');
+      console.warn('Could not persist local file handle', error);
+      toast('Recent file access is available only until this tab is closed.');
     }
+    return id;
   }
 
   async clearRecent() {
-    this.recentFiles.clear();
+    this.handles.clear();
     await this.recentStore('readwrite', store => idbRequest(store.clear()));
   }
 
+  async verifyPermission(handle, mode = 'read') {
+    if (!handle.queryPermission) return;
+    if (await handle.queryPermission({ mode }) === 'granted') return;
+    if (await handle.requestPermission({ mode }) !== 'granted')
+      throw new Error('Access to this file was not granted. Open it again from Local.', { cause: 'fileSrc' });
+  }
+
+  options(mode) {
+    return mode === 'copy'
+      ? [{ description: 'Images', mimeTypes: ['image/jpeg', 'image/png'], extensions: ['.jpg', '.jpeg', '.png'] }]
+      : mode === 'merge' ? [{ description: 'PDF scores', mimeTypes: ['application/pdf'], extensions: ['.pdf'] }]
+      : [{ description: 'Scores', mimeTypes: ['application/pdf', 'application/octet-stream'], extensions: ['.pdf', '.mscz', '.mxl', '.musicxml', '.xml'] }];
+  }
+
+  async pickFile(mode) {
+    try {
+      return await (this.supported ? window._localFs_.fileOpen : window._localFs_.fileOpenLegacy)(this.options(mode));
+    } catch (error) {
+      // A present API can still be forbidden, e.g. in an opaque file:// origin.
+      if (error.name !== 'SecurityError') throw error;
+      this.nativeUnavailable = true;
+      return window._localFs_.fileOpenLegacy(this.options(mode));
+    }
+  }
+
   async getFile(path, name, mode) {
-    // Recent stores a local copy, since an <input type=file> grants no reusable
-    // path or file handle. Never turn a Recent click into a different file picker.
+    let file, handle;
     if (name) {
-      let file = this.recentFiles.get(name);
-      if (!file) file = (await this.recentStore('readonly', store => idbRequest(store.get(name))))?.file;
-      if (!file) throw new Error('This older Recent entry has no local copy. Open the file once from the Local tab.', { cause: 'fileSrc' });
-      return { path: null, name: file.name, data: await file.arrayBuffer(), size: file.size, modified: file.lastModified };
+      handle = await this.getHandle(path);
+      if (!handle) throw new Error('This file has no reusable access. Open it again from Local.', { cause: 'fileSrc' });
+      await this.verifyPermission(handle);
+      try { file = await handle.getFile(); }
+      catch (error) {
+        if (error.name !== 'NotFoundError') throw error;
+        throw new Error('The original file is no longer available. Open it again from Local.', { cause: 'fileSrc' });
+      }
+    } else {
+      file = await this.pickFile(mode);
+      handle = file.handle;
     }
-    if (window.showOpenFilePicker) {
-      let types = mode == "copy"
-        ? [{ description: "Image Files", accept: { "image/jpeg": [".jpg", ".jpeg"], "image/png": [".png"] } }]
-        : mode === 'merge' ? [{ description: "PDF Files", accept: { "application/pdf": [".pdf"] } }]
-        : [{ description: "Scores", accept: { "application/pdf": [".pdf"], "application/octet-stream": [".mscz", ".mxl", ".musicxml", ".xml"] } }];
-      let [handle] = await showOpenFilePicker({ types });
-      let file = await handle.getFile();
-      await checkFileSize(file.name, file.size);
-      let data = await file.arrayBuffer();
-      await this.remember(file);
-      return { path: null, name: file.name, data: data, created: null, modified: file.lastModified, size: data.byteLength, fileHandle: handle };
-    }
-    return new Promise((accept, reject) => {
-      let input = helm('<input type="file" style="display:hidden;"></input>');
-      input.accept = mode == "copy" ? "image/jpeg, image/png" : mode === 'merge' ? '.pdf' : ".pdf,.mscz,.mxl,.musicxml,.xml";
-      _body_.append(input);
-      listen(
-        input,
-        ["change", "cancel"],
-        async (e) => {
-          input.remove();
-          if (e.type == "cancel") return reject(new Error("", { cause: "cancelled" }));
-          let file = e.target.files[0];
-          try {
-            await checkFileSize(file.name, file.size);
-          }
-          catch (error) {
-            return reject(error);
-          }
-          let data = await file.arrayBuffer();
-          await this.remember(file);
-          return accept({ path: null, name: file.name, data: data, created: null, modified: file.lastModified, size: data.byteLength });
-        },
-        { once: true }
-      );
-      input.click();
-    });
+    await checkFileSize(file.name, file.size);
+    const id = await this.remember(file, handle);
+    return { path: id, name: file.name, data: await file.arrayBuffer(), size: file.size,
+      modified: file.lastModified, fileHandle: handle || null };
   }
 
   async putFile(path, name, data, handle = null) {
-    if (window.showSaveFilePicker) {
-      // Use "experimental" file system access api, if supported:
-      if (!handle) {
-        let options = {
-          suggestedName: name,
-          types: [
-            {
-              description: "Rostrum Files",
-              accept: {
-                [name.toLowerCase().endsWith('.mscz') ? 'application/x-musescore' : 'application/pdf']: [name.toLowerCase().endsWith('.mscz') ? '.mscz' : '.pdf'],
-              },
-            },
-          ],
-        };
-        handle = await showSaveFilePicker(options);
-      }
-      let writeable = await handle.createWritable();
-      await writeable.write(data);
-      await writeable.close();
-      let file = await handle.getFile();
-      return { name: file.name, modified: file.lastModified };
-    } else {
-      // Try Web Share API first (works on iOS with "Save to Files" option)
-      let file = new File([data], name, { type: name.toLowerCase().endsWith('.mscz') ? 'application/x-musescore' : 'application/pdf' });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        try {
-          await navigator.share({ files: [file] });
-          return { name: name, modified: Date.now() };
-        } catch (e) {
-          if (e.name == 'AbortError') throw e; // User cancelled
-          // Fall through to download approach
-        }
-      }
-      // Fallback: download approach (Android Chrome, Firefox)
-      let blob = new Blob([data], { type: file.type });
-      let url = URL.createObjectURL(blob);
-      let link = document.createElement('a');
-      link.download = name;
-      link.href = url;
-      link.target = '_self';
-      link.rel = 'noopener';
-      link.style.display = 'none';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      setTimeout(() => URL.revokeObjectURL(url), 3000);
-      return { name: name, modified: Date.now() };
+    const options = { fileName: name, mimeTypes: [name.toLowerCase().endsWith('.mscz') ? 'application/x-musescore' : 'application/pdf'],
+      extensions: [name.toLowerCase().endsWith('.mscz') ? '.mscz' : '.pdf'], description: 'Scores' };
+    // The picker must run before export finishes, while the click is active.
+    const blob = Promise.resolve(data).then(bytes => new Blob([bytes], {
+      type: name.toLowerCase().endsWith('.mscz') ? 'application/x-musescore' : 'application/pdf',
+    }));
+    blob.catch(() => {}); // Export can fail while the native picker is still open.
+    let savedHandle;
+    try {
+      savedHandle = await (this.supported ? window._localFs_.fileSave : window._localFs_.fileSaveLegacy)(blob, options, handle, true);
+    } catch (error) {
+      if (error.name !== 'SecurityError') throw error;
+      this.nativeUnavailable = true;
+      savedHandle = await window._localFs_.fileSaveLegacy(blob, options);
     }
-  }
-
-  async getFileHandle(name) {
-    // Get a file handle immediately (during user gesture) for later writing
-    if (!window.showSaveFilePicker) return null;
-    let options = {
-      suggestedName: name,
-      types: [
-        {
-          description: "Rostrum Files",
-          accept: {
-            [name.toLowerCase().endsWith('.mscz') ? 'application/x-musescore' : 'application/pdf']: [name.toLowerCase().endsWith('.mscz') ? '.mscz' : '.pdf'],
-          },
-        },
-      ],
-    };
-    return await showSaveFilePicker(options);
+    const file = savedHandle ? await savedHandle.getFile() : new File([], name);
+    return { name: file.name, modified: file.lastModified,
+      path: await this.remember(file, savedHandle), fileHandle: savedHandle || null };
   }
 }
 
@@ -2449,9 +2424,6 @@ class LocalFileView {
     this.source = Score.sources.local;
     this.src = FileSrc.get("Local");
 
-    // Check if we should auto-open picker (1-click mode)
-    let tabMode = localStorage.getItem('podium-local-tab-mode') || '2-click'
-
     if (this.mode == "save") {
       this.elm = helm(`
         <div class="Local">
@@ -2470,89 +2442,46 @@ class LocalFileView {
         <div class="Local__line">${_mobile_ ? "" : "<b>Drop Score File</b>"}</div>
      </div>`);
 
-    // Add input elm after DOM creation
-    let inputElm = document.createElement('input');
-    inputElm.type = 'file';
-    inputElm.setAttribute('data-tag', 'dialog');
-    inputElm.draggable = true;
-    inputElm.style.visibility = 'hidden';
-    // the input element's "accept" attribute is different for "copy" and "open" modes.
-    inputElm.accept = this.mode == "copy" ? "image/jpeg, image/png" : this.mode === 'merge' ? '.pdf' : ".pdf,.mscz,.mxl,.musicxml,.xml";
-    this.elm.appendChild(inputElm);
-
-
-    Object.assign(this, dataIndex("tag", this.elm));
-
-    listen(this.local, "dragover", (e) => e.preventDefault());
-
-    listen(this.local, ["cancel", "click", "drop", "change"], async (e) => {
+    Object.assign(this, dataIndex('tag', this.elm));
+    listen(this.local, 'dragover', e => e.preventDefault());
+    listen(this.local, 'click', () => this.showPicker());
+    listen(this.local, 'drop', async e => {
       e.preventDefault();
-      let file = null;
-      switch (e.type) {
-        case "click":
-          localStorage.setItem('podium-local-tab-mode', '1-click');
-          this.showPicker();
-          break;
-        case "cancel":
-          localStorage.setItem('podium-local-tab-mode', '2-click');
-          break;
-        case "drop":
-          file = e.dataTransfer.items[0].getAsFile();
-          break;
-        case "change":
-          file = e.target.files[0];
-          e.target.value = null; // required to be able to reload same file
-          break;
-      }
-      if (file) {
-        // visitUpdate is used as 2nd argument to Score.visit. In it, we set created: to 0,
-        // because browser api doesn't give us a creation date on the file object
-        let visitUpdate = { size: file.size, created: 0, modified: file.lastModified };
-        if (this.mode == "copy") {
-          await _menu_.setPasteObj(await bytesToBase64DataUrl(await file.arrayBuffer(), file.type), file.type);
-          Score.visit({ source:Score.sources.local, name:file.name, path:"n/a"}, visitUpdate);
-          toast("File opened");
-        }
-        else if (this.mode == "merge") {
-          let data = await checkMergePdf(await file.arrayBuffer());
-          if (!data) return;
-          activateMerge(data);
-        }
-        else {
-          if(await checkUnsaved()) {
-            try {
-              await FileSrc.rememberLocal(file);
-              let score = await new Score().init(Score.sources.local, null, file.name, await file.arrayBuffer());
-              Score.visit(score, visitUpdate);
-              toast("File opened");
-            } catch (error) {
-              if (!error.handled) dialog(`Error opening file <i translate="no">${escapeHtml(file.name)}</i><br>${escapeHtml(error.message || error)}`);
-            }
-          }
-        }
-        this.panel.hide();
-      }
+      try {
+        const item = e.dataTransfer.items[0];
+        const handle = item.getAsFileSystemHandle ? await item.getAsFileSystemHandle().catch(() => null) : null;
+        const file = handle?.kind === 'file' ? await handle.getFile() : item.getAsFile();
+        if (file) { file.handle = handle?.kind === 'file' ? handle : null; await this.openFile(file); }
+      } catch (error) { errDialog(error, 'Error opening dropped file.'); }
     });
   }
 
-  async select() {
-    // The picker will "auto trigger" when tab is selected iff we're in
-    // 1-click "mode". The mode is remembered based on user's previous action.
-    let tabMode = localStorage.getItem('podium-local-tab-mode') || '2-click';
+  select() {} // Picking always starts from an explicit click, never from Recent.
 
-    if (tabMode == '1-click' && this.mode != 'save') {
-      // Auto-trigger picker for open mode
-      delay(5, () => this.showPicker());
-    }
+  async showPicker() {
+    try { await this.openFile(await this.src.pickFile(this.mode)); }
+    catch (error) { if (error.name !== 'AbortError') errDialog(error, 'Error opening local file.'); }
   }
 
-  showPicker() {
-    // Open the native file picker. It requires the transient activation of a user
-    // gesture, which a browser (notably Safari) may consider expired by the time a
-    // deferred call runs (see select()). Then nothing opens; the user can still tap
-    // to pick, so that's not an error. (Monkey seed 1612, WebKit.)
-    try { this.dialog.showPicker(); }
-    catch (err) { if (err.name != "NotAllowedError" && err.name != "InvalidStateError") throw err; }
+  async openFile(file) {
+    await checkFileSize(file.name, file.size);
+    const visitUpdate = { size: file.size, created: 0, modified: file.lastModified };
+    if (this.mode === 'copy') {
+      await _menu_.setPasteObj(await bytesToBase64DataUrl(await file.arrayBuffer(), file.type), file.type);
+      Score.visit({ source: this.source, name: file.name, path: await this.src.remember(file) }, visitUpdate);
+    } else if (this.mode === 'merge') {
+      const data = await checkMergePdf(await file.arrayBuffer());
+      if (!data) return;
+      activateMerge(data);
+    } else {
+      if (!await checkUnsaved()) return;
+      const path = await this.src.remember(file);
+      const score = await new Score().init(this.source, path, file.name, await file.arrayBuffer());
+      score.fileHandle = file.handle || null;
+      Score.visit(score, visitUpdate);
+      toast('File opened');
+    }
+    this.panel.hide();
   }
 
   async putFile() {
@@ -2561,17 +2490,13 @@ class LocalFileView {
       _shade_.show("Saving file");
       _shade_.onCancel = () => { throw new Error() };
 
-      score.source = Score.sources.local;
-      let handle = await this.src.getFileHandle(score.saveName);
-      let data = await score.toFile();
+      const pendingData = score.toFile();
 
-      // Get file handle. MUST be called from a user gesture context.
-      // Although toPdf is async, it usually completes quickly enough to 
-      // preserve the gesture for the file picker.
-      let { name, modified } = await this.src.putFile(score.path, score.saveName, data, handle);
-      await FileSrc.rememberLocal(new File([data], name, { lastModified: modified }));
-      score.fileHandle = handle; // remember for future quick-saves
-      score.update({ source: this.source, name: name, path: null });
+      // Pass the pending export through so the library starts the picker now.
+      const { name, modified, fileHandle, path } = await this.src.putFile(null, score.saveName, pendingData);
+      const data = await pendingData;
+      score.fileHandle = fileHandle;
+      score.update({ source: this.source, name, path });
       if (score.music) score.music.savedAsMscz = true;
       Score.visit(score, { size: data.length, modified: modified });
       score.setDirty(false);
@@ -2586,10 +2511,9 @@ class LocalFileView {
                 _shade_.show("Saving original file");
                 let data = error.originalData;
                 // Since toPdf failed, we never got a handle. Request one now.
-                let handle = await this.src.getFileHandle(score.name);
-                let { name, modified } = await this.src.putFile(score.path, score.name, data, handle);
-                score.fileHandle = handle;
-                score.update({ source: this.source, name: name, path: null });
+                const { name, modified, fileHandle, path } = await this.src.putFile(null, score.name, data);
+                score.fileHandle = fileHandle;
+                score.update({ source: this.source, name, path });
                 Score.visit(score, { size: data.length, modified: modified });
                 score.setDirty(false);
                 toast("Original file saved");
@@ -2668,6 +2592,11 @@ class FileListView {
       margin:.5em;
       padding:.5em;
       border-radius: var(--borderRadius);
+    }
+    .Flv-list__file[aria-disabled="true"] {
+      opacity:.45;
+      filter:grayscale(1);
+      cursor:default;
     }
     .Flv-list__file-header {
       display:flex;
@@ -2813,11 +2742,12 @@ class FileListView {
     });
   }
 
-  select() {
+  async select() {
+    const epoch = this.selectEpoch = (this.selectEpoch || 0) + 1;
     clearChildren(this.flvList);
-    JSON.parse(localStorage.getItem("recent") || "[]").forEach(async (obj, index) => {
-      if (this.acceptExt(obj.name)) this.flvList.append(await this.makeFileElm(obj));
-    });
+    const items = await Promise.all(JSON.parse(localStorage.getItem('recent') || '[]')
+      .filter(obj => this.acceptExt(obj.name)).map(obj => this.makeFileElm(obj)));
+    if (this.selectEpoch === epoch) this.flvList.append(...items);
   }
 
   refresh() {}
@@ -2863,6 +2793,10 @@ class FileListView {
            </div>
        </div>`);
     elm.style.background = color;
+    if (!isDir && source === Score.sources.local && !await FileSrc.get(source).getHandle(path)) {
+      elm.setAttribute('aria-disabled', 'true');
+      elm.title = 'No reusable file access. Open this file again from Local.';
+    }
     return elm;
   }
 
@@ -2943,6 +2877,7 @@ class FileListView {
         return ; 
       case "Enter": // open selection
         if(this.keyState.fileElm) {
+          if (this.keyState.fileElm.getAttribute('aria-disabled') === 'true') return;
           let { source, name, path, dir } = this.keyState.fileElm.dataset;
           if (dir && path !=null && name) this.getDir(path, name); // need !=null because path can be ""
           else if(source && path !=null && name) this.getFile(source, path, name) ;
@@ -2956,7 +2891,8 @@ class FileListView {
         let isNormal = /^[a-zA-Z0-9 .]$/.test(e.key) ; // normal key, i.e. not a navigational key
         if(isNormal) this.keyState.keys += e.key;
         let names = {}; // maps each file/directory name to containing fileElm
-        Array.from(sash.children).forEach((child) => names[child.dataset.name] = child) ;
+        Array.from(sash.children).filter(child => child.getAttribute('aria-disabled') !== 'true')
+          .forEach((child) => names[child.dataset.name] = child) ;
         let match = Object.keys(names).find((str) => { return new RegExp(this.keyState.keys.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), "i").test(str);}) ;
         if(match) {
           let fileElm = names[match] ;
@@ -2998,6 +2934,7 @@ class FileListView {
         }
         let fileElm = e.target.closest(".Flv-list__file");
         if (!fileElm) return;
+        if (fileElm.getAttribute('aria-disabled') === 'true') return;
         fileElm.classList.add("Flv-list__item-selected");
         let { source, name, path, dir } = fileElm.dataset;
         let tag = e.target.dataset.tag;

@@ -27,6 +27,7 @@ Run project tools with `mise exec --`; this repository does not use
 Start the HTTPS development server:
 
 ```bash
+mise exec -- node build_browser_fs.mjs
 mise exec -- python serve.py
 ```
 
@@ -89,6 +90,10 @@ is run with `emcc` available and the extension is rebuilt/reloaded.
 | `mise exec -- python build.py --clean` | Clean build artifacts |
 
 The build system creates a single-file distribution at `build/podium.html` that includes all dependencies, assets, and source code inline.
+Packaged builds automatically bundle the pinned browser-fs-access dependency
+with esbuild, including both native and fallback paths and its license. No CDN
+or dynamic module download is needed. `npm test` also builds this adapter before
+running browser tests; direct source development uses the command shown above.
 
 #### Static-host deployment
 

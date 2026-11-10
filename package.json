@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "scripts": {
-    "pretest": "python build.py --font",
+    "pretest": "node build_browser_fs.mjs && python build.py --font",
     "test": "playwright test",
     "test:headed": "playwright test --headed",
     "test:extension": "python build.py --extension && playwright test tests/extension-score.spec.js",
@@ -11,6 +11,10 @@
     "build:extension": "python build.py --extension"
   },
   "devDependencies": {
-    "@playwright/test": "1.62.0"
+    "@playwright/test": "1.62.0",
+    "esbuild": "0.28.2"
+  },
+  "dependencies": {
+    "browser-fs-access": "0.38.0"
   }
 }

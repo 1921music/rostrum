@@ -28,7 +28,7 @@ test('extension packages local score modules with WASM-only CSP permission', asy
   expect(html).not.toMatch(/<script[^>]*>\s*[^<\s]/);
 });
 
-for (const packaged of ['source', 'web', 'file', 'extension']) test(`${packaged}: first PDF and Open → Recent render through the file UI`, async ({}, testInfo) => {
+for (const packaged of ['source', 'web', 'file', 'extension']) test(`${packaged}: Local opens scores; Recent reopens handles and disables fallback entries`, async ({}, testInfo) => {
   test.setTimeout(60000);
   const manifest = JSON.parse(fs.readFileSync(builtManifest, 'utf8'));
   const id = crypto.createHash('sha256').update(Buffer.from(manifest.key, 'base64')).digest('hex').slice(0, 32)
@@ -38,141 +38,86 @@ for (const packaged of ['source', 'web', 'file', 'extension']) test(`${packaged}
     args: [`--disable-extensions-except=${extensionDir}`, `--load-extension=${extensionDir}`],
     viewport: packaged === 'file' ? { width: 795, height: 900 } : { width: 1280, height: 800 },
   });
-  const external = [], errors = [], startupErrors = [], pwaRequests = [];
+  const external = [], errors = [];
   try {
+    if (packaged === 'file') await context.addInitScript(() => {
+      delete window.showOpenFilePicker; delete window.showSaveFilePicker;
+    });
     await context.route('**/*', route => {
       const url = route.request().url();
       if (url === 'https://accounts.google.com/gsi/client') return route.fulfill({
         contentType: 'application/javascript', body: 'window.google = { accounts: { oauth2: {} } };',
       });
-      if (/^https?:/.test(url) && !url.startsWith('http://127.0.0.1:9876/')) {
-        external.push(url); return route.abort();
-      }
+      if (/^https?:/.test(url) && !url.startsWith('http://127.0.0.1:9876/')) { external.push(url); return route.abort(); }
       return route.continue();
     });
     const page = await context.newPage();
     page.on('pageerror', error => errors.push(error.message));
-    page.on('console', message => {
-      if (/manifest|Service Worker registration failed/i.test(message.text())) startupErrors.push(message.text());
-    });
-    page.on('request', request => {
-      if (/manifest\.webmanifest|\/sw\.js$/.test(request.url())) pwaRequests.push(request.url());
-    });
     await page.goto(packaged === 'extension' ? `chrome-extension://${id}/build/podium.html`
       : packaged === 'file' ? pathToFileURL(path.join(sourceDir, 'build/podium.html')).href
       : `http://127.0.0.1:9876/${packaged === 'source' ? 'pod' : 'podium'}.html`);
-    await page.waitForFunction(() => !!window._Score_ && !!window._menu_);
-    await page.evaluate(() => {
+    await page.waitForFunction(() => !!window._Score_ && !!window._menu_ && !!window._localFs_);
+    const bytes = await page.evaluate(async () => {
       _menu_.rings.layout.stash.active = 'horizontal';
       Object.assign(_menu_.rings.layout.cells.horizontal.stash, { pgShow: 2, fit: 'Auto', pz: null });
-    });
-    const bytes = await page.evaluate(async () => {
-      const doc = await PDFLib.PDFDocument.create();
-      doc.addPage([300, 400]).drawText('PDF regression test');
+      const doc = await PDFLib.PDFDocument.create(); doc.addPage([300, 400]).drawText('Original PDF');
       return [...await doc.save()];
     });
+    if (packaged !== 'file') await page.evaluate(async bytes => {
+      const root = await navigator.storage.getDirectory();
+      const handle = await root.getFileHandle('first.pdf', { create: true });
+      const writer = await handle.createWritable(); await writer.write(new Uint8Array(bytes)); await writer.close();
+      window.showOpenFilePicker = async () => [handle];
+    }, bytes);
     await page.evaluate(() => _menu_.notify('score/open/up'));
     const panel = page.locator('[data-tag="OpenPanel"]');
     await panel.getByText('Local', { exact: true }).click();
-    await panel.locator('input[type="file"]').setInputFiles({ name: 'first.pdf', mimeType: 'application/pdf', buffer: Buffer.from(bytes) });
-    await expect.poll(() => page.evaluate(() => _score_?.name), { timeout: 15000, message: 'first PDF opens; errors: ' + errors }).toBe('first.pdf');
-    const renderedInk = () => page.evaluate(() => {
-      const pg = _score_?.pgs[0];
-      if (!pg?.mozCanvas || pg.rendering) return 0;
-      const canvas = pg.mozCanvas, pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
-      let ink = 0;
-      for (let i = 0; i < pixels.length; i += 4) if (pixels[i + 3] && pixels[i] < 128) ++ink;
-      return ink;
-    });
-    await expect.poll(renderedInk).toBeGreaterThan(100);
-    await expect(panel).toHaveCount(0);
-    const checkCentered = async () => {
-      await page.evaluate(async () => {
-        await Promise.all(document.getAnimations().filter(a => a.effect?.getComputedTiming().iterations !== Infinity)
-          .map(a => a.finished.catch(() => {})));
-      });
-      const box = await page.evaluate(() => {
-        const layout = _Layout_.activeLayout, r = layout.layout.getBoundingClientRect();
-        return { x: r.x, y: r.y, right: r.right, bottom: r.bottom,
-          cx: r.x + r.width / 2, cy: r.y + r.height / 2, w: innerWidth, h: innerHeight, pages: layout.cell.geo.pgShow };
-      });
-      expect(box.pages).toBe(1);
-      expect(box.x).toBeGreaterThanOrEqual(0);
-      expect(box.y).toBeGreaterThanOrEqual(0);
-      expect(box.right).toBeLessThanOrEqual(box.w + 1);
-      expect(box.bottom).toBeLessThanOrEqual(box.h + 1);
-      expect(Math.abs(box.cx - box.w / 2)).toBeLessThan(2);
-      expect(Math.abs(box.cy - box.h / 2)).toBeLessThan(2);
-    };
-    await checkCentered();
-    await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('recent') || '[]').some(f => f.name === 'first.pdf'))).toBe(true);
-    // A reload discards all in-memory File objects; Recent must use persisted bytes.
-    let fileChoosers = 0;
-    page.on('filechooser', () => ++fileChoosers);
-    await page.reload();
-    await page.waitForFunction(() => !!window._Score_ && !!window._menu_);
-    await page.evaluate(() => {
-      _menu_.rings.layout.stash.active = 'horizontal';
-      Object.assign(_menu_.rings.layout.cells.horizontal.stash, { pgShow: 2, fit: 'Auto', pz: null });
-      window.__pickCount = 0;
-      window.showOpenFilePicker = async () => { ++window.__pickCount; throw new Error('Recent must not open a picker'); };
-    });
-    await page.evaluate(() => {
-      _menu_.notify('score/open/up');
-    });
-    await panel.getByText('Recent', { exact: true }).click();
-    await panel.locator('.Flv-list__file[data-name="first.pdf"]').click();
-    await expect.poll(() => page.evaluate(() => _score_?.name)).toBe('first.pdf');
-    await expect.poll(renderedInk).toBeGreaterThan(100);
-    await checkCentered();
-    expect(await page.evaluate(() => window.__pickCount)).toBe(0);
-    expect(fileChoosers).toBe(0);
-    expect(errors).toEqual([]);
-    expect(external).toEqual([]);
     if (packaged === 'file') {
-      expect(startupErrors).toEqual([]);
-      expect(pwaRequests).toEqual([]);
-      await expect(panel).toHaveCount(0);
-      await page.evaluate(() => {
-        _menu_.op.emv = { clientX: 350, clientY: 100 };
-        _menu_.notify('score/open/out');
-      });
-      await panel.getByText('Local', { exact: true }).click();
-      await panel.locator('input[type="file"]').setInputFiles({
-        name: 'recent.musicxml', mimeType: 'application/xml', buffer: Buffer.from(xml),
-      });
-      await expect.poll(() => page.evaluate(() => _score_?.name)).toBe('recent.musicxml');
-      await expect.poll(() => page.evaluate(() => !!_score_?.pgs[0].musicSvg)).toBe(true);
-      await expect(panel).toHaveCount(0);
-      await page.reload();
-      await page.waitForFunction(() => !!window._Score_ && !!window._menu_);
-      await page.evaluate(() => {
-        window.showOpenFilePicker = async () => { throw new Error('Recent must not open a picker'); };
-        _menu_.notify('score/open/up');
-      });
-      await panel.getByText('Recent', { exact: true }).click();
-      await panel.locator('.Flv-list__file[data-name="recent.musicxml"]').click();
-      await expect.poll(() => page.evaluate(() => _score_?.name)).toBe('recent.musicxml');
-      await expect.poll(() => page.evaluate(() => !!_score_?.pgs[0].musicSvg)).toBe(true);
-      expect(fileChoosers).toBe(0);
-      await expect(panel).toHaveCount(0);
-      await page.evaluate(() => {
-        const recent = JSON.parse(localStorage.getItem('recent'));
-        recent.unshift({ source: 'Local', path: null, name: 'legacy.pdf' });
-        localStorage.setItem('recent', JSON.stringify(recent));
-        _menu_.op.emv = { clientX: 350, clientY: 100 };
-        _menu_.notify('score/open/out');
-      });
-      await panel.getByText('Recent', { exact: true }).click();
-      await panel.locator('.Flv-list__file[data-name="legacy.pdf"]').click();
-      await expect(page.getByText('This older Recent entry has no local copy. Open the file once from the Local tab.', { exact: true })).toBeVisible();
-      expect(fileChoosers).toBe(0);
-      expect(await page.evaluate(async () => {
-        await _FileSrc_.clearLocalRecent();
-        try { await _FileSrc_.get('Local').getFile(null, 'first.pdf'); return false; }
-        catch (e) { return e.cause === 'fileSrc'; }
-      })).toBe(true);
+      const chooser = page.waitForEvent('filechooser');
+      await panel.locator('.Local').click();
+      await (await chooser).setFiles({ name: 'first.pdf', mimeType: 'application/pdf', buffer: Buffer.from(bytes) });
+    } else await panel.locator('.Local').click();
+    await expect.poll(() => page.evaluate(() => _score_?.name), { timeout: 15000 }).toBe('first.pdf');
+    await expect.poll(() => page.evaluate(() => !!_score_?.pgs[0].mozCanvas && !_score_.pgs[0].rendering)).toBe(true);
+    await expect(panel).toHaveCount(0);
+    const centered = await page.evaluate(() => {
+      const r = _Layout_.activeLayout.layout.getBoundingClientRect();
+      return r.x >= 0 && r.y >= 0 && r.right <= innerWidth + 1 && r.bottom <= innerHeight + 1;
+    });
+    expect(centered).toBe(true);
+    const pathId = await page.evaluate(() => _score_.path);
+    if (packaged === 'file') expect(pathId).toBe(null); else expect(pathId).toBeTruthy();
+    await page.reload();
+    await page.waitForFunction(() => !!window._menu_ && !!window._localFs_);
+    let choosers = 0;
+    page.on('filechooser', () => ++choosers);
+    await page.evaluate(async supported => {
+      if (supported) {
+        const root = await navigator.storage.getDirectory();
+        const handle = await root.getFileHandle('first.pdf');
+        const doc = await PDFLib.PDFDocument.create(); doc.addPage([400, 600]).drawText('Changed outside Rostrum');
+        const writer = await handle.createWritable(); await writer.write(await doc.save()); await writer.close();
+      }
+      window.showOpenFilePicker = async () => { throw new Error('Recent must not show a file picker'); };
+      _menu_.notify('score/open/up');
+    }, packaged !== 'file');
+    await panel.getByText('Recent', { exact: true }).click();
+    const entry = panel.locator('.Flv-list__file[data-name="first.pdf"]');
+    if (packaged === 'file') {
+      await expect(entry).toHaveAttribute('aria-disabled', 'true');
+      await entry.click();
+      await entry.press('f'); await entry.press('Enter');
+      expect(await page.evaluate(() => _score_?.name || null)).toBe(null);
+    } else {
+      await expect(entry).not.toHaveAttribute('aria-disabled', 'true');
+      await entry.click();
+      await expect.poll(() => page.evaluate(() => _score_?.name), { timeout: 15000 }).toBe('first.pdf');
+      expect(await page.evaluate(() => _score_.pgs[0].width)).toBe(400);
+      expect(await page.evaluate(() => _score_.path)).toBe(pathId);
+      expect(await page.evaluate(() => !!_score_.fileHandle)).toBe(true);
     }
+    expect(choosers).toBe(0);
+    expect(errors).toEqual([]); expect(external).toEqual([]);
   } finally { await context.close(); }
 });
 

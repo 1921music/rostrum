@@ -47,6 +47,7 @@ window.pdfjsLib.GlobalWorkerOptions.workerPort = new Worker("pdf.worker.min.mjs"
 // #include lib/fabric.min.js
 // #include lib/pdf-lib.min.js
 // #include lib/fontkit.umd.min.js
+// #include build/browser-fs-access.js
 // #include lib/pdf.min.mjs deflateAs mozSrc
 // #include lib/pdf.worker.min.mjs deflateAs mozWorkerSrc
 // #include src/canvas.js minified

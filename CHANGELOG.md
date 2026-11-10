@@ -2,15 +2,15 @@
 
 ## Unreleased — MSCZ support
 
+- Use bundled browser-fs-access for local Open/Save. Store reusable file handles
+  for Recent, read externally edited files afresh, and distinguish same-name files.
+  Disable Recent entries without a usable handle; remove the old stored copies.
 - Fetch HTML from the network on reload, bypassing stale HTTP/service-worker
   caches and refreshing the offline copy. Keep offline and server-error fallbacks.
   Precache only real Pages entry points and bypass HTTP cache during worker updates.
 - Bundle the Japanese guide, media and music font beside local HTML and in the
   extension. App → Guide reads the bundled copy offline without file-URL probes
   or falling back to the external English guide.
-- Keep the last 20 local file copies in browser storage for picker-free Recent
-  opening after reload; refresh saved copies and clear them with Recent history.
-  Legacy local history entries require opening once from Local.
 - Give Transpose and Playback responsive panel layouts, separate mixer track
   names from controls, and shorten the Pan sliders.
 - Skip PWA manifest loading and service-worker registration in standalone

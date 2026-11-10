@@ -1299,7 +1299,9 @@ class Score {
     let prev;
     for (let i = 0; i < recent.length; i++) {
       let entry = recent[i];
-      if (entry.source == score.source && entry.name == score.name && entry.path == score.path) {
+      if (entry.source == score.source && (
+          (entry.path == score.path && (entry.name == score.name || (score.source === Score.sources.local && score.path))) ||
+          (score.source === Score.sources.local && score.path && !entry.path && entry.name == score.name))) {
         prev = recent.splice(i, 1)[0];
         break;
       }

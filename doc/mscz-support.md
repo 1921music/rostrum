@@ -19,11 +19,17 @@ music font in a sibling `guidebook/` directory. Keep `build/guidebook/` alongsid
 `build/podium.html` when copying the local app. App → Guide opens this copy
 offline; the extension opens its own packaged guide in a new tab.
 
-Local Recent entries keep up to 20 file snapshots in IndexedDB, so they can be
-opened without a file picker after reloading the standalone HTML. Saving updates
-the snapshot; clearing Recent also deletes these copies. External edits require
-opening the changed file from Local again. Older metadata-only history entries
-need to be opened once from Local before they can work this way.
+Local Open/Save uses the locally bundled browser-fs-access library. When native
+file access is usable, Recent stores file handles in IndexedDB, reads the current
+file contents on each open, and requests permission again when necessary. Same-name
+files in different folders have distinct identities. Saving reuses the handle;
+Save As and MusicXML/MXL conversion acquire a new handle.
+
+Fallback browsers use normal file selection and downloads. Their Recent entries
+remain visible but are disabled because the original file cannot be reopened.
+Older snapshot copies are deleted when the local history database is upgraded;
+their history entries remain disabled until reopened through native Local access.
+Rostrum never silently substitutes a stored copy for an inaccessible original.
 
 ## Saving
 
@@ -91,9 +97,10 @@ and simulated MSCX image movement/scaling.
 They also cover shared font registrations, rehearsal text/frame bounds, English
 panel labels and PDF opening through both the Local tab and the active-score
 Open action. Selecting a different file uses its actual name, format and handle.
-The extension test suite also opens a PDF first, then opens one through Recent,
-in source HTTP, packaged HTTP, standalone `file://` HTML and the MV3 extension.
-It checks rendered PDF pixels. Standalone HTML uses a data-URL PDF module worker
+The extension suite covers source HTTP, packaged HTTP, standalone `file://` HTML
+and the MV3 extension. It verifies persisted handles and external file changes
+where native access is available, and disabled Recent entries on fallback.
+Standalone HTML uses a data-URL PDF module worker
 because Chromium rejects a blob-URL module worker from an opaque file origin.
 
 ## Verifying the extension

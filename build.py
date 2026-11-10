@@ -484,6 +484,7 @@ def podium_page_patches(canonical):
     # the libraries are included by main.js itself (see its #include's):
     ('    <script src="fabric.min.js"></script> \n', ''),
     ('    <script src="score-engine-data.js"></script>\n', ''),
+    ('    <script src="browser-fs-access.js"></script>\n', ''),
     ("    <script type=\"module\">import * as pdfjsLib from './pdf.min.mjs'; window.pdfjsLib = pdfjsLib;</script>\n", ''),
     ('    <script src="pdf-lib.min.js"></script> \n', ''),
     ('    <script src="fontkit.umd.min.js"></script> \n', ''),
@@ -561,6 +562,7 @@ def bundle_local_guide(destination, extension=False):
 
 
 def build_podium_page(outFileName, canonical="https://1921music.github.io/rostrum/"):
+    subprocess.run(['node', 'build_browser_fs.mjs'], check=True)
     with open("src/pod.html", encoding='utf-8') as f:
         page = f.read()
     with open("LICENSE", encoding='utf-8') as f:

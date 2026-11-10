@@ -183,7 +183,7 @@ test('MXL converts to MSCZ on save without reusing the source handle', async ({ 
     score.fileHandle = { createWritable: () => { ++originalWrites; throw new Error('Original file must not be overwritten'); } };
     window.showSaveFilePicker = async options => {
       picked = options;
-      return { createWritable: async () => ({ write: async bytes => { savedBytes = bytes; }, close: async () => {} }),
+      return { createWritable: async () => ({ write: async bytes => { savedBytes = bytes instanceof Blob ? new Uint8Array(await bytes.arrayBuffer()) : bytes; }, close: async () => {} }),
         getFile: async () => ({ name: options.suggestedName, lastModified: Date.now() }) };
     };
     await _FileSrc_.saveActiveScore(_menu_.rings.score.cells.save);
@@ -340,7 +340,10 @@ test('Open panel accepts and renders a PDF selected from Local', async ({ page }
   await page.evaluate(() => _menu_.notify('score/open/up'));
   const panel = page.locator('[data-tag="OpenPanel"]');
   await panel.getByText('Local', { exact: true }).click();
-  await panel.locator('input[type="file"]').setInputFiles({ name: 'local.pdf', mimeType: 'application/pdf', buffer: Buffer.from(bytes) });
+  await page.evaluate(() => { _FileSrc_.get('Local').nativeUnavailable = true; });
+  const chooser = page.waitForEvent('filechooser');
+  await panel.locator('.Local').click();
+  await (await chooser).setFiles({ name: 'local.pdf', mimeType: 'application/pdf', buffer: Buffer.from(bytes) });
   await expect.poll(() => page.evaluate(() => _score_?.name)).toBe('local.pdf');
   await expect.poll(() => page.evaluate(() => !!_score_?.pgs[0].mozCanvas)).toBe(true);
 });
