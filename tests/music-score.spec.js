@@ -368,12 +368,15 @@ for (const layoutKey of ['book', 'horizontal', 'vertical']) test(`shared playbac
     await new Promise(resolve => setTimeout(resolve, 500));
     const pg = _score_.pgs[0];
     const rect = pg.musicSvg.getBoundingClientRect(), bounds = player.tracking.system.bounds;
-    return { ...player.tracking, top: rect.top, systemTop: rect.top + bounds[1] * rect.height,
+    const cursorLine = pg.musicSvg.querySelector('[data-playback-cursor]');
+    return { cursorShown: getComputedStyle(cursorLine).display !== 'none', ...player.tracking, top: rect.top, systemTop: rect.top + bounds[1] * rect.height,
       systemBottom: rect.top + (bounds[1] + bounds[3]) * rect.height, viewport: innerHeight,
       active: [...pg.musicSvg.querySelectorAll('.mscz-playing')].map(g => g.dataset.noteId) };
   }, time);
   const first = await sample(0.1), next = await sample(2.1);
   expect(first.noteIds).toHaveLength(2);
+  expect(first.cursorShown).toBe(true);
+  expect(first.cursor.height).toBeGreaterThan(0);
   expect(new Set(first.active)).toEqual(new Set(first.noteIds));
   expect(next.system.id).not.toBe(first.system.id);
   if (Math.abs(next.top - first.top) > 1) expect(next.top).toBeLessThan(first.top - 20);
@@ -396,7 +399,7 @@ for (const layoutKey of ['book', 'horizontal', 'vertical']) test(`shared playbac
     music.player.state = 'paused';
     await pg.renderPdfAux(pg.canvas);
     const active = pg.musicSvg.querySelectorAll('.mscz-playing').length;
-    const cleanExport = music.pageSvgElement(1).querySelectorAll('.mscz-playing,[data-playback-style]').length;
+    const cleanExport = music.pageSvgElement(1).querySelectorAll('.mscz-playing,[data-playback-style],[data-playback-cursor]').length;
     music.player.stop(); music.player.context = null;
     return { active, cleanExport, stopped: pg.musicSvg.querySelectorAll('.mscz-playing').length };
   });
@@ -423,9 +426,10 @@ for (const layoutKey of ['book', 'horizontal', 'vertical']) test(`playback follo
       const music = _score_.music, system = music.player.tracking.system;
       const pg = _score_.pgs.find(pg => pg.mozPn === system.page + 1);
       const rect = pg.musicSvg?.getBoundingClientRect();
-      return { page: system.page, selected: Number(_score_.numbers.pn), highlighted: pg.musicSvg?.querySelectorAll('.mscz-playing').length > 0,
+      const line = pg.musicSvg?.querySelector('[data-playback-cursor]');
+      return { cursorShown: !!line && getComputedStyle(line).display !== 'none', page: system.page, selected: Number(_score_.numbers.pn), highlighted: pg.musicSvg?.querySelectorAll('.mscz-playing').length > 0,
         visible: !!rect && rect.right > 0 && rect.left < innerWidth && rect.bottom > 0 && rect.top < innerHeight };
-    })).toEqual({ page: expectedPage, selected: expectedPage + 1, highlighted: true, visible: true });
+    })).toEqual({ cursorShown: true, page: expectedPage, selected: expectedPage + 1, highlighted: true, visible: true });
   };
   await sample(0.1, 0); await sample(2.1, 1); await sample(6.1, 0);
   await page.evaluate(() => {

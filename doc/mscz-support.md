@@ -60,7 +60,8 @@ editable data. Changed/missing anchors stop saving. Page insertion, removal,
 reordering, PDF merging/import and flattening are disabled for notation scores.
 Ordinary image drawing inherited from the Qt-free engine is incomplete; this
 first integration does not add support for arbitrary pre-existing score images.
-Playback supports play/pause/stop and part mixing, but not seek or a play cursor.
+Playback supports play/pause/stop and part mixing, red noteheads, a smoothly moving
+red system-height cursor, and automatic scrolling/page turns. Seeking is not supported.
 
 The web/PWA, standalone HTML and browser extension contain the engine, fonts
 and EAS GM audio bank. They do not require an audio service. The MV3 extension

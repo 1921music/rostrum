@@ -117,6 +117,7 @@ class MusicDocument {
       if (family && backend && !family.includes(backend.prefix)) node.setAttribute('font-family', backend.family(family));
     }
     const page = this.info.pages[pn - 1];
+    svg.dataset.playbackPage = pn - 1;
     svg.setAttribute('width', page.width); svg.setAttribute('height', page.height);
     return svg;
   }

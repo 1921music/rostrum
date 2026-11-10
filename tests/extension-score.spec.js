@@ -225,6 +225,7 @@ test('real MV3 extension renders, transposes, plays and saves scores offline wit
     await expect.poll(() => page.evaluate(() => _score_.music.player.sources.size)).toBeGreaterThan(0);
     expect(await page.evaluate(() => _score_.music.player.error || '')).toBe('');
     await expect.poll(() => page.locator('.mscz-playing').count()).toBeGreaterThan(0);
+    expect(await page.locator('[data-playback-cursor]').first().evaluate(n => getComputedStyle(n).display)).not.toBe('none');
     await expect(page.locator('[data-tag="PlaybackPanel"] [data-follow]')).toBeChecked();
     expect(workers).toContain(`${origin}/build/score-engine/playback-worker.js`);
     expect(workers.every(url => url.startsWith(origin + '/'))).toBe(true);
