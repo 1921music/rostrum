@@ -244,6 +244,7 @@ class Pg {
         width: this.width / _pxPerEm_ + 'em', height: this.height / _pxPerEm_ + 'em' });
       if (this.musicSvg) this.musicSvg.replaceWith(svg); else canvas.wrapperEl.append(svg);
       this.musicSvg = svg;
+      this.score.music.view.update();
       this.rendering = false; this.setZoom(this.zoom);
       return;
     }
@@ -1395,6 +1396,7 @@ class Score {
     if (pdfData && isMusicScore(name)) {
       this.size = pdfData.byteLength;
       this.music = this.mozDoc = await MusicDocument.open(pdfData, name);
+      this.music.owner = this;
       if (activate) {
         const defaults = JSON.parse(_menu_.stashDefaults);
         Object.assign(_menu_.rings.page.cells.numbers.stash, defaults.page?.cells?.numbers);
@@ -1584,6 +1586,28 @@ class Score {
           player.setMixer(i, { volume: m.volume, pan: m.pan, mute: !!m.mute, solo: !!m.solo });
       });
     }
+  }
+
+  async followMusic(system) {
+    const music = this.music, layout = Layout.activeLayout;
+    const serial = this.musicFollowSerial = (this.musicFollowSerial || 0) + 1;
+    if (!music?.autoScroll || this !== _score_ || layout?.score !== this) return;
+    const pn = system.page + 1;
+    let pg = this.pgs.find(pg => pg.mozPn === pn);
+    if (!pg) return;
+    const visible = pg.musicSvg?.isConnected && pg.musicSvg.getBoundingClientRect();
+    if (!visible || visible.right < 24 || visible.left > innerWidth - 24 || visible.bottom < 24 || visible.top > innerHeight - 24)
+      await layout.pgGoTo(this.pnOf(pg), false);
+    if (this.disposed || layout !== Layout.activeLayout || serial !== this.musicFollowSerial || music.player.state !== 'playing' || !music.autoScroll) return;
+    const rect = pg.musicSvg?.getBoundingClientRect();
+    if (!rect?.width || !rect.height) return;
+    const [x, y, w, h] = system.bounds;
+    const top = rect.top + y * rect.height, bottom = top + h * rect.height;
+    const left = rect.left + x * rect.width, right = left + w * rect.width;
+    const dy = top < 24 || bottom > innerHeight - 24 ? 24 - top : 0;
+    const dx = left < 24 || right > innerWidth - 24 ? 24 - left : 0;
+    if (dy) layout.elm.style.top = layout.elm.offsetTop + dy + 'px';
+    if (dx) layout.elm.style.left = layout.elm.offsetLeft + dx + 'px';
   }
 
   async buildMusicPages(records) {

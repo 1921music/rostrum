@@ -347,3 +347,85 @@ test('Open panel accepts and renders a PDF selected from Local', async ({ page }
   await expect.poll(() => page.evaluate(() => _score_?.name)).toBe('local.pdf');
   await expect.poll(() => page.evaluate(() => !!_score_?.pgs[0].mozCanvas)).toBe(true);
 });
+
+
+for (const layoutKey of ['book', 'horizontal', 'vertical']) test(`shared playback tracking colors noteheads and follows systems in ${layoutKey}`, async ({ page }) => {
+  const xml = fs.readFileSync(path.join(__dirname, '../engine/test/playback.musicxml'), 'utf8')
+    .replaceAll('<measure number="2">', '<measure number="2"><print new-system="yes"/>');
+  await page.evaluate(async ({ xml, layoutKey }) => {
+    _menu_.rings.layout.stash.active = layoutKey;
+    await new _Score_().init('Local', null, 'tracking.musicxml', new TextEncoder().encode(xml));
+  }, { xml, layoutKey });
+  await page.waitForFunction(() => _Layout_.activeLayout?.elm?.owner);
+  await page.evaluate(() => {
+    const layout = _Layout_.activeLayout;
+    layout.elm.style.transition = 'none';
+    layout.elm.style.fontSize = parseFloat(getComputedStyle(layout.elm).fontSize) * 3 + 'px';
+  });
+  const sample = time => page.evaluate(async time => {
+    const music = _score_.music, player = music.player;
+    player.context = { currentTime: time }; player.startTime = 0; player.state = 'playing'; player.notify();
+    await new Promise(resolve => setTimeout(resolve, 500));
+    const pg = _score_.pgs[0];
+    const rect = pg.musicSvg.getBoundingClientRect(), bounds = player.tracking.system.bounds;
+    return { ...player.tracking, top: rect.top, systemTop: rect.top + bounds[1] * rect.height,
+      systemBottom: rect.top + (bounds[1] + bounds[3]) * rect.height, viewport: innerHeight,
+      active: [...pg.musicSvg.querySelectorAll('.mscz-playing')].map(g => g.dataset.noteId) };
+  }, time);
+  const first = await sample(0.1), next = await sample(2.1);
+  expect(first.noteIds).toHaveLength(2);
+  expect(new Set(first.active)).toEqual(new Set(first.noteIds));
+  expect(next.system.id).not.toBe(first.system.id);
+  if (Math.abs(next.top - first.top) > 1) expect(next.top).toBeLessThan(first.top - 20);
+  else expect(next.systemBottom).toBeLessThanOrEqual(next.viewport - 23);
+  expect(next.systemTop).toBeGreaterThanOrEqual(23);
+  expect(new Set(next.active)).toEqual(new Set(next.noteIds));
+  if (layoutKey === 'book') await page.screenshot({ path: 'build/playback-follow-book.png' });
+  const repeated = await sample(6.1);
+  expect(repeated.systemTop).toBeGreaterThanOrEqual(23);
+  if (next.top < first.top - 20) expect(repeated.top).toBeGreaterThan(next.top + 20);
+  expect(repeated.noteIds).toEqual(first.noteIds);
+  await page.evaluate(() => _menu_.notify('score/playback/up'));
+  await page.locator('[data-tag="PlaybackPanel"] [data-follow]').uncheck();
+  const unfollowed = await sample(8.1);
+  expect(unfollowed.top).toBe(repeated.top);
+  const red = await page.locator('.mscz-playing text,.mscz-playing use,.mscz-playing path').first().evaluate(n => getComputedStyle(n).fill);
+  expect(red).toBe('rgb(208, 0, 0)');
+  const state = await page.evaluate(async () => {
+    const music = _score_.music, pg = _score_.pgs[0];
+    music.player.state = 'paused';
+    await pg.renderPdfAux(pg.canvas);
+    const active = pg.musicSvg.querySelectorAll('.mscz-playing').length;
+    const cleanExport = music.pageSvgElement(1).querySelectorAll('.mscz-playing,[data-playback-style]').length;
+    music.player.stop(); music.player.context = null;
+    return { active, cleanExport, stopped: pg.musicSvg.querySelectorAll('.mscz-playing').length };
+  });
+  expect(state.active).toBe(unfollowed.noteIds.length);
+  expect(state.cleanExport).toBe(0);
+  expect(state.stopped).toBe(0);
+});
+
+
+for (const layoutKey of ['book', 'horizontal', 'vertical']) test(`playback follows page turns and repeat returns in ${layoutKey}`, async ({ page }) => {
+  const xml = fs.readFileSync(path.join(__dirname, '../engine/test/playback.musicxml'), 'utf8')
+    .replaceAll('<measure number="2">', '<measure number="2"><print new-page="yes"/>');
+  await page.evaluate(async ({ xml, layoutKey }) => {
+    _menu_.rings.layout.stash.active = layoutKey;
+    await new _Score_().init('Local', null, 'pages.musicxml', new TextEncoder().encode(xml));
+  }, { xml, layoutKey });
+  const sample = async (time, expectedPage) => {
+    await page.evaluate(time => {
+      const p = _score_.music.player;
+      p.context = { currentTime: time }; p.startTime = 0; p.state = 'playing'; p.notify();
+    }, time);
+    await expect.poll(() => page.evaluate(() => {
+      const music = _score_.music, system = music.player.tracking.system;
+      const pg = _score_.pgs.find(pg => pg.mozPn === system.page + 1);
+      const rect = pg.musicSvg?.getBoundingClientRect();
+      return { page: system.page, highlighted: pg.musicSvg?.querySelectorAll('.mscz-playing').length > 0,
+        visible: !!rect && rect.right > 0 && rect.left < innerWidth && rect.bottom > 0 && rect.top < innerHeight };
+    })).toEqual({ page: expectedPage, highlighted: true, visible: true });
+  };
+  await sample(0.1, 0); await sample(2.1, 1); await sample(6.1, 0);
+  await page.evaluate(() => { const p = _score_.music.player; p.stop(); p.context = null });
+});

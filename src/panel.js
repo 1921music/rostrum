@@ -3956,12 +3956,17 @@ class PlaybackPanel extends MusicPanel {
     this.body.classList.add('MusicPanel', 'PlaybackPanel');
     this.body.innerHTML = `<div class="PlaybackPanel__transport"><button data-play>Play</button> <button data-stop>Stop</button> <output></output></div>
       <p><label class="PlaybackPanel__master">Volume <input data-master type="range" min="0" max="100" value="80"></label></p>
+      <p><label><input data-follow type="checkbox" checked> Auto-scroll</label></p>
       <div data-mixer style="max-height:40vh;overflow:auto"></div><p role="status"></p>`;
     this.body.querySelector('[data-play]').onclick = async () => {
       const player = _score_?.music?.player; if (!player) return;
       try { if (player.state === 'playing') await player.pause(); else await player.play(); }
       catch (error) { player.fail(error); }
       this.sync();
+    };
+    this.body.querySelector('[data-follow]').onchange = e => {
+      if (!_score_?.music) return;
+      _score_.music.autoScroll = e.target.checked; _score_.music.view.resetFollow();
     };
     this.body.querySelector('[data-stop]').onclick = () => _score_?.music?.player.stop();
     this.body.querySelector('[data-master]').oninput = e => {
@@ -3971,6 +3976,7 @@ class PlaybackPanel extends MusicPanel {
   }
   sync() {
     const player = _score_?.music?.player; if (!player) return;
+    this.body.querySelector('[data-follow]').checked = _score_.music.autoScroll;
     const play = this.body.querySelector('[data-play]');
     play.textContent = player.state === 'playing' ? 'Pause' : 'Play';
     play.disabled = _score_.musicBusy || player.state === 'loading' || !player.timeline;

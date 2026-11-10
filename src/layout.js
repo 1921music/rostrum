@@ -241,6 +241,7 @@ class Layout {
       _shade_.hide();
     }
     if (Layout.activeLayout) ScreenPanel.update(Layout.activeLayout.elm);
+    _score_?.music?.view.resetFollow();
   }
 
   constructor(score, cell) {

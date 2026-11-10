@@ -61,10 +61,10 @@ A Chrome/Edge browser extension is available for opening PDF scores directly fro
 Build, test and deployment instructions are in [DEVELOPMENT.md](DEVELOPMENT.md).
 See [CHANGELOG.md](CHANGELOG.md) for Rostrum release notes.
 
-The `mscz_support` development branch adds MSCZ/MusicXML/MXL viewing,
-transposition, playback and SVG annotation persistence. See
-[score support](doc/mscz-support.md) for its save format, engine build and current
-limits. These changes have not been deployed to the public app.
+MSCZ/MusicXML/MXL viewing, transposition, playback and SVG annotation persistence
+use the shared, pinned `mscz_webviewer` engine. Playback highlights noteheads and
+can follow the score by system. See [score support](doc/mscz-support.md) for the
+save format, engine build and current limits.
 
 ## License
 
@@ -106,3 +106,16 @@ Rostrum 独自のバージョンは **1.0.0**（タグ `v1.0.0`）から始ま�
 - Rostrum のリリースノート：[CHANGELOG.md](CHANGELOG.md)
 - Podium からの変更と背景：[FORK-ja.md](FORK-ja.md)
 - ライセンス：[GNU AGPL v3](LICENSE)。元の作者の著作権表記を引き継いでいます。
+
+### 楽譜再生への表示追従
+
+MSCZ / MusicXML の再生中は、現在の音符の符頭を赤色で表示します。
+再生パネルの `Auto-scroll` は初期状態でONで、段の切り替わりに合わせて
+表示位置を調整します。次の段が画面内に収まっている場合は移動しません。
+ブック・横スクロール・縦スクロール表示で、ページ送りとリピートにも追従します。
+一時停止では赤色表示を保持し、停止すると元に戻ります。赤色は表示専用で、
+保存する楽譜や書き出すPDFには入りません。
+
+共通エンジンの `playbackTimeline().visual`、`Playback.tracking` / `subscribe()`、
+`PlaybackView` を使用しています。エンジンのAPI仕様は
+[engine/README.md](engine/README.md#playback-tracking-api) を参照してください。

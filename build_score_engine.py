@@ -26,7 +26,7 @@ def main():
     read = lambda name: (web / name).read_text(encoding='utf-8')
     wrapper = read('mscz.js').replace("'./mscz-engine.js'", repr(module(read('mscz-engine.js'))))
     wrapper = wrapper.replace("'./text-fonts.js'", repr(module(read('text-fonts.js'))))
-    wrapper += '\nexport { Playback } from ' + repr(module(read('playback.js'))) + ';\n'
+    wrapper += '\nexport { Playback, PlaybackView, playbackPosition } from ' + repr(module(read('playback.js'))) + ';\n'
     worker = read('playback-worker.js').replace("import createSynth from './mscz-synth.js'",
         read('mscz-synth.js').replace('export default createSynth;', '').replace('import.meta.url', 'self.location.href'))
     resources = []

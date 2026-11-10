@@ -16,34 +16,41 @@ async function musicEngine() {
       Uint8Array.from(atob(s), c => c.charCodeAt(0))
     ]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
     const extension = !!globalThis.chrome?.runtime?.id;
-    let api, Playback;
+    let api, Playback, PlaybackView;
     if (extension) {
       api = await import(new URL('./score-engine/mscz.js', location.href).href);
-      ({ Playback } = await import(new URL('./score-engine/playback.js', location.href).href));
+      ({ Playback, PlaybackView } = await import(new URL('./score-engine/playback.js', location.href).href));
     } else {
       const moduleBytes = await decode(payload.module);
       let binary = '';
       for (let i = 0; i < moduleBytes.length; i += 32768)
         binary += String.fromCharCode(...moduleBytes.subarray(i, i + 32768));
       api = await import('data:text/javascript;base64,' + btoa(binary));
-      Playback = api.Playback;
+      Playback = api.Playback; PlaybackView = api.PlaybackView;
     }
     const resources = await Promise.all(payload.resources.map(async r => ({ name: r.name, bytes: await decode(r.data) })));
     const engine = await api.load({ wasmBinary: await decode(payload.wasm), resources,
       playbackAssets: { wasm: await decode(payload.playback.wasm),
         worker: extension ? null : new TextDecoder().decode(await decode(payload.playback.worker)),
         workerURL: extension ? new URL('./score-engine/playback-worker.js', location.href).href : null } });
-    return { engine, Playback };
+    return { engine, Playback, PlaybackView };
   })().catch(error => { musicEnginePromise = null; throw error; });
 }
 
 class MusicDocument {
   static async open(bytes, name) {
-    const { engine, Playback } = await musicEngine();
+    const { engine, Playback, PlaybackView } = await musicEngine();
     const document = new MusicDocument();
     document.native = engine.open(new Uint8Array(bytes), name);
     document.name = name;
     document.player = new Playback(engine, 'EAS', () => globalThis.document.dispatchEvent(new Event('musicPlayback')));
+    document.autoScroll = true;
+    document.view = new PlaybackView(document.player, {
+      getPages: () => document.owner?.pgs?.map(pg => pg.musicSvg).filter(Boolean) || [],
+      onSystem: system => {
+        if (document.autoScroll) document.owner?.followMusic(system).catch(error => console.error(error));
+      }
+    });
     try {
       document.refresh();
       try { document.settings = JSON.parse(document.info.settings || '{}'); } catch { document.settings = {}; }
@@ -123,5 +130,5 @@ class MusicDocument {
       .reduce((best, a) => Math.abs(a.x - x) < Math.abs(best.x - x) ? a : best);
   }
   anchor(key, staff) { return this.info.anchors.find(a => a.key === key && a.staff === staff); }
-  async destroy() { this.player.stop(); await this.player.context?.close(); this.native.close(); this.svgs.clear(); }
+  async destroy() { this.view.destroy(); this.player.stop(); await this.player.context?.close(); this.native.close(); this.svgs.clear(); }
 }
