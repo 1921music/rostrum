@@ -515,7 +515,7 @@ Podium:
   `<g transform="translate(1),scale(0.9,0.9)">
    <path  fill="#aaa" stroke="currentColor" stroke-width=".6" stroke-linejoin="round"
    d="M4 23v-3h16v3h1.5h-19ZM7 20v-14h10v14M7 12h-2l-3-10h20l-3 10h-2"/>
-   <text x="9.5" y="14" font-family="Bravura" font-size="10px">\ue520</text></g>`,
+   <text x="12" y="15.5" text-anchor="middle" font-family="Georgia, Times New Roman, serif" font-size="9" font-weight="bold" font-style="italic" fill="currentColor">R</text></g>`,
 
 Print:
   `<path fill="#aaa" stroke="currentColor" stroke-width=".5" d="m14.3,12h2.2M18.6,15.6 17.5,13M6.18,12H7.97M3.37,15.6 5.17,13M11.1,1.96h1M10.7,3.13 11.4,2.57 11.1,2M11.8,3.12 12.4,2.53 12.1,1.96M11.1,6.91 10.6,6.28 11.2,5.88 10.6,5.19 11.1,4.75 10.7,4.18M12.4,6.86 12,6.23 12.6,5.82 12,5.13 12.4,4.69 12.1,4.12m0.8,2.85H9.85V8.83H12.9V8.28L20.8,8.15V7.69L12.9,7.58ZM7.02,8.82H15.7V10.3H7.01ZM8.19,11.6 6.63,14.4H15.3L14.1,11.6ZM3.56,22.9V15.6H18.4V23H16.5V18.6H15.6V17H6.03v1.6H5.14v4.3zM16.6,8.23V13h0.9L17.6,8.24ZM5.14,13V2.1H6.16V3.15H16.6v-1.1h1.1l-0.1,5.57h-1V4.09H6.16V13Z" />`,
