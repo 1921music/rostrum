@@ -26,6 +26,9 @@ import { Score } from "./score.js";
 import { panels } from "./panel.js";
 // -skip
 
+let scoreFileMimeType = name => name.toLowerCase().endsWith('.zip') ? 'application/zip'
+  : name.toLowerCase().endsWith('.mscz') ? 'application/x-musescore' : 'application/pdf';
+
 let bytesToBase64DataUrl = async (bytes, type = "application/octet-stream") => {
   // This function is copied directly from
   // "https:\/\/developer.mozilla.org/en-US/docs/Web/API/Window/btoa"
@@ -1243,6 +1246,7 @@ class GDriveSrc extends CachedSrc {
 
   async putFileSrc(path, name, data, dir, file) {
     let CHUNK_SIZE = 5 * 1024 * 1024;
+    const dataSize = data instanceof Blob ? data.size : data.byteLength;
 
     if (!file) {
       // Won't exist if creating, so create new empty file with metadata and get its id from the response.
@@ -1262,7 +1266,7 @@ class GDriveSrc extends CachedSrc {
     }
 
     let response;
-    if (data.byteLength > CHUNK_SIZE) {
+    if (dataSize > CHUNK_SIZE) {
       // Resumable upload. Every response must be checked: an unnoticed failed chunk
       // would leave a stale or truncated file on Drive while the save "succeeds".
       let sessionResponse = await fetch(this.uploadUrl + file.id + "?uploadType=resumable", {
@@ -1275,20 +1279,21 @@ class GDriveSrc extends CachedSrc {
       let uploadUrl = sessionResponse.ok && sessionResponse.headers.get("Location");
       if (!uploadUrl) err(`GDrive putFileSrc(${path},${name},...)`, `upload session: ${await sessionResponse.text()}`);
 
-      for (let offset = 0; offset < data.byteLength; offset += CHUNK_SIZE) {
-        let chunk = data.slice(offset, Math.min(offset + CHUNK_SIZE, data.byteLength));
-        let endByte = offset + chunk.byteLength - 1;
+      for (let offset = 0; offset < dataSize; offset += CHUNK_SIZE) {
+        let chunk = data.slice(offset, Math.min(offset + CHUNK_SIZE, dataSize));
+        const chunkSize = chunk instanceof Blob ? chunk.size : chunk.byteLength;
+        let endByte = offset + chunkSize - 1;
 
         response = await fetch(uploadUrl, {
           method: "PUT",
           headers: {
-            "Content-Length": chunk.byteLength,
-            "Content-Range": `bytes ${offset}-${endByte}/${data.byteLength}`,
+            "Content-Length": chunkSize,
+            "Content-Range": `bytes ${offset}-${endByte}/${dataSize}`,
           },
           body: chunk,
         });
         // 308 (Resume Incomplete): more chunks expected; 200/201: complete
-        let last = endByte + 1 >= data.byteLength;
+        let last = endByte + 1 >= dataSize;
         if (last ? !response.ok : response.status != 308)
           err(`GDrive putFileSrc(${path},${name},...)`, `chunk at ${offset}: ${response.status} ${await response.text()}`);
       }
@@ -1309,7 +1314,7 @@ class GDriveSrc extends CachedSrc {
       dir.files[file.name] = {
         id: updatedFile.id,
         name: updatedFile.name,
-        size: updatedFile.size || data.byteLength,
+        size: updatedFile.size || dataSize,
         created: updatedFile.createdTime,
         modified: updatedFile.modifiedTime
       };
@@ -1477,9 +1482,10 @@ class DbxSrc extends CachedSrc {
     let session_id = (await response.json()).session_id;
     // upload file in slices, from a view of exactly data's bytes (data may be an ArrayBuffer,
     // or a view that doesn't start at its buffer's beginning)
-    let bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    let bytes = data instanceof Blob ? { byteLength: data.size, subarray: (start, end) => data.slice(start, end) }
+      : data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
     let maxSliceLen = 5 * 1024 * 1024;
-    let remaining = data.byteLength;
+    let remaining = bytes.byteLength;
     let sliceLen = Math.min(remaining, maxSliceLen);
     url = this.contentUrl + "upload_session/append_v2";
     let cursor = 0;
@@ -1694,9 +1700,10 @@ class ODriveSrc extends CachedSrc {
     let uploadUrl = (await response.json()).uploadUrl;
     // (a view of exactly data's bytes: data may be an ArrayBuffer, or a view that
     // doesn't start at its buffer's beginning)
-    let bytes = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    let bytes = data instanceof Blob ? { byteLength: data.size, subarray: (start, end) => data.slice(start, end) }
+      : data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
     let maxSliceLen = 5 * 1024 * 1024;
-    let dataLen = data.byteLength;
+    let dataLen = bytes.byteLength;
     let remaining = dataLen;
     let sliceLen = Math.min(remaining, maxSliceLen);
 
@@ -1708,7 +1715,7 @@ class ODriveSrc extends CachedSrc {
         headers: {
           "Content-Length": sliceLen,
           "Content-Range": `bytes ${cursor}-${cursor + sliceLen - 1}/${dataLen}`,
-          "Content-Type": name.toLowerCase().endsWith('.mscz') ? 'application/x-musescore' : 'application/pdf',
+          "Content-Type": scoreFileMimeType(name),
         },
         body: slice,
       });
@@ -2362,7 +2369,7 @@ class PCloudSrc extends CachedSrc {
     // Access-Control-Allow-Headers field. A simple request works in the
     // extension too, so there is no platform branch here.
     let form = new FormData();
-    form.append("file", new Blob([data], { type: name.toLowerCase().endsWith('.mscz') ? 'application/x-musescore' : 'application/pdf' }), name);
+    form.append("file", new Blob([data], { type: scoreFileMimeType(name) }), name);
     await this.request("uploadfile", { folderid: dir.id, nopartial: 1 }, {
       method: "POST",
       body: form,

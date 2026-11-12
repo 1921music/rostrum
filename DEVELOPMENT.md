@@ -21,13 +21,56 @@ OPFS or filesystem APIs. File backends use logical relative paths, and database
 backends must flush committed changes before an operation reports success.
 The OPFS SQLite VFS uses internal pool files: `database.export()` produces the
 logical `library.sqlite` image; do not back up the physical pool files directly.
-Selected-folder and IndexedDB backends, file-URL Worker startup, cloud sync and
-full-library backup/restore are not implemented yet. Safari/iPhone behavior
-requires device validation. A second tab currently receives a storage-lock
-error rather than opening a second writable database.
+The policy accepts explicit `opfs`, `directory` and `indexeddb` adapters. The
+latter two persist a SQLite image after each operation; OPFS uses its native
+SQLite VFS. Selection is remembered separately from the shared library, and no
+backend silently falls back to temporary storage. A second tab receives a lock
+error rather than opening another writer. Directory locking is conservative
+for folders with the same name; external database changes are detected before
+writing. Use a dedicated folder, not a database shared with another application.
+
+Standalone file-URL builds embed a Worker and WASM runtime. Origin-bound file
+and IndexedDB operations run in the host-page adapter and are bridged to the
+SQLite Worker as bytes/Blobs. This avoids giving an opaque data-URL Worker
+filesystem handles. Browser support and Safari/iPhone still require device
+validation; the environment-to-default-backend mapping remains undecided.
+
+**Backups and conflicting edits** exports a ZIP containing `library.sqlite`,
+portable `library.json` records/change history, and the owned `scores/` files.
+Import validates paths, file hashes, schema fields, change ancestry and
+references before merging. It does not execute the supplied SQLite image and
+does not import credentials, storage selection or per-device sync progress.
+Unchanged old backups do not undo newer deletions; previous/deleted scores can
+be recovered in the history view. Conflicts retain all versions until an
+explicit resolution records all parent revisions. Independent ink additions
+merge by stable document/page/object identities.
+
+ZIP file data streams through Blobs rather than one combined byte array. The
+current parser supports members up to 512 MiB and portable metadata up to
+64 MiB; these are implementation limits, not a permanent format requirement.
+An emergency export remains possible when a committed in-memory snapshot
+cannot be persisted. The app retains the unsaved indication in this case.
+
+Manual cloud sync uses the connected Drive/Dropbox/OneDrive/pCloud account and
+the folder selected in the Library tab. A folder's Rostrum packages form one
+shared library. Each run uploads a complete package with a unique name, first
+to a temporary name and then publishes it by rename. Readers ignore unfinished
+uploads. Packages are append-only so simultaneous uploads cannot overwrite
+each other. This initial transport is snapshot-based, not bandwidth-optimized
+delta sync; older packages are retained, with no automatic remote cleanup.
+The generic transport exposes `list`, `read`, `write` and a stable destination
+ID. Sync progress is local and failed uploads remain retryable. A run with no
+new revisions since its previous successful publication skips the upload only
+while that package is still present in the destination. Removing packages or
+switching accounts therefore does not prevent republishing the local library.
+The current score is saved before merging and reopened afterward when its
+content is still available and has no unresolved conflicts. Cloud uploads
+accept Blobs and use bounded chunks where the existing provider supports them.
+Real OAuth/provider checks must use a dedicated test account and the manual
+release checklist. Automated tests mock every provider request.
 
 `mise exec -- node build_browser_fs.mjs` builds the bundled library dependencies,
-including the bookshelf Worker and SQLite WASM. The normal packaged, extension
+including the bookshelf Worker, host adapter and SQLite WASM. The normal packaged, extension
 and Pages builds include those assets; the Pages worker precaches them offline.
 No CDN is required. Run focused checks with:
 
@@ -257,5 +300,20 @@ mise exec -- python -m unittest discover -s tests -p test_deploy_pages.py
 ```
 
 The browser tests mock cloud APIs. Real provider sign-in is checked manually.
+For the bookshelf release, use a dedicated test account and folder to check
+each intended provider and target device:
+
+- Import PDF outlines and MSCZ, add ink, restart, and verify the chosen library
+  reconnects with the same contents. Check browser storage and a chosen folder
+  separately where supported; file-URL picker support must be checked on-device.
+- Export a library, restore it into a fresh library, and verify score hashes,
+  ink, tags, playlists, previous versions and deletions.
+- Sync two devices, edit offline on both, reconnect, resolve a competing edit,
+  and verify convergence. Confirm incomplete uploads stay unpublished and a
+  failed attempt can be retried without replacing another device's package.
+- Check the displayed destination/account, the storage cost of full packages,
+  and behavior when permission is revoked or the network/storage is unavailable.
+  Automated tests must continue to mock all of these provider requests.
+
 `tests/variants.spec.js` verifies both apps together when `build/variants/`
 contains the stable deployment with the wink deployment under `wink-page-turn/`.

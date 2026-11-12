@@ -1,11 +1,52 @@
 // +skip
 import { Score } from './score.js';
-import { checkUnsaved } from './file.js';
+import { checkUnsaved, FileSrc } from './file.js';
 import { toast, css } from './common.js';
+import { exchangeLibraryPackages } from './bookshelf-sync.js';
+import { LibraryCloudTransport } from './bookshelf-cloud.js';
 // -skip
 
 class BookshelfStore {
   constructor() { this.pending = new Map(); this.sequence = 0; }
+  async configure(storage) {
+    if (this.syncPending) throw new Error('Wait for library sync before changing its location.');
+    if (Score.activeScore?.libraryDocumentId) {
+      await this.flush(Score.activeScore); await Score.activeScore.dispose();
+    }
+    if (this.worker) { await this.call('close'); this.worker.terminate(); }
+    this.worker = this.workerStarting = null; this.storage = storage;
+    const result = await this.call('open');
+    try { await window.RostrumLibraryHost.saveSelection(storage); }
+    catch { toast('Library opened, but its location could not be remembered. Choose it again next time.'); }
+    return result;
+  }
+  async sync(transport) {
+    if (this.syncPending) throw new Error('Library sync is already running.');
+    const previous = Score.activeScore;
+    const documentId = previous?.libraryDocumentId;
+    const index = Math.max(0, Number(previous?.numbers?.pn || 1) - 1);
+    const anchor = previous && { type: previous.music ? 'music' : 'pdf', pageIndex: previous.pgs[index]?.mozPn ? previous.pgs[index].mozPn - 1 : index };
+    this.syncPending = true;
+    const cancelDisplay = _shade_.cancel.style.display;
+    _shade_.cancel.style.display = 'none';
+    _shade_.show('Syncing library', 0);
+    try { return await exchangeLibraryPackages(this, transport); }
+    finally {
+      if (documentId && !Score.activeScore) {
+        try { await this.openDocument(documentId, anchor, true); }
+        catch (error) { toast('Review the synced library before reopening this score: ' + error.message); }
+      }
+      this.syncPending = false;
+      _shade_.cancel.style.display = cancelDisplay;
+      _shade_.hide();
+    }
+  }
+  async syncCloud(source, path) {
+    if (![Score.sources.gdrive, Score.sources.dbx, Score.sources.odrive, Score.sources.pcloud].includes(source)) throw new Error('Choose a cloud service');
+    const transport = new LibraryCloudTransport(FileSrc.get(source), path);
+    await transport.connect();
+    return this.sync(transport);
+  }
   scheduleSave(score) {
     score.librarySaveGeneration = (score.librarySaveGeneration || 0) + 1;
     clearTimeout(score.librarySaveTimer);
@@ -31,8 +72,14 @@ class BookshelfStore {
     score.librarySavePromise = save();
     try { await score.librarySavePromise; } finally { score.librarySavePromise = null; }
   }
-  async openDocument(id, anchor) {
+  async openDocument(id, anchor, afterSync = false) {
+    if (this.syncPending && !afterSync) throw new Error('Wait for library sync before opening another score.');
     if (Score.activeScore?.libraryDocumentId) await this.flush(Score.activeScore);
+    const conflicts = await this.call('conflicts');
+    if (conflicts.some(conflict => conflict.table === 'documents' && conflict.id === id
+      || conflict.table === 'annotations' && conflict.alternatives.some(change => JSON.parse(change.payload_json).document_id === id))) {
+      throw new Error('Resolve this score’s conflicting edits before opening it.');
+    }
     const state = await this.call('read', { id });
     const settings = JSON.parse(state.document.settings_json);
     const score = await new Score().init(null, null, JSON.parse(state.document.metadata_json).originalFilename,
@@ -48,26 +95,70 @@ class BookshelfStore {
     }
     return score;
   }
-  call(action, args = {}) {
-    if (!this.worker) {
-      this.worker = new Worker(new URL('bookshelf-worker.js', location.href), { type: 'module' });
-      this.worker.onmessage = ({ data }) => {
+  async ensureWorker() {
+    if (this.workerStarting) return this.workerStarting;
+    this.workerStarting = (async () => {
+      if (this.storage === undefined) this.storage = await window.RostrumLibraryHost.loadSelection() || {};
+      let url = new URL('bookshelf-worker.js', location.href).href;
+      if (location.protocol === 'file:') {
+        this.hostStorage = await window.RostrumLibraryHost.openHostStorage(this.storage || {});
+        const runtime = window._bookshelfRuntime_;
+        if (!runtime) throw new Error('This build does not contain the library runtime.');
+        const decode = value => new Uint8Array([...atob(value)].map(char => char.charCodeAt(0)));
+        const workerText = await new Response(new Blob([decode(runtime.worker)]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+        const script = `globalThis.rostrumLibraryWasm = new Uint8Array(await new Response(new Blob([Uint8Array.from(atob(${JSON.stringify(runtime.wasm)}), c=>c.charCodeAt(0))]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());\n` + workerText;
+        const bytes = new TextEncoder().encode(script);
+        let binary = ''; for (let i = 0; i < bytes.length; i += 32768) binary += String.fromCharCode(...bytes.subarray(i, i + 32768));
+        url = 'data:text/javascript;base64,' + btoa(binary);
+      }
+      this.worker = new Worker(url, { type: 'module' });
+      let readyResolve, readyReject;
+      const ready = new Promise((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
+      const startupTimeout = setTimeout(() => readyReject(new Error('Library worker did not finish starting.')), 20000);
+      this.worker.onmessage = async ({ data }) => {
+        if (data.hostRequest) {
+          const methods = {
+            readDatabase: () => this.hostStorage.readDatabase(), writeDatabase: bytes => this.hostStorage.writeDatabase(bytes), close: () => this.hostStorage.close(),
+            read: path => this.hostStorage.files.read(path), write: (path, bytes) => this.hostStorage.files.write(path, bytes), remove: path => this.hostStorage.files.remove(path),
+          };
+          try {
+            if (!Object.hasOwn(methods, data.method)) throw new Error('Unknown storage operation');
+            const value = await methods[data.method](...data.args);
+            this.worker?.postMessage({ hostReply: data.hostRequest, value });
+          } catch (error) { this.worker?.postMessage({ hostReply: data.hostRequest, error: error.message, errorName: error.name }); }
+          return;
+        }
+        if (data.ready) { clearTimeout(startupTimeout); readyResolve(); return; }
         const pending = this.pending.get(data.id);
         if (!pending) return;
         this.pending.delete(data.id);
-        data.error ? pending.reject(new Error(data.error)) : pending.resolve(data.value);
+        data.error ? pending.reject(Object.assign(new Error(data.error), { persistenceFailed: data.persistenceFailed })) : pending.resolve(data.value);
       };
       this.worker.onerror = () => {
+        clearTimeout(startupTimeout); readyReject(new Error('Could not start library storage.'));
         for (const pending of this.pending.values()) pending.reject(new Error('Could not start library storage.'));
         this.pending.clear(); this.worker.terminate(); this.worker = null;
+        this.hostStorage?.close(); this.hostStorage = null;
+        this.workerStarting = null;
       };
-    }
+      await ready;
+      await this.send('open', { storage: location.protocol === 'file:' ? { kind: 'host' } : this.storage || {} });
+      return this.worker;
+    })().catch(error => {
+      this.worker?.terminate(); this.hostStorage?.close(); this.hostStorage = null;
+      this.worker = this.workerStarting = null; throw error;
+    });
+    return this.workerStarting;
+  }
+  send(action, args) {
     return new Promise((resolve, reject) => {
       const id = ++this.sequence;
       this.pending.set(id, { resolve, reject });
-      this.worker.postMessage({ id, action, args });
+      try { this.worker.postMessage({ id, action, args }); }
+      catch (error) { this.pending.delete(id); reject(error); }
     });
   }
+  async call(action, args = {}) { await this.ensureWorker(); return this.send(action, args); }
   async analyze(file) {
     if (!/\.(pdf|mscz|mxl|musicxml|xml)$/i.test(file.name)) throw new Error('Unsupported score format');
     const entries = [];
@@ -132,6 +223,23 @@ class BookshelfStore {
     const named = new File([file], JSON.parse(doc.metadata_json).originalFilename);
     return this.call('reindex', { documentId: id, entries: await this.analyze(named) });
   }
+  async exportBackup() {
+    this.emergencyBackup = false;
+    if (Score.activeScore?.libraryDocumentId) {
+      try { await this.flush(Score.activeScore); }
+      catch (error) {
+        if (!error.persistenceFailed) throw error;
+        this.emergencyBackup = true;
+      }
+    }
+    return this.call('backup');
+  }
+  async importBackup(file) {
+    if (Score.activeScore?.libraryDocumentId) {
+      await this.flush(Score.activeScore); await Score.activeScore.dispose();
+    }
+    return this.call('importBackup', { file });
+  }
 }
 const bookshelfStore = new BookshelfStore();
 window._bookshelf_ = bookshelfStore;
@@ -186,7 +294,7 @@ class BookshelfView {
     this.elm.insertBefore(tagFilter, results); this.elm.insertBefore(tagMatch, results);
     const mode = document.createElement('select');
     mode.setAttribute('aria-label', 'Library view');
-    for (const [value, label] of [['documents', 'All scores'], ['entries', 'Songs'], ['bookshelves', 'Bookshelves'], ['playlists', 'Playlists'], ['tags', 'Tags']]) mode.add(new Option(label, value));
+    for (const [value, label] of [['documents', 'All scores'], ['entries', 'Songs'], ['bookshelves', 'Bookshelves'], ['playlists', 'Playlists'], ['tags', 'Tags'], ['history', 'Previous and deleted scores']]) mode.add(new Option(label, value));
     const collection = document.createElement('select'); collection.setAttribute('aria-label', 'Collection');
     const createName = document.createElement('input'); createName.placeholder = 'New collection name'; createName.setAttribute('aria-label', 'New collection name');
     const create = document.createElement('button'); create.textContent = 'Create';
@@ -196,6 +304,87 @@ class BookshelfView {
       try { status.textContent = ''; await task(); }
       catch (error) { status.textContent = error.message; }
     };
+    const transfers = document.createElement('details');
+    const transferTitle = document.createElement('summary'); transferTitle.textContent = 'Backups and conflicting edits'; transfers.append(transferTitle);
+    const backup = document.createElement('button'); backup.textContent = 'Export library';
+    const restore = document.createElement('input'); restore.type = 'file'; restore.accept = '.zip,application/zip'; restore.setAttribute('aria-label', 'Import library backup');
+    const explanation = document.createElement('div'); explanation.textContent = 'Import adds the saved library and keeps conflicting edits for review.';
+    const review = document.createElement('button'); review.textContent = 'Review conflicting edits';
+    const conflictResults = document.createElement('div');
+    const folder = document.createElement('button'); folder.textContent = 'Choose library folder'; folder.hidden = typeof window.showDirectoryPicker !== 'function';
+    const defaultLibrary = document.createElement('button'); defaultLibrary.textContent = 'Use default library';
+    const browserLibrary = document.createElement('button'); browserLibrary.textContent = 'Use browser compatibility library';
+    const location = document.createElement('div'); location.textContent = 'Library location: default';
+    transfers.append(backup, explanation, restore, review, conflictResults); this.elm.insertBefore(transfers, results);
+    transfers.append(folder, defaultLibrary, browserLibrary, location);
+    const cloud = document.createElement('select'); cloud.setAttribute('aria-label', 'Library cloud service'); cloud.add(new Option('Choose cloud service', ''));
+    for (const source of [Score.sources.gdrive, Score.sources.dbx, Score.sources.odrive, Score.sources.pcloud]) cloud.add(new Option(source, source));
+    const cloudPath = document.createElement('input'); cloudPath.setAttribute('aria-label', 'Library cloud folder'); cloudPath.placeholder = 'Folder path (blank is root)';
+    const cloudInfo = document.createElement('div'); cloudInfo.textContent = 'Use a dedicated folder with the connected account. Each upload is a full library package; earlier packages are kept.';
+    const sync = document.createElement('button'); sync.textContent = 'Sync library now';
+    transfers.append(cloud, cloudPath, cloudInfo, sync);
+    let cloudTouched = false;
+    cloud.onchange = cloudPath.oninput = () => { cloudTouched = true; };
+    window.RostrumLibraryHost.loadCloudSelection().then(saved => {
+      if (!cloudTouched && saved) { cloud.value = saved.source; cloudPath.value = saved.path; }
+    }).catch(() => {});
+    sync.onclick = () => run(async () => {
+      sync.disabled = true; status.textContent = 'Syncing library';
+      try {
+        const result = await bookshelfStore.syncCloud(cloud.value, cloudPath.value.trim()); await this.refresh();
+        await window.RostrumLibraryHost.saveCloudSelection({ source: cloud.value, path: cloudPath.value.trim() }).catch(() => {});
+        status.textContent = `Synced library; ${result.conflicts} conflicting items to review.`;
+      } finally { sync.disabled = false; }
+    });
+    folder.onclick = () => run(async () => {
+      const directory = await window.showDirectoryPicker({ mode: 'readwrite' });
+      await bookshelfStore.configure({ kind: 'directory', directory });
+      location.textContent = 'Library folder: ' + directory.name; await this.refresh();
+    });
+    defaultLibrary.onclick = () => run(async () => {
+      await bookshelfStore.configure({}); location.textContent = 'Library location: default'; await this.refresh();
+    });
+    browserLibrary.onclick = () => run(async () => {
+      await bookshelfStore.configure({ kind: 'indexeddb' }); location.textContent = 'Library location: browser compatibility storage'; await this.refresh();
+    });
+    backup.onclick = () => run(async () => {
+      const bytes = await bookshelfStore.exportBackup();
+      await window._localFs_.fileSaveLegacy(new Blob([bytes], { type: 'application/zip' }), { fileName: 'rostrum-library-' + new Date().toISOString().slice(0,10) + '.zip' });
+      status.textContent = bookshelfStore.emergencyBackup ? 'Emergency backup exported; library storage could not be updated.' : 'Library exported';
+    });
+    restore.onchange = () => run(async () => {
+      if (!restore.files[0]) return;
+      restore.disabled = true;
+      try {
+        const result = await bookshelfStore.importBackup(restore.files[0]);
+        await this.refresh();
+        status.textContent = `Imported ${result.importedFiles} scores; ${result.conflicts} conflicting items to review.`;
+      } finally { restore.disabled = false; restore.value = ''; }
+    });
+    review.onclick = () => run(async () => {
+      const conflicts = await bookshelfStore.call('conflicts'); conflictResults.replaceChildren();
+      if (!conflicts.length) { conflictResults.textContent = 'No conflicting edits'; return; }
+      for (const conflict of conflicts) {
+        const section = document.createElement('div');
+        for (const change of conflict.alternatives) {
+          const row = JSON.parse(change.payload_json), metadata = JSON.parse(row.metadata_json || '{}');
+          const title = document.createElement('div');
+          title.textContent = [metadata.title || metadata.displayName || metadata.name || row.name || 'Saved item', row.deleted_at ? 'Deleted' : 'Kept', change.created_at].join(' · ');
+          const details = document.createElement('details'), summary = document.createElement('summary'); summary.textContent = 'Compare saved values';
+          const values = document.createElement('pre'); values.style.cssText = 'white-space:pre-wrap;overflow-wrap:anywhere;text-align:left';
+          values.textContent = JSON.stringify({ ...metadata, ...(row.content_json ? { writing: JSON.parse(row.content_json) } : {}), ...(row.settings_json ? { settings: JSON.parse(row.settings_json) } : {}) }, null, 2);
+          details.append(summary, values);
+          const choose = document.createElement('button'); choose.textContent = 'Use this version';
+          choose.onclick = () => run(async () => {
+            await bookshelfStore.call('resolveConflict', { table: conflict.table, id: conflict.id, revisionId: change.id,
+              expectedRevisionIds: conflict.alternatives.map(option => option.id) });
+            conflictResults.replaceChildren(); await this.refresh(); review.click();
+          });
+          section.append(title, details, choose);
+        }
+        conflictResults.append(section);
+      }
+    });
     const records = (table, parent, id) => bookshelfStore.call('records', { table, parent, id });
     const update = (table, values) => bookshelfStore.call('update', { table, values });
     const label = row => row.name || JSON.parse(row.metadata_json).title || JSON.parse(row.metadata_json).displayName || JSON.parse(row.metadata_json).name;
@@ -219,6 +408,8 @@ class BookshelfView {
       const referenceRows = await Promise.all(referenceTables.map(table => records(table)));
       if (current !== generation) return;
       references = Object.fromEntries(referenceTables.map((table, i) => [table, referenceRows[i]]));
+      location.textContent = bookshelfStore.storage?.kind === 'directory' ? 'Library folder: ' + bookshelfStore.storage.directory.name
+        : bookshelfStore.storage?.kind === 'indexeddb' ? 'Library location: browser compatibility storage' : 'Library location: default';
       const selectedTags = [...tagFilter.selectedOptions].map(option => option.value);
       tagFilter.replaceChildren();
       for (const tag of references.tags) { const option = new Option(tag.name, tag.id); option.selected = selectedTags.includes(tag.id); tagFilter.add(option); }
@@ -235,7 +426,11 @@ class BookshelfView {
       let memberships = [];
       const filters = { query: search.value, tagIds: selectedTags, matchAll: tagMatch.value === 'all' };
       search.placeholder = ['documents', 'bookshelves'].includes(mode.value) ? 'Search scores' : 'Search songs';
-      if (mode.value === 'bookshelves' && collection.value) {
+      if (['bookshelves', 'playlists'].includes(mode.value) && !collection.value) {
+        rows = [];
+      } else if (mode.value === 'history') {
+        rows = await bookshelfStore.call('history');
+      } else if (mode.value === 'bookshelves' && collection.value) {
         memberships = await records('bookshelf_documents', 'bookshelf_id', collection.value);
         const documents = await bookshelfStore.call('list', filters);
         rows = memberships.sort((a,b) => a.order_key.localeCompare(b.order_key) || a.id.localeCompare(b.id)).flatMap(link => {
@@ -270,12 +465,18 @@ class BookshelfView {
         openButton.textContent = metadata.title || metadata.displayName;
         openButton.style.cssText = 'display:block;margin:.5em 0';
         openButton.disabled = !!row.unavailable;
+        if (row.deleted_at) openButton.disabled = true;
         openButton.onclick = () => run(async () => {
           if (!await checkUnsaved()) return;
           await bookshelfStore.openDocument(row.document_id || row.id, row.anchor_json && JSON.parse(row.anchor_json));
           panel.hide();
         });
         card.append(openButton);
+        if (mode.value === 'history') {
+          const info = document.createElement('div'); info.textContent = row.deleted_at ? 'Deleted score' : row.replaced_by_id ? 'Previous version' : 'Current version'; card.append(info);
+          if (row.deleted_at || row.replaced_by_id) button(card, 'Use this version', () => bookshelfStore.call('useVersion', { id: row.id }));
+          if (row.deleted_at) continue;
+        }
         if (row.unavailable) {
           const unavailable = document.createElement('div'); unavailable.textContent = 'This song or score was deleted.'; card.append(unavailable);
           if (row.membership) button(card, 'Remove from collection', () => update('playlist_items', { id: row.membership.id, deleted_at: new Date().toISOString() }));
@@ -353,7 +554,11 @@ class BookshelfView {
           card.append(replacement);
         }
       }
-      if (!rows.length) { const empty = document.createElement('div'); empty.textContent = 'No scores found'; results.append(empty); }
+      if (!rows.length) {
+        const empty = document.createElement('div');
+        empty.textContent = ['bookshelves', 'playlists'].includes(mode.value) && !collection.value ? 'Choose or create a collection' : 'No scores found';
+        results.append(empty);
+      }
     });
     input.onchange = () => run(async () => {
       input.disabled = true;

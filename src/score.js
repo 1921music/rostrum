@@ -2120,9 +2120,18 @@ class Score {
 
   async captureLibraryState() {
     const annotations = [];
-    const identities = this.libraryAnnotationIds ||= {};
+    const identities = this.libraryAnnotationIds ||= Object.create(null);
+    const identity = async key => {
+      if (Object.hasOwn(identities, key)) return identities[key];
+      // A document-scoped UUIDv8 avoids collisions when a source file with
+      // embedded annotation IDs is independently imported into two documents.
+      const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(this.libraryDocumentId + ':' + key)));
+      bytes[6] = (bytes[6] & 15) | 128; bytes[8] = (bytes[8] & 63) | 128;
+      const hex = [...bytes.slice(0,16)].map(byte => byte.toString(16).padStart(2,'0')).join('');
+      return identities[key] = `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+    };
     const settings = { version: 1, quality: this.quality,
-      menu: _menu_.stashToJsonObj('score'), annotationIds: identities };
+      menu: JSON.parse(JSON.stringify(_menu_.stashToJsonObj('score'))) };
     if (this.music) {
       const records = await this.musicRecords({ preserveSelection: true });
       settings.music = { version: 1, transpose: this.music.transpose,
@@ -2131,12 +2140,15 @@ class Score {
         volume: this.music.player.volume, mixer: this.music.player.mixer,
         bookmarks: this.music.bookmarks, menu: settings.menu };
       for (const record of records) annotations.push({
-        id: identities[record.id] ||= crypto.randomUUID(),
+        id: await identity(record.id),
         anchor: { type: 'music', key: record.key, staff: record.staff }, content: record });
     } else {
       const seen = new Set();
+      const pageIds = new Set();
       settings.pages = this.pgs.map(pg => {
-        pg.libraryPageId ||= crypto.randomUUID();
+        pg.libraryPageId ||= pg.mozPn ? this.libraryDocumentId + ':page:' + pg.mozPn : crypto.randomUUID();
+        if (pageIds.has(pg.libraryPageId)) pg.libraryPageId = crypto.randomUUID();
+        pageIds.add(pg.libraryPageId);
         const objects = pg.inflated ? pg.canvas.getObjects() : pg.json?.objects || [];
         for (const object of objects) {
           if (!object.rostrumId || seen.has(object.rostrumId)) object.rostrumId = crypto.randomUUID();
@@ -2144,7 +2156,7 @@ class Score {
         }
         const json = pg.toJson() || pg.json || { objects: [] };
         for (const object of json.objects || []) {
-          annotations.push({ id: identities[object.rostrumId] ||= crypto.randomUUID(),
+          annotations.push({ objectKey: object.rostrumId,
             anchor: { type: 'pdf', pageId: pg.libraryPageId },
             content: object });
         }
@@ -2152,6 +2164,7 @@ class Score {
         return { id: pg.libraryPageId, mozPn: pg.mozPn, width: pg.width, height: pg.height,
           bookmark: pg.bookmark, background: pg.background, canvas };
       });
+      for (const annotation of annotations) { annotation.id = await identity(annotation.objectKey); delete annotation.objectKey; }
     }
     return { settings, annotations };
   }
@@ -2160,7 +2173,12 @@ class Score {
     if (settings.version === 1) {
       this.libraryRestoring = true;
       try {
-        this.libraryAnnotationIds = settings.annotationIds || {};
+        this.libraryAnnotationIds = Object.assign(Object.create(null), settings.annotationIds || {});
+        for (const annotation of annotations) {
+          const content = JSON.parse(annotation.content_json);
+          const key = this.music ? content.id : content.rostrumId;
+          if (key) this.libraryAnnotationIds[key] = annotation.id;
+        }
         if (activate && settings.menu) _menu_.stashFromJsonObj(settings.menu, 'score');
         this.quality = settings.quality ?? this.quality;
         if (this.music) {

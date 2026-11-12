@@ -485,6 +485,8 @@ def podium_page_patches(canonical):
     ('    <script src="fabric.min.js"></script> \n', ''),
     ('    <script src="score-engine-data.js"></script>\n', ''),
     ('    <script src="browser-fs-access.js"></script>\n', ''),
+    ('    <script src="bookshelf-runtime.js"></script>\n', ''),
+    ('    <script src="bookshelf-host.js"></script>\n', ''),
     ("    <script type=\"module\">import * as pdfjsLib from './pdf.min.mjs'; window.pdfjsLib = pdfjsLib;</script>\n", ''),
     ('    <script src="pdf-lib.min.js"></script> \n', ''),
     ('    <script src="fontkit.umd.min.js"></script> \n', ''),

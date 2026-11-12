@@ -1,15 +1,21 @@
 const { test, expect } = require('@playwright/test');
 const fs = require('node:fs');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
+const { zipSync, unzipSync, strToU8, strFromU8 } = require('fflate');
 
-test.beforeEach(async ({ page }) => {
-  page.external = [];
-  await page.context().route('**/*', route => {
+async function blockExternal(context, external) {
+  await context.route('**/*', route => {
     const url = route.request().url();
     if (url.startsWith('http://127.0.0.1:9876/')) return route.continue();
+    if (url.startsWith(pathToFileURL(path.resolve('build')).href + '/')) return route.continue();
     if (url === 'https://accounts.google.com/gsi/client') return route.fulfill({ contentType: 'application/javascript', body: 'window.google = { accounts: { oauth2: {} } };' });
-    page.external.push(url); return route.abort();
+    external.push(url); return route.abort();
   });
+}
+test.beforeEach(async ({ page }) => {
+  page.external = [];
+  await blockExternal(page.context(), page.external);
 });
 test.afterEach(async ({ page }) => expect(page.external).toEqual([]));
 
@@ -246,6 +252,8 @@ test('collection and song editing UI works on a narrow screen', async ({ page })
   await page.evaluate(() => _menu_.notify('score/open/up'));
   await page.getByText('Library', { exact: true }).click();
   await page.getByLabel('Library view').selectOption('bookshelves');
+  await expect(page.getByText('Choose or create a collection', { exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'UI.pdf', exact: true })).toHaveCount(0);
   await page.getByLabel('New collection name').fill('My shelf');
   await page.getByRole('button', { name: 'Create', exact: true }).click();
   await expect(page.getByLabel('Collection', { exact: true }).locator('option', { hasText: 'My shelf' })).toHaveCount(1);
@@ -296,4 +304,229 @@ test('a second tab reports exclusive database access instead of using temporary 
   });
   expect(error).toBeTruthy();
   await second.close();
+});
+
+for (const kind of ['indexeddb', 'directory']) test(`${kind} backend saves SQLite and owned files across reload`, async ({ page }) => {
+  await page.goto('/pod.html');
+  await page.waitForFunction(() => !!window._bookshelf_ && !!window._menu_);
+  const id = await page.evaluate(async kind => {
+    const storage = kind === 'directory' ? { kind, directory: await (await navigator.storage.getDirectory()).getDirectoryHandle('chosen-folder', { create: true }) } : { kind };
+    await _bookshelf_.configure(storage);
+    const pdf = await PDFLib.PDFDocument.create(); pdf.addPage([300,400]);
+    return (await _bookshelf_.import(new File([await pdf.save()], 'Persist.pdf'))).id;
+  }, kind);
+  await page.reload();
+  await page.waitForFunction(() => !!window._bookshelf_ && !!window._menu_);
+  const result = await page.evaluate(async ({ kind, id }) => {
+    const docs = await _bookshelf_.call('list');
+    const score = await _bookshelf_.openDocument(id);
+    return { ids: docs.map(doc => doc.id), pages: score.pgs.length, kind: _bookshelf_.storage.kind };
+  }, { kind, id });
+  expect(result).toEqual({ ids: [id], pages: 1, kind });
+});
+
+test('library packages restore on another device, merge independent edits, and preserve conflicts until resolved', async ({ page, browser }) => {
+  await page.goto('/pod.html');
+  await page.waitForFunction(() => !!window._bookshelf_ && !!window._menu_);
+  const initial = await page.evaluate(async () => {
+    const pdf = await PDFLib.PDFDocument.create(); pdf.addPage([300,400]);
+    const doc = await _bookshelf_.import(new File([await pdf.save()], 'Exchange.pdf'));
+    const entry = (await _bookshelf_.call('search', {}))[0];
+    const score = await _bookshelf_.openDocument(doc.id); score.setDirty(true); await _bookshelf_.flush(score);
+    return { docId: doc.id, entryId: entry.id, bytes: [...new Uint8Array(await (await _bookshelf_.exportBackup()).arrayBuffer())] };
+  });
+  const otherContext = await browser.newContext(); await blockExternal(otherContext, page.external);
+  try {
+    const other = await otherContext.newPage(); await other.goto('/pod.html');
+    await other.waitForFunction(() => !!window._bookshelf_ && !!window._menu_);
+    const restored = await other.evaluate(async initial => {
+      const result = await _bookshelf_.importBackup(new File([new Uint8Array(initial.bytes)], 'library.zip'));
+      const score = await _bookshelf_.openDocument(initial.docId);
+      const pg = await score.pgUse(1, false); pg.canvas.add(new fabric.Rect({ left: 20, top: 30, width: 40, height: 50, fill: 'blue' }));
+      score.setDirty(true); await _bookshelf_.flush(score);
+      await _bookshelf_.call('update', { table: 'entries', values: { id: initial.entryId,
+        metadata_json: JSON.stringify({ title: 'Remote title', source: { type: 'manual' } }) } });
+      return { result, bytes: [...new Uint8Array(await (await _bookshelf_.exportBackup()).arrayBuffer())] };
+    }, initial);
+    expect(restored.result).toMatchObject({ importedFiles: 1, conflicts: 0 });
+    const merged = await page.evaluate(async ({ initial, bytes }) => {
+      const score = _score_, pg = await score.pgUse(1, false);
+      pg.canvas.add(new fabric.Circle({ left: 70, top: 80, radius: 10, fill: 'red' })); score.setDirty(true); await _bookshelf_.flush(score);
+      await _bookshelf_.call('update', { table: 'entries', values: { id: initial.entryId,
+        metadata_json: JSON.stringify({ title: 'Local title', source: { type: 'manual' } }) } });
+      const result = await _bookshelf_.importBackup(new File([new Uint8Array(bytes)], 'remote.zip'));
+      const conflicts = await _bookshelf_.call('conflicts');
+      const restoredScore = await _bookshelf_.openDocument(initial.docId);
+      const restoredPg = await restoredScore.pgUse(1, false);
+      const fills = restoredPg.canvas.getObjects().map(object => object.fill).sort();
+      const conflict = conflicts.find(conflict => conflict.id === initial.entryId);
+      const chosen = conflict.alternatives.find(change => JSON.parse(JSON.parse(change.payload_json).metadata_json).title === 'Remote title');
+      await _bookshelf_.call('resolveConflict', { table: 'entries', id: initial.entryId, revisionId: chosen.id,
+        expectedRevisionIds: conflict.alternatives.map(change => change.id) });
+      const again = await _bookshelf_.importBackup(new File([new Uint8Array(bytes)], 'remote.zip'));
+      return { result, conflictCount: conflicts.length, fills, again, resolved: (await _bookshelf_.call('conflicts')).length,
+        bytes: [...new Uint8Array(await (await _bookshelf_.exportBackup()).arrayBuffer())] };
+    }, { initial, bytes: restored.bytes });
+    expect(merged.fills).toEqual(['blue', 'red']);
+    expect(merged.conflictCount).toBe(1);
+    expect(merged.resolved).toBe(0);
+    expect(merged.again.addedChanges).toBe(0);
+    const converged = await other.evaluate(async ({ initial, bytes }) => {
+      await _bookshelf_.importBackup(new File([new Uint8Array(bytes)], 'resolved.zip'));
+      return { titles: (await _bookshelf_.call('search', {})).map(row => JSON.parse(row.metadata_json).title),
+        conflicts: (await _bookshelf_.call('conflicts')).length };
+    }, { initial, bytes: merged.bytes });
+    expect(converged).toEqual({ titles: ['Remote title'], conflicts: 0 });
+  } finally { await otherContext.close(); }
+});
+
+test('damaged backup files and forged change records are rejected without altering the library', async ({ page }) => {
+  await page.goto('/pod.html');
+  await page.waitForFunction(() => !!window._bookshelf_ && !!window._menu_);
+  const bytes = await page.evaluate(async () => {
+    const pdf = await PDFLib.PDFDocument.create(); pdf.addPage([300,400]);
+    await _bookshelf_.import(new File([await pdf.save()], 'Safe.pdf'));
+    return [...new Uint8Array(await (await _bookshelf_.exportBackup()).arrayBuffer())];
+  });
+  const damaged = unzipSync(new Uint8Array(bytes));
+  const scorePath = Object.keys(damaged).find(name => name.startsWith('scores/'));
+  damaged[scorePath][0] ^= 1;
+  const forged = unzipSync(new Uint8Array(bytes));
+  const manifest = JSON.parse(strFromU8(forged['library.json']));
+  manifest.changes[0].entity_type = 'documents; DROP TABLE entries';
+  forged['library.json'] = strToU8(JSON.stringify(manifest));
+  for (const archive of [zipSync(damaged), zipSync(forged)]) {
+    const result = await page.evaluate(async bytes => {
+      let error;
+      try { await _bookshelf_.importBackup(new File([new Uint8Array(bytes)], 'bad.zip')); } catch (e) { error = e.message; }
+      return { error, count: (await _bookshelf_.call('list')).length, entries: (await _bookshelf_.call('search', {})).length };
+    }, [...archive]);
+    expect(result.error).toBeTruthy();
+    expect(result).toMatchObject({ count: 1, entries: 1 });
+  }
+});
+
+test('standalone file URL starts the embedded Worker and persists with an explicit backend', async ({ page }) => {
+  await page.goto(pathToFileURL(path.resolve('build/podium.html')).href);
+  await page.waitForFunction(() => !!window._bookshelf_ && !!window._menu_);
+  const result = await page.evaluate(async () => {
+    await _bookshelf_.configure({ kind: 'indexeddb', name: 'file-library-test-' + crypto.randomUUID() });
+    const tag = await _bookshelf_.call('update', { table: 'tags', values: { id: crypto.randomUUID(), name: 'Offline tag' } });
+    const bytes = await _bookshelf_.call('export');
+    return { name: tag.name, header: new TextDecoder().decode(bytes.slice(0,15)) };
+  });
+  expect(result).toEqual({ name: 'Offline tag', header: 'SQLite format 3' });
+  await page.reload(); await page.waitForFunction(() => !!window._bookshelf_ && !!window._menu_);
+  const tags = await page.evaluate(() => _bookshelf_.call('records', { table: 'tags' }));
+  expect(tags.map(tag => tag.name)).toEqual(['Offline tag']);
+});
+
+test('an external database change blocks overwriting but still permits an emergency backup', async ({ page }) => {
+  await page.goto('/pod.html');
+  await page.waitForFunction(() => !!window._bookshelf_ && !!window._menu_);
+  const result = await page.evaluate(async () => {
+    const directory = await (await navigator.storage.getDirectory()).getDirectoryHandle('external-change', { create: true });
+    await _bookshelf_.configure({ kind: 'directory', directory });
+    const pdf = await PDFLib.PDFDocument.create(); pdf.addPage([300,400]);
+    const doc = await _bookshelf_.import(new File([await pdf.save()], 'Recover.pdf'));
+    const score = await _bookshelf_.openDocument(doc.id), pg = await score.pgUse(1, false);
+    const handle = await directory.getFileHandle('library.sqlite');
+    const changed = new Uint8Array(await (await handle.getFile()).arrayBuffer()); changed[changed.length - 1] ^= 1;
+    const writer = await handle.createWritable(); await writer.write(changed); await writer.close();
+    pg.canvas.add(new fabric.Rect({ left:10,top:20,width:30,height:40,fill:'red' })); score.setDirty(true);
+    let error;
+    try { await _bookshelf_.flush(score); } catch (e) { error = e.message; }
+    const archive = await _bookshelf_.exportBackup();
+    return { error, dirty: score.dirty, emergency: _bookshelf_.emergencyBackup, bytes: [...new Uint8Array(await archive.arrayBuffer())] };
+  });
+  expect(result.error).toMatch(/changed outside/);
+  expect(result).toMatchObject({ dirty: true, emergency: true });
+  const backup = unzipSync(new Uint8Array(result.bytes));
+  const manifest = JSON.parse(strFromU8(backup['library.json']));
+  expect(manifest.records.annotations.filter(row => !row.deleted_at)).toHaveLength(1);
+});
+
+test('sync transport exchanges immutable packages and resumes after a failed upload', async ({ page }) => {
+  test.setTimeout(90000);
+  await page.goto('/pod.html'); await page.waitForFunction(() => !!window._bookshelf_ && !!window._menu_);
+  const result = await page.evaluate(async () => {
+    const packages = new Map();
+    const transport = { id: 'mock-cloud', async list() { return [...packages.keys()].map(id => ({ id })); },
+      async read(id) { return packages.get(id); }, async write(id, file) { if (packages.has(id)) throw new Error('Package overwritten'); packages.set(id, file); } };
+    const a = { kind: 'indexeddb', name: 'device-a' }, b = { kind: 'indexeddb', name: 'device-b' };
+    await _bookshelf_.configure(a);
+    const pdf = await PDFLib.PDFDocument.create(); pdf.addPage([300,400]);
+    await _bookshelf_.import(new File([await pdf.save()], 'Sync.pdf'));
+    await _bookshelf_.sync(transport);
+    await _bookshelf_.configure(b); await _bookshelf_.sync(transport);
+    await _bookshelf_.call('update', { table: 'tags', values: { id: crypto.randomUUID(), name: 'From B' } });
+    await _bookshelf_.sync(transport);
+    await _bookshelf_.configure(a);
+    await _bookshelf_.call('update', { table: 'tags', values: { id: crypto.randomUUID(), name: 'From A' } });
+    let failed = false;
+    try { await _bookshelf_.sync({ ...transport, async write() { throw new Error('Upload failed'); } }); } catch { failed = true; }
+    await _bookshelf_.sync(transport);
+    const namesA = (await _bookshelf_.call('records', { table: 'tags' })).map(row => row.name).sort();
+    await _bookshelf_.configure(b); await _bookshelf_.sync(transport);
+    const namesB = (await _bookshelf_.call('records', { table: 'tags' })).map(row => row.name).sort();
+    const count = packages.size;
+    const unchanged = await _bookshelf_.sync(transport);
+    // Changing accounts can leave the same destination name with no packages.
+    packages.clear();
+    const republished = await _bookshelf_.sync(transport);
+    return { namesA, namesB, failed, packages: count, skipped: unchanged.uploadedPackage === null,
+      republished: !!republished.uploadedPackage && packages.size === 1, conflicts: (await _bookshelf_.call('conflicts')).length };
+  });
+  expect(result).toMatchObject({ namesA: ['From A','From B'], namesB: ['From A','From B'], failed: true, skipped: true, republished: true, conflicts: 0 });
+  expect(result.packages).toBe(5);
+});
+
+test('backup controls download a complete archive and import it into another library', async ({ page }) => {
+  await page.goto('/pod.html'); await page.waitForFunction(() => !!window._bookshelf_ && !!window._menu_);
+  await page.evaluate(async () => {
+    const pdf = await PDFLib.PDFDocument.create(); pdf.addPage([300,400]);
+    await _bookshelf_.import(new File([await pdf.save()], 'Backup UI.pdf'));
+    _menu_.notify('score/open/up');
+  });
+  await page.getByText('Library', { exact: true }).click();
+  await page.getByText('Backups and conflicting edits', { exact: true }).click();
+  const downloading = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export library', exact: true }).click();
+  const download = await downloading;
+  const data = fs.readFileSync(await download.path());
+  const archive = unzipSync(data);
+  expect(Object.keys(archive).filter(name => name.startsWith('scores/'))).toHaveLength(1);
+  expect(new TextDecoder().decode(archive['library.sqlite'].slice(0,15))).toBe('SQLite format 3');
+  await page.evaluate(() => _bookshelf_.configure({ kind: 'indexeddb', name: 'backup-ui-target' }));
+  await page.getByLabel('Import library backup').setInputFiles({ name: 'backup.zip', mimeType: 'application/zip', buffer: data });
+  await expect(page.getByRole('status')).toHaveText('Imported 1 scores; 0 conflicting items to review.');
+  expect(await page.evaluate(async () => (await _bookshelf_.call('list')).length)).toBe(1);
+});
+
+test('cloud sync publishes unique complete packages through the existing provider interface', async ({ page }) => {
+  await page.goto('/pod.html'); await page.waitForFunction(() => !!window._bookshelf_ && !!window._menu_);
+  const result = await page.evaluate(async () => {
+    const files = new Map(), folders = []; let failPublish = false;
+    const source = { source: 'pCloud', async auth() {},
+      async getDir(path) { folders.push(path); return { files: Object.fromEntries(files) }; },
+      async getFileSrc(path, name) { return files.get(name).bytes; },
+      async putFile(path, name, bytes) { if (files.has(name)) throw new Error('Overwrite'); files.set(name, { name, bytes }); },
+      async renameFile(path, name, newName) { if (failPublish) throw new Error('Publication failed'); files.set(newName, files.get(name)); files.delete(name); },
+      async trashFile(path, name) { files.delete(name); } };
+    const original = _FileSrc_.get;
+    _FileSrc_.get = ref => ref === 'pCloud' ? source : original.call(_FileSrc_, ref);
+    try {
+      const pdf = await PDFLib.PDFDocument.create(); pdf.addPage([300,400]);
+      await _bookshelf_.import(new File([await pdf.save()], 'Cloud.pdf'));
+      await _bookshelf_.syncCloud('pCloud', 'My library');
+      await _bookshelf_.syncCloud('pCloud', 'My library');
+      await _bookshelf_.call('update', { table: 'tags', values: { id: crypto.randomUUID(), name: 'Pending upload' } });
+      failPublish = true; let failed = false;
+      try { await _bookshelf_.syncCloud('pCloud', 'My library'); } catch { failed = true; }
+      return { names: [...files.keys()], correctFolder: folders.every(path => path === '/My library'), failed };
+    } finally { _FileSrc_.get = original; }
+  });
+  expect(result.names).toHaveLength(1);
+  expect(result.names.every(name => /^rostrum-library-[0-9a-f-]+\.zip$/.test(name))).toBe(true);
+  expect(result).toMatchObject({ correctFolder: true, failed: true });
 });
