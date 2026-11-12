@@ -3924,7 +3924,7 @@ class TransposePanel extends MusicPanel {
     this.body.classList.add('MusicPanel', 'TransposePanel');
     this.body.innerHTML = `<div class="TransposePanel__steps"><button data-step="-1">- semitone</button> <output></output> <button data-step="1">+ semitone</button></div>
       <p><button data-reset>Original key</button></p><label class="TransposePanel__spelling">Spelling <select><option value="readable">Readable</option><option value="preserve">Preserve</option></select></label>
-      <p><label><input type="checkbox" data-preserve-system-breaks checked> レイアウトを維持する</label></p><p role="status"></p>`;
+      <p><label><input type="checkbox" data-preserve-system-breaks checked> Keep layout</label></p><p role="status"></p>`;
     this.body.addEventListener('click', e => {
       if (!e.target.matches('button')) return;
       const music = _score_?.music;

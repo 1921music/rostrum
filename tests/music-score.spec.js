@@ -172,7 +172,7 @@ test('original system-break preference defaults on and survives toggle, reset an
     _menu_.notify('score/transpose/up');
   }, xml);
   const checkbox = page.locator('[data-tag="TransposePanel"] [data-preserve-system-breaks]');
-  await expect(page.getByRole('checkbox', { name: 'レイアウトを維持する', exact: true })).toBeChecked();
+  await expect(page.getByRole('checkbox', { name: 'Keep layout', exact: true })).toBeChecked();
   await expect(checkbox).toBeChecked();
   await page.locator('[data-tag="TransposePanel"] [data-step="1"]').click();
   await expect.poll(() => page.evaluate(() => !_score_.musicBusy && _score_.music.transpose === 1)).toBe(true);
