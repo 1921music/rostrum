@@ -1,5 +1,6 @@
 import { build } from 'esbuild';
 import { readFile } from 'node:fs/promises';
+import './build_bookshelf.mjs';
 
 // One local script for source development, standalone HTML, PWA and MV3.
 // Bundle both native and fallback paths; never load library code from a CDN.

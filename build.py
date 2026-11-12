@@ -563,6 +563,11 @@ def bundle_local_guide(destination, extension=False):
 
 def build_podium_page(outFileName, canonical="https://1921music.github.io/rostrum/"):
     subprocess.run(['node', 'build_browser_fs.mjs'], check=True)
+    for asset in ('bookshelf-worker.js', 'sqlite3.wasm'):
+        source = os.path.join('build', asset)
+        destination = os.path.join(os.path.dirname(outFileName), asset)
+        if os.path.abspath(source) != os.path.abspath(destination):
+            shutil.copyfile(source, destination)
     with open("src/pod.html", encoding='utf-8') as f:
         page = f.read()
     with open("LICENSE", encoding='utf-8') as f:
@@ -628,6 +633,8 @@ if args.extension:
     shutil.copyfile('manifest.json', os.path.join(extension_dir, 'manifest.json'))
     shutil.copyfile('extension-background.js', os.path.join(extension_dir, 'extension-background.js'))
     shutil.copytree(score_modules, os.path.join(extension_app_dir, 'score-engine'))
+    for asset in ('bookshelf-worker.js', 'sqlite3.wasm'):
+        shutil.copyfile(os.path.join('build', asset), os.path.join(extension_app_dir, asset))
     for pdf_module in ('pdf.min.mjs', 'pdf.worker.min.mjs'):
         with open(os.path.join('lib', pdf_module), encoding='utf-8') as source_file:
             pdf_source = source_file.read()
@@ -871,6 +878,7 @@ if args.pages:
     # and (see its activate handler) drops every cache that is not the current
     # one. Taking the digest of the page alone would miss a changed guidebook.
     digest = hashlib.sha256()
+    doc_to_cache += ['./bookshelf-worker.js', './sqlite3.wasm']
     for relative in ['./index.html'] + doc_to_cache:
         with open(os.path.join(pages_dir, relative[2:]), 'rb') as f:
             digest.update(f.read())

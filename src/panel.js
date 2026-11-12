@@ -56,6 +56,7 @@ import {
 } from "./common.js";
 import { iconPaths } from "./icon.js";
 import { escapeHtml, FileSrc, FileListView, FileSystemView, LocalFileView } from "./file.js";
+import { BookshelfView } from "./bookshelf.js";
 import { Layout } from "./layout.js";
 import { Score } from "./score.js";
 import { smuflTable } from "./smufl.js";
@@ -1132,7 +1133,7 @@ class OpenPanel extends FilePanel {
     let fileSources = Object.entries(Score.sources)
       .filter(([key]) => key !== "url")
       .map(([, value]) => value);
-    this.tabView = new TabView(this, "Recent", ...fileSources);
+    this.tabView = new TabView(this, "Recent", ...(this.constructor === OpenPanel ? ['Library'] : []), ...fileSources);
     this.body.append(this.tabView.elm);
     for (let title in this.tabView.tabs) {
       let tab = this.tabView.tabs[title];
@@ -1140,6 +1141,7 @@ class OpenPanel extends FilePanel {
         if (!tab.view) {
           try {
             if (title == "Recent") tab.view = new FileListView(this);
+            else if (title == "Library") tab.view = new BookshelfView(this);
             else if (title == "Local") tab.view = new LocalFileView(this);
             else
               tab.view = new FileSystemView(

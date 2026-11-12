@@ -471,7 +471,7 @@ class Pg {
       });
   
       canvas.on("mouse:up", opts => {
-        if(stateChanged) pushState();
+        if(stateChanged) { pushState(); this.score.setDirty(true); }
         stateChanged = false;
         if (_menu_.activeRing.key == "ink" && _menu_.activeRing.activeCell) _menu_.pgUpEvent(opts, this); 
       });
@@ -538,6 +538,9 @@ class Pg {
 
       canvas.on("object:modified", (opts) => { 
         if(!this.suppressStateChange)  stateChanged = true;
+      });
+      canvas.on('text:changed', () => {
+        if (!this.suppressStateChange) this.score.setDirty(true);
       });
   
       this.inflated = true;
@@ -1360,16 +1363,16 @@ class Score {
     // @clear if true (default), pasteBuffer is cleared.
   }
 
-  async init(source, path, name, pdfData=null, activate=true) {
+  async init(source, path, name, pdfData=null, activate=true, libraryState=null) {
     try {
-      return await this.initAux(source, path, name, pdfData, activate);
+      return await this.initAux(source, path, name, pdfData, activate, libraryState);
     } catch(error) {
       await this.dispose();
       throw error;
     }
   }
 
-  async initAux(source, path, name, pdfData, activate) {
+  async initAux(source, path, name, pdfData, activate, libraryState) {
     // Initialize a new Score, always called as part of the constructor, ex. await new Score().init(...)
     // @source one of Score.sources, identifies the data source that provides the score's data.
     //  For new scores (no external data sources), this is just null.
@@ -1397,6 +1400,7 @@ class Score {
       this.size = pdfData.byteLength;
       this.music = this.mozDoc = await MusicDocument.open(pdfData, name);
       this.music.owner = this;
+      if (libraryState?.settings?.music) this.music.settings = libraryState.settings.music;
       if (activate) {
         const defaults = JSON.parse(_menu_.stashDefaults);
         Object.assign(_menu_.rings.page.cells.numbers.stash, defaults.page?.cells?.numbers);
@@ -1538,6 +1542,7 @@ class Score {
       this.quality = _menu_.rings.score.cells.details.stash.quality ?? this.quality;
     }
 
+    if (libraryState) await this.restoreLibraryState(libraryState, activate);
     if(activate) await this.activate();
     return this;
   }
@@ -1545,7 +1550,10 @@ class Score {
   dispose() {
     // Idempotent: exports already in progress retain their document until finished.
     if(this.disposePromise) return this.disposePromise;
-    this.disposePromise = this.disposeAux();
+    this.disposePromise = this.disposeAux().catch(error => {
+      this.disposePromise = null; // A failed library save must remain retryable.
+      throw error;
+    });
     return this.disposePromise;
   }
 
@@ -1670,7 +1678,7 @@ class Score {
     this.pgRefresh();
   }
 
-  async musicRecords() {
+  async musicRecords({ preserveSelection = false } = {}) {
     const records = [];
     this.music.bookmarks = this.pgs.flatMap((pg, page) => {
       const a = pg.bookmark && this.music.info.anchors.find(a => a.page === page);
@@ -1682,8 +1690,12 @@ class Score {
       ++pg.tempHolds;
       try {
         await pg.inflate(false, false);
-        pg.canvas.discardActiveObject();
-        for (const obj of pg.canvas.getObjects()) {
+        if (!preserveSelection) pg.canvas.discardActiveObject();
+        for (const obj of pg.canvas.getObjects()) obj.rostrumId ||= crypto.randomUUID();
+        const objects = preserveSelection
+          ? await new Promise(resolve => fabric.util.enlivenObjects(pg.toJson().objects, resolve))
+          : pg.canvas.getObjects();
+        for (const obj of objects) {
           const bounds = obj.getBoundingRect(true, true);
           const previous = obj.rostrumAnchor && this.music.anchor(obj.rostrumAnchor.key, obj.rostrumAnchor.staff);
           const a = previous?.page === page ? previous : this.music.nearest(page, bounds.left, bounds.top);
@@ -1763,6 +1775,7 @@ class Score {
   }
 
   async disposeAux() {
+    if (this.libraryDocumentId && !this.libraryRestoring) await window._bookshelf_.flush(this);
     await Promise.allSettled([...this.pendingExports]);
     this.disposed = true;
     if(Layout.activeLayout?.score === this) {
@@ -2105,8 +2118,74 @@ class Score {
     }
   }
 
+  async captureLibraryState() {
+    const annotations = [];
+    const identities = this.libraryAnnotationIds ||= {};
+    const settings = { version: 1, quality: this.quality,
+      menu: _menu_.stashToJsonObj('score'), annotationIds: identities };
+    if (this.music) {
+      const records = await this.musicRecords({ preserveSelection: true });
+      settings.music = { version: 1, transpose: this.music.transpose,
+        spelling: this.music.native.viewTransposeSpelling,
+        preserveSystemBreaks: this.music.native.viewPreserveSystemBreaks,
+        volume: this.music.player.volume, mixer: this.music.player.mixer,
+        bookmarks: this.music.bookmarks, menu: settings.menu };
+      for (const record of records) annotations.push({
+        id: identities[record.id] ||= crypto.randomUUID(),
+        anchor: { type: 'music', key: record.key, staff: record.staff }, content: record });
+    } else {
+      const seen = new Set();
+      settings.pages = this.pgs.map(pg => {
+        pg.libraryPageId ||= crypto.randomUUID();
+        const objects = pg.inflated ? pg.canvas.getObjects() : pg.json?.objects || [];
+        for (const object of objects) {
+          if (!object.rostrumId || seen.has(object.rostrumId)) object.rostrumId = crypto.randomUUID();
+          seen.add(object.rostrumId);
+        }
+        const json = pg.toJson() || pg.json || { objects: [] };
+        for (const object of json.objects || []) {
+          annotations.push({ id: identities[object.rostrumId] ||= crypto.randomUUID(),
+            anchor: { type: 'pdf', pageId: pg.libraryPageId },
+            content: object });
+        }
+        const { objects: ignored, ...canvas } = json;
+        return { id: pg.libraryPageId, mozPn: pg.mozPn, width: pg.width, height: pg.height,
+          bookmark: pg.bookmark, background: pg.background, canvas };
+      });
+    }
+    return { settings, annotations };
+  }
+
+  async restoreLibraryState({ document: doc, settings, annotations }, activate) {
+    if (settings.version === 1) {
+      this.libraryRestoring = true;
+      try {
+        this.libraryAnnotationIds = settings.annotationIds || {};
+        if (activate && settings.menu) _menu_.stashFromJsonObj(settings.menu, 'score');
+        this.quality = settings.quality ?? this.quality;
+        if (this.music) {
+          for (const pg of this.pgs) pg.deflate(true);
+          await this.buildMusicPages(annotations.map(a => JSON.parse(a.content_json)));
+        } else if (settings.pages?.length) {
+          for (const pg of this.pgs) pg.deflate(true);
+          this.pgs = settings.pages.map(page => {
+            const objects = annotations.filter(a => JSON.parse(a.anchor_json).pageId === page.id).map(a => JSON.parse(a.content_json));
+            const pg = new Pg(this, page.width, page.height, { ...page.canvas, objects }, page.mozPn, page.background);
+            pg.libraryPageId = page.id; pg.bookmark = page.bookmark;
+            return pg;
+          });
+          this.pgRefresh();
+        }
+      } finally { this.libraryRestoring = false; }
+    }
+    this.libraryDocumentId = doc.id;
+    this.librarySaveGeneration = this.librarySavedGeneration = 0;
+    this.dirty = false;
+  }
+
   setDirty(dirty=true) {
     this.dirty = dirty;
+    if (dirty && this.libraryDocumentId && !this.libraryRestoring) window._bookshelf_.scheduleSave(this);
   }
 
   setEditable(bool) {

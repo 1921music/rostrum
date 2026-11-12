@@ -1,5 +1,44 @@
 # Development
 
+### Bookshelf development
+
+The Open panel's **Library** tab imports owned copies, lists scores and songs,
+and manages tags, bookshelves and playlists. PDF outlines produce song entries;
+MusicXML/MSCZ metadata provides an initial title. Song details and start pages
+can be edited. **Import current score** imports an exported copy of the score
+currently open, including a score opened through the existing cloud tabs.
+
+Library scores autosave annotations and per-score settings to SQLite without
+rewriting their imported PDF/MSCZ. Save As remains the explicit file export path.
+Replacing a file creates a new document and marks the previous document as
+replaced; old song/playlist references are retained. Rebuilding the song index
+preserves identified entries and manual edits/deletions.
+
+Storage access goes through `src/bookshelf-storage.js`. Environment-specific
+selection belongs in `src/bookshelf-storage-policy.js`; its current OPFS wiring
+is for development, not a final support matrix. Only backend adapters may call
+OPFS or filesystem APIs. File backends use logical relative paths, and database
+backends must flush committed changes before an operation reports success.
+The OPFS SQLite VFS uses internal pool files: `database.export()` produces the
+logical `library.sqlite` image; do not back up the physical pool files directly.
+Selected-folder and IndexedDB backends, file-URL Worker startup, cloud sync and
+full-library backup/restore are not implemented yet. Safari/iPhone behavior
+requires device validation. A second tab currently receives a storage-lock
+error rather than opening a second writable database.
+
+`mise exec -- node build_browser_fs.mjs` builds the bundled library dependencies,
+including the bookshelf Worker and SQLite WASM. The normal packaged, extension
+and Pages builds include those assets; the Pages worker precaches them offline.
+No CDN is required. Run focused checks with:
+
+```powershell
+mise exec -- npm test -- tests/bookshelf.spec.js
+```
+
+The tests use real local SQLite/OPFS and block unexpected external requests.
+The schema and product overview remain drafts in `doc/bookshelf-design.md` and
+`doc/bookshelf-spec.md`; sync change-record details may evolve with validation.
+
 
 ### Prerequisites
 

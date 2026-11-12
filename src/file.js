@@ -110,6 +110,10 @@ let activateMerge = (pdfData) => {
 };
 
 let checkUnsaved = async (msg = "Warning: current score has unsaved changes. Open anyway?", close = false) => {
+  if (_score_?.libraryDocumentId) {
+    try { await window._bookshelf_.flush(_score_); }
+    catch (error) { toast('Library save failed: ' + error.message); return false; }
+  }
   // Display a confirm dialog if there is a dirty _score_ that would be overriden
   // without saving by opening a new Score. Return promise that resolves to true iff user clicks "Open".
   // When close if true, "Open" is replaced with "Close".
@@ -327,6 +331,11 @@ class FileSrc {
 
   static async saveActiveScore(cell) {
     let score = _score_;
+    if (score.libraryDocumentId) {
+      try { await window._bookshelf_.flush(score); toast('Library changes saved.'); }
+      catch (error) { toast('Library save failed: ' + error.message); }
+      return;
+    }
     let src = FileSrc.get(score.source);
     // If no source, or source doesn't support saving (like URL/WWW), show the save panel
     if (!src || typeof src.putFile != 'function' || (score.music && !score.music.savedAsMscz
