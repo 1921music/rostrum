@@ -1572,7 +1572,7 @@ class Score {
       typeof b.key === 'string' && Number.isInteger(b.staff) && typeof b.color === 'string' && CSS.supports('color', b.color)) : [];
     if (activate) this.quality = _menu_.rings.score.cells.details.stash.quality ?? this.quality;
     if (Number.isInteger(settings.transpose) && settings.transpose >= -12 && settings.transpose <= 12) {
-      this.music.native.setViewTransposeSemitones(settings.transpose, settings.spelling === 'preserve' ? 'preserve' : 'readable');
+      this.music.native.setViewTransposeSemitones(settings.transpose, settings.spelling === 'preserve' ? 'preserve' : 'readable', settings.preserveSystemBreaks !== false);
       this.music.transpose = settings.transpose;
       this.music.refresh();
     }
@@ -1702,14 +1702,15 @@ class Score {
     return records;
   }
 
-  async transposeMusic(semitones, spelling = this.music.native.viewTransposeSpelling) {
+  async transposeMusic(semitones, spelling = this.music.native.viewTransposeSpelling,
+    preserveSystemBreaks = this.music.native.viewPreserveSystemBreaks) {
     if (this.musicBusy) return;
     this.musicBusy = true;
     const music = this.music;
     try {
       const records = await this.musicRecords();
       music.player.stop();
-      music.native.setViewTransposeSemitones(semitones, spelling);
+      music.native.setViewTransposeSemitones(semitones, spelling, preserveSystemBreaks);
       music.transpose = semitones;
       music.refresh();
       Layout.activeLayout?.destructor(); Layout.activeLayout = null;
@@ -1755,6 +1756,7 @@ class Score {
     if (this === _score_) Layout.activeLayout?.capturePz();
     return this.music.native.saveRostrum({ annotations, settings: JSON.stringify({ version: 1,
       transpose: this.music.transpose, spelling: this.music.native.viewTransposeSpelling,
+      preserveSystemBreaks: this.music.native.viewPreserveSystemBreaks,
       volume: this.music.player.volume, mixer: this.music.player.mixer,
       bookmarks: this.music.bookmarks,
       menu: _menu_.stashToJsonObj('score') }) });

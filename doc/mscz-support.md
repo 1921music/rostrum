@@ -4,6 +4,13 @@ Rostrum reads `.mscz`, `.musicxml`, `.xml` (score-partwise) and `.mxl` in
 the same page layouts as PDF. Scores are processed locally. The score ring has
 Transpose and Playback panels; PDF keeps its existing controls.
 
+The Transpose panel's **レイアウトを維持する** (Keep original layout) checkbox is enabled by
+default. Transposed scores keep the original systems, page boundaries and page
+count, reducing horizontal note spacing and vertical system gaps when necessary
+(very crowded notation can overlap). Uncheck it to allow
+the source's normal automatic wrapping. The preference is saved in Rostrum's
+view settings and restored on reopening; older files default to enabled.
+
 On-screen score backgrounds are inline SVG. All pages share the score engine's
 registered FontFace objects, including the bundled music/text fonts; pages do
 not embed or register their own font copies. This keeps browser text measurement
@@ -11,7 +18,8 @@ and visible text rendering on the same fonts. Thumbnails, the magnifier and PDF
 export create a temporary self-contained SVG image only when a raster image is
 needed, then release it with the page cache.
 
-The score panels use English labels. UTF-8 is declared at the start of the HTML,
+The score panels use English labels with the requested Japanese layout checkbox.
+UTF-8 is declared at the start of the HTML,
 before the embedded license, including standalone and extension builds.
 
 The local HTML and extension builds ship the Japanese guide with its media and

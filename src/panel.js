@@ -3923,7 +3923,8 @@ class TransposePanel extends MusicPanel {
     super(cell);
     this.body.classList.add('MusicPanel', 'TransposePanel');
     this.body.innerHTML = `<div class="TransposePanel__steps"><button data-step="-1">- semitone</button> <output></output> <button data-step="1">+ semitone</button></div>
-      <p><button data-reset>Original key</button></p><label class="TransposePanel__spelling">Spelling <select><option value="readable">Readable</option><option value="preserve">Preserve</option></select></label><p role="status"></p>`;
+      <p><button data-reset>Original key</button></p><label class="TransposePanel__spelling">Spelling <select><option value="readable">Readable</option><option value="preserve">Preserve</option></select></label>
+      <p><label><input type="checkbox" data-preserve-system-breaks checked> レイアウトを維持する</label></p><p role="status"></p>`;
     this.body.addEventListener('click', e => {
       if (!e.target.matches('button')) return;
       const music = _score_?.music;
@@ -3931,11 +3932,16 @@ class TransposePanel extends MusicPanel {
       this.change(e.target.hasAttribute('data-reset') ? 0 : music.transpose + Number(e.target.dataset.step));
     });
     this.body.querySelector('select').addEventListener('change', () => this.change(_score_?.music?.transpose));
+    this.body.querySelector('[data-preserve-system-breaks]').addEventListener('change', () => this.change(_score_?.music?.transpose));
   }
   async change(value) {
     const status = this.body.querySelector('[role=status]');
     status.textContent = 'Transposing...';
-    try { await _score_.transposeMusic(value, this.body.querySelector('select').value); status.textContent = ''; }
+    const spelling = this.body.querySelector('select').value;
+    const preserveSystemBreaks = this.body.querySelector('[data-preserve-system-breaks]').checked;
+    const pending = _score_.transposeMusic(value, spelling, preserveSystemBreaks);
+    this.sync();
+    try { await pending; status.textContent = ''; }
     catch (error) { status.textContent = error.message; }
     this.sync();
   }
@@ -3943,7 +3949,11 @@ class TransposePanel extends MusicPanel {
     const music = _score_?.music;
     if (!music) return;
     this.body.querySelector('output').textContent = music.transpose ? `${music.transpose > 0 ? '+' : ''}${music.transpose}` : 'Original key';
-    this.body.querySelector('select').value = music.native.viewTransposeSpelling;
+    if (!_score_.musicBusy) this.body.querySelector('select').value = music.native.viewTransposeSpelling;
+    this.body.querySelector('select').disabled = _score_.musicBusy;
+    if (!_score_.musicBusy) this.body.querySelector('[data-preserve-system-breaks]').checked = music.native.viewPreserveSystemBreaks;
+    this.body.querySelector('[data-preserve-system-breaks]').disabled = _score_.musicBusy;
+    this.body.querySelector('[data-reset]').disabled = _score_.musicBusy;
     for (const button of this.body.querySelectorAll('[data-step]'))
       button.disabled = _score_.musicBusy || Math.abs(music.transpose + Number(button.dataset.step)) > 12;
   }

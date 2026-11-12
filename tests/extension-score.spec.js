@@ -213,10 +213,14 @@ test('real MV3 extension renders, transposes, plays and saves scores offline wit
       _menu_.notify('score/transpose/up');
       return { originalPitch, records: await score.musicRecords() };
     }, xml);
+    const preserveSystemBreaks = page.locator('[data-tag="TransposePanel"] [data-preserve-system-breaks]');
+    await expect(preserveSystemBreaks).toBeChecked();
     await page.locator('[data-tag="TransposePanel"] [data-step="1"]').click();
     await expect(page.locator('[data-tag="TransposePanel"] [data-reset]')).toHaveText('Original key');
     await expect.poll(() => page.evaluate(() => _score_.music.transpose)).toBe(1);
     await expect.poll(() => page.evaluate(() => _score_.musicBusy)).toBe(false);
+    await preserveSystemBreaks.uncheck();
+    await expect.poll(() => page.evaluate(() => !_score_.musicBusy && !_score_.music.native.viewPreserveSystemBreaks)).toBe(true);
     await page.evaluate(() => _menu_.notify('score/playback/up'));
     await expect(page.locator('[data-tag="PlaybackPanel"] [data-play]')).toHaveText('Play');
     await expect(page.locator('[data-tag="PlaybackPanel"] [data-close]')).toHaveText('×');
@@ -250,10 +254,12 @@ test('real MV3 extension renders, transposes, plays and saves scores offline wit
       const loaded = await new _Score_().init('Local', null, 'extension.mscz', bytes);
       await loaded.pgUse(1, false);
       return { signature: [...bytes.slice(0, 4)], transpose: loaded.music.transpose,
+        preserveSystemBreaks: loaded.music.native.viewPreserveSystemBreaks,
         records: await loaded.musicRecords(), originalPitch, images: loaded.music.originalImages.length };
     });
     expect(restored.signature).toEqual([80, 75, 3, 4]);
     expect(restored.transpose).toBe(1);
+    expect(restored.preserveSystemBreaks).toBe(false);
     expect(restored.originalPitch).toEqual(before.originalPitch);
     expect(restored.images).toBe(2);
     expect(restored.records.map(r => r.object.type)).toEqual(['circle', 'textbox']);

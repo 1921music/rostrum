@@ -165,6 +165,76 @@ test('transpose panel and playback toolbar fit desktop and narrow screens', asyn
   }
 });
 
+test('original system-break preference defaults on and survives toggle, reset and save', async ({ page }) => {
+  test.setTimeout(120000);
+  await page.evaluate(async xml => {
+    await new _Score_().init('Local', null, 'layout.musicxml', new TextEncoder().encode(xml));
+    _menu_.notify('score/transpose/up');
+  }, xml);
+  const checkbox = page.locator('[data-tag="TransposePanel"] [data-preserve-system-breaks]');
+  await expect(page.getByRole('checkbox', { name: 'レイアウトを維持する', exact: true })).toBeChecked();
+  await expect(checkbox).toBeChecked();
+  await page.locator('[data-tag="TransposePanel"] [data-step="1"]').click();
+  await expect.poll(() => page.evaluate(() => !_score_.musicBusy && _score_.music.transpose === 1)).toBe(true);
+  await checkbox.uncheck();
+  await expect.poll(() => page.evaluate(() => !_score_.musicBusy && !_score_.music.native.viewPreserveSystemBreaks)).toBe(true);
+  await checkbox.check();
+  await expect.poll(() => page.evaluate(() => !_score_.musicBusy && _score_.music.native.viewPreserveSystemBreaks)).toBe(true);
+  await checkbox.uncheck();
+  await expect.poll(() => page.evaluate(() => !_score_.musicBusy && !_score_.music.native.viewPreserveSystemBreaks)).toBe(true);
+  const saved = await page.evaluate(async () => {
+    const bytes = await _score_.toFile();
+    const restored = await new _Score_().init('Local', null, 'saved.mscz', bytes);
+    const preference = restored.music.native.viewPreserveSystemBreaks;
+    const offset = restored.music.transpose;
+    await restored.transposeMusic(0);
+    const afterReset = restored.music.native.viewPreserveSystemBreaks;
+    return { preference, offset, afterReset };
+  });
+  expect(saved).toEqual({ preference: false, offset: 1, afterReset: false });
+  expect(await page.evaluate(async () => {
+    await _score_.transposeMusic(0, 'readable', true);
+    const restored = await new _Score_().init('Local', null, 'enabled.mscz', await _score_.toFile());
+    return restored.music.native.viewPreserveSystemBreaks;
+  })).toBe(true);
+});
+
+for (const file of JSON.parse(process.env.MSCZ_LAYOUT_TEST_SCORES || '[]')) {
+  test(`real score keeps original systems through the transpose dialog: ${path.basename(file)}`, async ({ page }, testInfo) => {
+    test.setTimeout(120000);
+    await page.evaluate(async ({ bytes, name }) => {
+      await new _Score_().init('Local', null, name, new Uint8Array(bytes));
+      window.sampleSystems = () => {
+        const groups = new Map();
+        for (const a of _score_.music.info.anchors) {
+          const key = `${a.page}:${a.system}`;
+          if (!groups.has(key)) groups.set(key, []);
+          groups.get(key).push(`${a.key}:${a.staff}`);
+        }
+        return [...groups].map(([key, anchors]) => ({ page: Number(key.split(':')[0]), anchors }));
+      };
+      window.originalSampleSystems = sampleSystems();
+      window.originalSamplePages = _score_.pgs.length;
+      _menu_.notify('score/transpose/up');
+    }, { bytes: [...fs.readFileSync(file)], name: path.basename(file) });
+    const checkbox = page.locator('[data-tag="TransposePanel"] [data-preserve-system-breaks]');
+    await expect(checkbox).toBeChecked();
+    await page.locator('[data-tag="TransposePanel"] [data-step="1"]').click();
+    await expect.poll(() => page.evaluate(() => !_score_.musicBusy && _score_.music.transpose === 1)).toBe(true);
+    expect(await page.evaluate(() => JSON.stringify(sampleSystems()) === JSON.stringify(originalSampleSystems))).toBe(true);
+    const fixedPages = await page.evaluate(() => _score_.pgs.length);
+    expect(fixedPages).toBe(await page.evaluate(() => originalSamplePages));
+    await page.screenshot({ path: testInfo.outputPath('preserved-systems.png') });
+    await checkbox.uncheck();
+    await expect.poll(() => page.evaluate(() => !_score_.musicBusy && !_score_.music.native.viewPreserveSystemBreaks)).toBe(true);
+    const automaticPages = await page.evaluate(() => _score_.pgs.length);
+    await checkbox.check();
+    await expect.poll(() => page.evaluate(() => !_score_.musicBusy && _score_.music.native.viewPreserveSystemBreaks)).toBe(true);
+    expect(await page.evaluate(() => JSON.stringify(sampleSystems()) === JSON.stringify(originalSampleSystems))).toBe(true);
+    await testInfo.attach('page-counts', { body: JSON.stringify({ originalPages: await page.evaluate(() => originalSamplePages), fixedPages, automaticPages }), contentType: 'application/json' });
+  });
+}
+
 test('MXL converts to MSCZ on save without reusing the source handle', async ({ page }) => {
   test.setTimeout(90000);
   const mxl = zip({ 'META-INF/container.xml': '<container><rootfiles><rootfile full-path="score.musicxml" media-type="application/vnd.recordare.musicxml+xml"/></rootfiles></container>', 'score.musicxml': xml });
