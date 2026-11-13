@@ -151,7 +151,8 @@ class BookshelfStore extends EventTarget {
         const pending = this.pending.get(data.id);
         if (!pending) return;
         this.pending.delete(data.id);
-        data.error ? pending.reject(Object.assign(new Error(data.error), { name: data.errorName || 'Error', persistenceFailed: data.persistenceFailed })) : pending.resolve(data.value);
+        data.error ? pending.reject(Object.assign(new Error(data.error), { name: data.errorName || 'Error', persistenceFailed: data.persistenceFailed,
+          committedValue:data.committedValue })) : pending.resolve(data.value);
       };
       this.worker.onerror = () => {
         clearTimeout(startupTimeout); readyReject(new Error('Could not start library storage.'));
@@ -264,6 +265,48 @@ class BookshelfStore extends EventTarget {
     const { document: doc, file } = await this.call('read', { id });
     const named = new File([file], JSON.parse(doc.metadata_json).originalFilename);
     return this.call('reindex', { documentId: id, entries: await this.analyze(named) });
+  }
+  async editSongs(id) {
+    if (this.reviewPending || this.syncPending) throw new Error('Finish the current library operation before editing songs.');
+    this.reviewPending = true;
+    let preview;
+    try {
+      if (Score.activeScore?.libraryDocumentId) await this.flush(Score.activeScore);
+      const state = await this.call('songState', { id });
+      let expectedRevisionId = state.document.revision_id;
+      let expectedEntries = state.entries.map(row => ({ id:row.id, revision_id:row.revision_id }));
+      const records = state.entries.filter(row => !row.deleted_at);
+      const metadata = JSON.parse(state.document.metadata_json);
+      const file = new File([state.file], metadata.originalFilename);
+      preview = await new Score().init(null, null, file.name, await file.arrayBuffer(), false);
+      const entries = records.map(row => ({ id:row.id, parent_id:row.parent_id,
+        anchor:JSON.parse(row.anchor_json), metadata:JSON.parse(row.metadata_json) }));
+      // Keep hierarchy visible even if sync inserted children before parents.
+      const byId = new Map(entries.map(entry => [entry.id,entry])), seen = new Set(), ordered = [];
+      const visit = entry => {
+        if (seen.has(entry.id)) return;
+        seen.add(entry.id);
+        if (byId.has(entry.parent_id)) visit(byId.get(entry.parent_id));
+        ordered.push(entry);
+      };
+      entries.sort((a,b) => a.anchor.pageIndex - b.anchor.pageIndex || a.id.localeCompare(b.id)).forEach(visit);
+      const commit = async draft => {
+        try {
+          const result = await this.call('editSongs', { documentId:id, expectedRevisionId, expectedEntries, ...draft });
+          return result.document;
+        } catch (error) {
+          // Snapshot backends may commit SQLite before persistence fails. Keep
+          // the resulting revisions so a retry can save further draft edits.
+          if (error.persistenceFailed && error.committedValue?.document) {
+            expectedRevisionId = error.committedValue.document.revision_id;
+            expectedEntries = error.committedValue.entries;
+          }
+          throw error;
+        }
+      };
+      return await reviewScoreImport(file, ordered, preview, commit, this.storage?.kind === 'directory' ? () => this.reauthorizeStorage() : null,
+      { editing:true, displayName:metadata.displayName });
+    } finally { try { await preview?.dispose(); } finally { this.reviewPending = false; } }
   }
   async exportBackup() {
     this.emergencyBackup = false;
@@ -593,6 +636,7 @@ class BookshelfView {
                 userEditedFields: [...new Set([...(metadata.userEditedFields || []), 'composer', 'aliases', 'anchor'])] }) });
           });
         } else {
+          button(card, 'Edit songs', () => bookshelfStore.editSongs(row.id));
           button(card, 'Rebuild song index', () => bookshelfStore.reindex(row.id));
           const songTitle = document.createElement('input'); songTitle.placeholder = 'New song title'; songTitle.setAttribute('aria-label', 'New song title');
           const startPage = document.createElement('input'); startPage.type = 'number'; startPage.min = '1'; startPage.value = '1'; startPage.setAttribute('aria-label', 'New song start page');

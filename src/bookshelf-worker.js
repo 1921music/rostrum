@@ -364,6 +364,35 @@ const actions = {
       return { count: entries.length };
     });
   },
+  async songState({ id }) {
+    const state = await actions.read({ id });
+    return { ...state, entries:sql('SELECT * FROM entries WHERE document_id=?', [id]) };
+  },
+  editSongs({ documentId, expectedRevisionId, expectedEntries, displayName, entries }) {
+    return transaction(() => {
+      const document = sql('SELECT * FROM documents WHERE id=? AND deleted_at IS NULL', [documentId])[0];
+      if (!document) throw new Error('Score not found');
+      const current = sql('SELECT id, revision_id, deleted_at FROM entries WHERE document_id=?', [documentId]);
+      const expected = new Map(expectedEntries.map(row => [row.id,row.revision_id]));
+      if (document.revision_id !== expectedRevisionId || current.length !== expected.size
+        || current.some(row => expected.get(row.id) !== row.revision_id)) {
+        throw new Error('This score or its songs changed while the dialog was open. Cancel and reopen it before saving.');
+      }
+      const ids = new Set(entries.map(entry => entry.id));
+      if (ids.size !== entries.length || current.some(row => !row.deleted_at && !ids.has(row.id))) throw new Error('Invalid song list');
+      if (typeof displayName !== 'string' || !displayName.trim()) throw new Error('Enter a library score name');
+      for (const entry of entries) {
+        const owner = sql('SELECT document_id FROM entries WHERE id=?', [entry.id])[0];
+        if (owner && (owner.document_id !== documentId || !expected.has(entry.id))) throw new Error('A song identity belongs to another score or changed since opening');
+        if (!entry.deleted_at && (!entry.metadata?.title?.trim() || !Number.isInteger(entry.anchor?.pageIndex) || entry.anchor.pageIndex < 0)) throw new Error('Enter a song title and valid start page');
+        save('entries', { id:entry.id, document_id:documentId, parent_id:entry.parent_id || null,
+          anchor_json:JSON.stringify(entry.anchor), metadata_json:JSON.stringify(entry.metadata), deleted_at:entry.deleted_at || null });
+      }
+      validateRelations();
+      const updated = save('documents', { id:documentId, metadata_json:JSON.stringify({ ...JSON.parse(document.metadata_json), displayName:displayName.trim() }) });
+      return { document:updated, entries:sql('SELECT id, revision_id FROM entries WHERE document_id=?', [documentId]) };
+    });
+  },
   search({ query = '', tagIds = [], matchAll = false }) {
     // Literal substring search initially; the index can be replaced without
     // changing the persistent entry identities or user edits.
@@ -442,7 +471,7 @@ self.onmessage = ({ data }) => {
   if (data.hostReply) return;
   const { id, action, args } = data;
   queue = queue.then(async () => {
-    let actionCompleted = false;
+    let actionCompleted = false, value;
     try {
       if (!Object.hasOwn(actions, action)) throw new Error('Unknown library operation');
       if (action === 'open' && args?.storage) {
@@ -455,13 +484,14 @@ self.onmessage = ({ data }) => {
         self.postMessage({ id, value: true }); return;
       }
       await open();
-      const value = await actions[action](args || {});
+      value = await actions[action](args || {});
       actionCompleted = true;
       // An emergency export must remain possible if persistence is failing.
       // SQLite has already committed the in-memory state at this point.
       if (!['backup', 'export'].includes(action)) await db.flush();
       self.postMessage({ id, value });
-    } catch (error) { self.postMessage({ id, error: error.message, errorName: error.name, persistenceFailed: actionCompleted }); }
+    } catch (error) { self.postMessage({ id, error: error.message, errorName: error.name, persistenceFailed: actionCompleted,
+      committedValue:actionCompleted ? value : undefined }); }
   });
 };
 self.postMessage({ ready: true });

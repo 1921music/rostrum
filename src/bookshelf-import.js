@@ -21,8 +21,8 @@ class ScoreImportReview {
     .ScoreImportReview button { font:inherit; padding:.3em .6em; }
     .ScoreImportReview__columns { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:1em; }
     .ScoreImportReview__songs { max-height:52dvh; overflow:auto; padding:.2em; }
-    .ScoreImportReview fieldset { min-width:0; margin:.4em 0; border:1px solid #888; padding:.6em; }
-    .ScoreImportReview fieldset[data-current=true] { border:2px solid var(--color-text); }
+    .ScoreImportReview fieldset { min-width:0; margin:.4em 0; border:2px solid #888; padding:.6em; }
+    .ScoreImportReview fieldset[data-current=true] { border-color:var(--color-text); }
     .ScoreImportReview__fields { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) 5em; gap:.5em; }
     .ScoreImportReview__rowButtons, .ScoreImportReview__navigation, .ScoreImportReview__actions {
       display:flex; flex-wrap:wrap; align-items:center; gap:.5em; margin:.5em 0; }
@@ -38,8 +38,9 @@ class ScoreImportReview {
     }
   `);
 
-  constructor(file, entries, score, commit, reauthorize) {
+  constructor(file, entries, score, commit, reauthorize, options = {}) {
     this.file = file; this.score = score; this.commit = commit;
+    this.editing = !!options.editing;
     this.rows = []; this.pageIndex = 0; this.generation = 0; this.renderJobs = new Set();
     const element = (tag, parent, text) => {
       const node = document.createElement(tag); if (text !== undefined) node.textContent = text;
@@ -47,14 +48,17 @@ class ScoreImportReview {
     };
     this.element = element;
     const elm = this.elm = element('dialog'); elm.className = 'ScoreImportReview';
-    elm.setAttribute('aria-label', 'Review score import');
+    const heading = this.editing ? 'Edit score songs' : 'Review score import';
+    elm.setAttribute('aria-label', heading);
     // Panel content owns its presses; this native dialog follows the same rule.
     elm.addEventListener('pointerdown', e => { e.taken = true; }, { capture:true });
-    element('h2', elm, 'Review score import').className = 'ScoreImportReview__heading';
+    element('h2', elm, heading).className = 'ScoreImportReview__heading';
     const content = element('div', elm); content.className = 'ScoreImportReview__content';
     element('div', content, file.name).className = 'ScoreImportReview__filename';
-    this.displayName = this.input(content, 'Library score name', file.name);
-    element('p', content, 'Review songs before importing. Uncheck all to keep only the file. Bookmarks in the original file stay unchanged.');
+    this.displayName = this.input(content, 'Library score name', options.displayName ?? file.name);
+    element('p', content, this.editing
+      ? 'Edit songs in this score. Uncheck a song or use Delete song to remove it when you save. The original file and writing stay unchanged.'
+      : 'Review songs before importing. Uncheck all to keep only the file. Bookmarks in the original file stay unchanged.');
     const columns = element('div', content); columns.className = 'ScoreImportReview__columns';
     const left = element('div', columns);
     this.count = element('div', left); this.count.setAttribute('aria-live', 'polite');
@@ -78,14 +82,14 @@ class ScoreImportReview {
       this.permissionRetry.disabled = true;
       try {
         await reauthorize(); this.permissionRetry.hidden = true;
-        this.error.textContent = 'Folder access restored. Import to save this draft.';
+        this.error.textContent = 'Folder access restored. You can save this draft now.';
       } catch (error) { this.error.textContent = error.message; }
       finally { this.permissionRetry.disabled = false; }
     });
     this.permissionRetry.hidden = true; this.reauthorize = reauthorize;
     const actions = element('div', elm); actions.className = 'ScoreImportReview__actions';
-    this.button(actions, 'Cancel import', () => { if (!this.busy) elm.close(); });
-    this.button(actions, 'Import into library', () => this.submit());
+    this.button(actions, this.editing ? 'Cancel changes' : 'Cancel import', () => { if (!this.busy) elm.close(); });
+    this.button(actions, this.editing ? 'Save changes' : 'Import into library', () => this.submit());
     elm.addEventListener('cancel', e => { if (this.busy) e.preventDefault(); });
     for (const entry of entries) this.addRow(entry);
   }
@@ -116,6 +120,7 @@ class ScoreImportReview {
     const buttons = this.element('div',elm); buttons.className = 'ScoreImportReview__rowButtons';
     this.button(buttons, 'Use filename as title', () => { row.title.value = this.file.name.replace(/\.[^.]+$/, ''); });
     this.button(buttons, 'Preview song page', () => this.showPage(Number(row.page.value) - 1));
+    if (this.editing) this.button(buttons, 'Delete song', () => { row.include.checked = false; this.updateCount(); });
     const select = () => {
       for (const other of this.rows) other.elm.dataset.current = String(other === row);
     };
@@ -164,15 +169,14 @@ class ScoreImportReview {
       }
       const changed = new Set(entry.metadata.userEditedFields || []);
       for (const [field, value] of [['title',row.title.value.trim()],['composer',row.composer.value.trim()]]) {
-        if ((entry.metadata[field] || '') !== value) changed.add(field);
-        entry.metadata[field] = value;
+        if ((entry.metadata[field] || '') !== value) { changed.add(field); entry.metadata[field] = value; }
       }
       if (entry.anchor.pageIndex !== pageIndex) changed.add('anchor');
       entry.anchor.pageIndex = pageIndex;
       const originalParent = entry.parent_id || null;
       while (entry.parent_id && !byId.get(entry.parent_id)?.include.checked) entry.parent_id = byId.get(entry.parent_id)?.original.parent_id || null;
       if ((entry.parent_id || null) !== originalParent) changed.add('parent');
-      entry.metadata.userEditedFields = [...changed];
+      if (changed.size || entry.metadata.userEditedFields) entry.metadata.userEditedFields = [...changed];
       return entry;
     });
     return { displayName, entries };
@@ -203,6 +207,6 @@ class ScoreImportReview {
   }
 }
 
-async function reviewScoreImport(file, entries, score, commit, reauthorize) {
-  return new ScoreImportReview(file, entries, score, commit, reauthorize).show();
+async function reviewScoreImport(file, entries, score, commit, reauthorize, options) {
+  return new ScoreImportReview(file, entries, score, commit, reauthorize, options).show();
 }

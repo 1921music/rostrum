@@ -16,6 +16,13 @@ Escape skips that file; a failed commit keeps the editable draft for retry.
 Unselected extracted entries are kept as tombstones so rebuilding the index
 does not bring them back. Included children can outlive an excluded heading;
 the adjusted parent and edited fields survive reindex. Original files stay intact.
+For an existing score, use **All scores → Edit and organize → Edit songs**.
+The same dialog opens with saved song records, **Delete song**, **Save changes**
+and **Cancel changes**. It also supports files with no songs. Saving applies the
+whole draft in one transaction, retaining existing song IDs, metadata, tags,
+playlist links, writing and original bytes. Deletions are tombstones. A revision
+check rejects drafts made stale by another update. Snapshot persistence failures
+keep the draft and committed revisions so retrying can include further edits.
 Imports skip an already registered SHA-256 hash, even under another filename.
 Previous/deleted documents also count as registered; use the history view to
 restore them. Skipping does not create songs, copies, revisions or replacement
