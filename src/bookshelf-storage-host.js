@@ -41,3 +41,5 @@ export function saveSelection(options) {
 }
 export function loadCloudSelection() { return selectionStore('readonly', store => store.get('cloud')); }
 export function saveCloudSelection(options) { return selectionStore('readwrite', store => store.put(options, 'cloud')); }
+export function loadSyncSettings() { return selectionStore('readonly', store => store.get('sync-settings')); }
+export function saveSyncSettings(options) { return selectionStore('readwrite', store => store.put(options, 'sync-settings')); }

@@ -3,6 +3,18 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { test, expect } = require("@playwright/test");
 
+test.beforeEach(async ({ page }) => {
+  page.external = [];
+  await page.route('**/*', route => {
+    const url = route.request().url();
+    if (url.startsWith('http://127.0.0.1:9876/')) return route.continue();
+    if (url === 'https://accounts.google.com/gsi/client') return route.fulfill({ contentType:'application/javascript',body:'window.google = { accounts: { oauth2: {} } };' });
+    if (url === 'https://cdn.jsdelivr.net/gh/steinbergmedia/bravura@master/redist/otf/Bravura.otf') return route.fulfill({ contentType:'font/otf',body:fs.readFileSync(path.resolve('lib/BravuraText.otf')) });
+    page.external.push(url); return route.abort();
+  });
+});
+test.afterEach(async ({ page }) => expect(page.external).toEqual([]));
+
 // build/pages/ is what "python build.py --pages" produces: a self-contained
 // deployment for a static host, which must work from any subdirectory. The
 // static server's roots include build/, so it is served from /pages/ here --

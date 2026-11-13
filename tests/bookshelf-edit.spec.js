@@ -29,7 +29,8 @@ async function pdf(page) {
 async function openEditor(page) {
   if (!await page.getByText('Library', { exact:true }).isVisible()) await page.evaluate(() => _menu_.notify('score/open/up'));
   await page.getByText('Library', { exact:true }).click();
-  await page.getByText('Edit and organize', { exact:true }).click();
+  const organize = page.locator('details').filter({ has:page.locator('summary').getByText('Edit and organize', { exact:true }) });
+  if (!await organize.evaluate(node => node.open)) await organize.locator('summary').click();
   await page.getByRole('button', { name:'Edit songs', exact:true }).click();
   await expect(editor(page)).toBeVisible();
 }

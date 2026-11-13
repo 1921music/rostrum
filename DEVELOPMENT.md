@@ -76,21 +76,47 @@ current parser supports members up to 512 MiB and portable metadata up to
 An emergency export remains possible when a committed in-memory snapshot
 cannot be persisted. The app retains the unsaved indication in this case.
 
-Manual cloud sync uses the connected Drive/Dropbox/OneDrive/pCloud account and
-the folder selected in the Library tab. A folder's Rostrum packages form one
-shared library. Each run uploads a complete package with a unique name, first
-to a temporary name and then publishes it by rename. Readers ignore unfinished
-uploads. Packages are append-only so simultaneous uploads cannot overwrite
-each other. This initial transport is snapshot-based, not bandwidth-optimized
-delta sync; older packages are retained, with no automatic remote cleanup.
-The generic transport exposes `list`, `read`, `write` and a stable destination
-ID. Sync progress is local and failed uploads remain retryable. A run with no
-new revisions since its previous successful publication skips the upload only
-while that package is still present in the destination. Removing packages or
-switching accounts therefore does not prevent republishing the local library.
-The current score is saved before merging and reopened afterward when its
-content is still available and has no unresolved conflicts. Cloud uploads
-accept Blobs and use bounded chunks where the existing provider supports them.
+Library sync uses the connected Drive/Dropbox/OneDrive/pCloud account and the
+dedicated folder selected in Library. Apply a destination with **Sync library
+now**. Scores are separate immutable `scores/<documentId>__<original name>`
+files; metadata travels in `changes/<deviceId>/<batchId>.json`. No library ZIP
+or SQLite image is sent by sync. Only unpublished change records are uploaded;
+annotations are separate records, so writing does not re-upload a PDF/MSCZ.
+Files finish uploading before their metadata is published. Temporary names are
+ignored, immutable batches retain parallel edits, and retries are idempotent.
+The transport exposes `listChanges/readChanges/writeChanges` and
+`listScores/readScore/writeScore`, with a stable destination ID. Per-destination
+batch inventories are intersected with the current remote listing, so account
+changes and removed batches cannot falsely acknowledge unpublished changes.
+Individual changes are limited to 32 MiB and incoming batches to 64 MiB; normal
+outgoing batches target 4 MiB. History compaction and remote garbage collection
+are deferred; previous ZIP snapshots remain backups and can be imported manually.
+
+Metadata and writing are received for the entire library. Score bytes download
+only on **Open**, **Download to this device**, or **Keep offline**. Bookshelves
+and playlists offer **Keep collection offline**. Offline keeping and file
+presence are device-local `local_state` records, never shared change records.
+Pinned requests survive failed downloads and are retried on the next sync.
+Failed pinned downloads appear as device errors without marking successfully
+exchanged cloud metadata as unsynced; other pinned downloads still proceed.
+**Release download** keeps metadata, writing and cloud files, but requires an
+uploaded, hash-verified cloud copy and an unpinned, closed score. No automatic
+eviction is performed. A complete ZIP backup explicitly downloads missing files.
+
+**Automatic library sync** defaults on once a destination is connected. Local
+SQLite saves retain their 300 ms debounce; shared changes request a send after
+3 seconds. Foreground polling runs every 30 seconds and is retriggered on launch,
+returning to the foreground and reconnection. The checkbox persists per device;
+turning it off stops new automatic runs while any in-flight transfer finishes.
+Background authentication never opens a consent/login window. Existing sessions
+and supported refresh tokens can be reused; otherwise the status asks the user
+to connect with **Sync library now**. Browser suspension cannot guarantee an
+upload on app exit. Device save status and cloud sync status are shown separately,
+and each score shows its local presence, offline keeping and upload status.
+Automatic polling leaves the open score alone unless incoming changes affect
+its document/settings/ink; applying such changes saves, briefly locks and reopens
+that score at its page, or retains conflicts for review. Cloud uploads accept
+Blobs and use bounded chunks where the existing provider supports them.
 Real OAuth/provider checks must use a dedicated test account and the manual
 release checklist. Automated tests mock every provider request.
 
@@ -101,6 +127,7 @@ No CDN is required. Run focused checks with:
 
 ```powershell
 mise exec -- npm test -- tests/bookshelf.spec.js
+mise exec -- npx playwright test tests/library-delta.spec.js
 ```
 
 The tests use real local SQLite/OPFS and block unexpected external requests.
@@ -335,8 +362,14 @@ each intended provider and target device:
   ink, tags, playlists, previous versions and deletions.
 - Sync two devices, edit offline on both, reconnect, resolve a competing edit,
   and verify convergence. Confirm incomplete uploads stay unpublished and a
-  failed attempt can be retried without replacing another device's package.
-- Check the displayed destination/account, the storage cost of full packages,
+  failed attempt can be retried without replacing another device's change batch.
+  Confirm a metadata edit sends no score body, a fresh device receives searchable
+  metadata without downloading scores, and opening/pinning downloads only the
+  required files. Check offline reopening and local download release separately.
+- Toggle automatic sync off, restart, and verify it stays off. Check silent
+  foreground sync, online/resume retries, and the sign-in-required state after
+  credentials expire without an unsolicited authentication dialog.
+- Check the displayed destination/account, separate device/cloud status,
   and behavior when permission is revoked or the network/storage is unavailable.
   Automated tests must continue to mock all of these provider requests.
 

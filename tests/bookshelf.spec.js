@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { zipSync, unzipSync, strToU8, strFromU8 } = require('fflate');
+const { installDeltaCloud,installProviderCloud } = require('./library-sync-helpers');
 
 async function blockExternal(context, external) {
   await context.route('**/*', route => {
@@ -555,13 +556,12 @@ test('an external database change blocks overwriting but still permits an emerge
   expect(manifest.records.annotations.filter(row => !row.deleted_at)).toHaveLength(1);
 });
 
-test('sync transport exchanges immutable packages and resumes after a failed upload', async ({ page }) => {
+test('sync transport exchanges immutable changes and resumes after a failed upload', async ({ page }) => {
   test.setTimeout(90000);
   await page.goto('/pod.html'); await page.waitForFunction(() => !!window._bookshelf_ && !!window._menu_);
+  await installDeltaCloud(page);
   const result = await page.evaluate(async () => {
-    const packages = new Map();
-    const transport = { id: 'mock-cloud', async list() { return [...packages.keys()].map(id => ({ id })); },
-      async read(id) { return packages.get(id); }, async write(id, file) { if (packages.has(id)) throw new Error('Package overwritten'); packages.set(id, file); } };
+    const packages = deltaCloud.batches, transport = deltaCloud.transport;
     const a = { kind: 'indexeddb', name: 'device-a' }, b = { kind: 'indexeddb', name: 'device-b' };
     await _bookshelf_.configure(a);
     const pdf = await PDFLib.PDFDocument.create(); pdf.addPage([300,400]);
@@ -573,7 +573,7 @@ test('sync transport exchanges immutable packages and resumes after a failed upl
     await _bookshelf_.configure(a);
     await _bookshelf_.call('update', { table: 'tags', values: { id: crypto.randomUUID(), name: 'From A' } });
     let failed = false;
-    try { await _bookshelf_.sync({ ...transport, async write() { throw new Error('Upload failed'); } }); } catch { failed = true; }
+    try { await _bookshelf_.sync({ ...transport, async writeChanges() { throw new Error('Upload failed'); } }); } catch { failed = true; }
     await _bookshelf_.sync(transport);
     const namesA = (await _bookshelf_.call('records', { table: 'tags' })).map(row => row.name).sort();
     await _bookshelf_.configure(b); await _bookshelf_.sync(transport);
@@ -583,11 +583,11 @@ test('sync transport exchanges immutable packages and resumes after a failed upl
     // Changing accounts can leave the same destination name with no packages.
     packages.clear();
     const republished = await _bookshelf_.sync(transport);
-    return { namesA, namesB, failed, packages: count, skipped: unchanged.uploadedPackage === null,
-      republished: !!republished.uploadedPackage && packages.size === 1, conflicts: (await _bookshelf_.call('conflicts')).length };
+    return { namesA, namesB, failed, packages: count, skipped: unchanged.uploadedBatches === 0,
+      republished: republished.uploadedBatches === 1 && packages.size === 1, conflicts: (await _bookshelf_.call('conflicts')).length };
   });
   expect(result).toMatchObject({ namesA: ['From A','From B'], namesB: ['From A','From B'], failed: true, skipped: true, republished: true, conflicts: 0 });
-  expect(result.packages).toBe(5);
+  expect(result.packages).toBe(3);
 });
 
 test('backup controls download a complete archive and import it into another library', async ({ page }) => {
@@ -612,30 +612,21 @@ test('backup controls download a complete archive and import it into another lib
   expect(await page.evaluate(async () => (await _bookshelf_.call('list')).length)).toBe(1);
 });
 
-test('cloud sync publishes unique complete packages through the existing provider interface', async ({ page }) => {
+test('cloud sync publishes changes and separate scores through the provider interface', async ({ page }) => {
   await page.goto('/pod.html'); await page.waitForFunction(() => !!window._bookshelf_ && !!window._menu_);
+  await installProviderCloud(page);
   const result = await page.evaluate(async () => {
-    const files = new Map(), folders = []; let failPublish = false;
-    const source = { source: 'pCloud', async auth() {},
-      async getDir(path) { folders.push(path); return { files: Object.fromEntries(files) }; },
-      async getFileSrc(path, name) { return files.get(name).bytes; },
-      async putFile(path, name, bytes) { if (files.has(name)) throw new Error('Overwrite'); files.set(name, { name, bytes }); },
-      async renameFile(path, name, newName) { if (failPublish) throw new Error('Publication failed'); files.set(newName, files.get(name)); files.delete(name); },
-      async trashFile(path, name) { files.delete(name); } };
-    const original = _FileSrc_.get;
-    _FileSrc_.get = ref => ref === 'pCloud' ? source : original.call(_FileSrc_, ref);
-    try {
       const pdf = await PDFLib.PDFDocument.create(); pdf.addPage([300,400]);
       await _bookshelf_.import(new File([await pdf.save()], 'Cloud.pdf'));
       await _bookshelf_.syncCloud('pCloud', 'My library');
       await _bookshelf_.syncCloud('pCloud', 'My library');
       await _bookshelf_.call('update', { table: 'tags', values: { id: crypto.randomUUID(), name: 'Pending upload' } });
-      failPublish = true; let failed = false;
+      providerCloud.failPublish = true; let failed = false;
       try { await _bookshelf_.syncCloud('pCloud', 'My library'); } catch { failed = true; }
-      return { names: [...files.keys()], correctFolder: folders.every(path => path === '/My library'), failed };
-    } finally { _FileSrc_.get = original; }
+      return { names:[...providerCloud.directories].flatMap(([path,dir]) => [...dir.files.keys()].map(name => path + '/' + name)), failed };
   });
-  expect(result.names).toHaveLength(1);
-  expect(result.names.every(name => /^rostrum-library-[0-9a-f-]+\.zip$/.test(name))).toBe(true);
-  expect(result).toMatchObject({ correctFolder: true, failed: true });
+  expect(result.names).toHaveLength(2);
+  expect(result.names.some(name => name.startsWith('/My library/scores/') && name.endsWith('__Cloud.pdf'))).toBe(true);
+  expect(result.names.some(name => name.startsWith('/My library/changes/') && name.endsWith('.json'))).toBe(true);
+  expect(result.failed).toBe(true);
 });

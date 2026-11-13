@@ -693,6 +693,10 @@ class CachedSrc extends FileSrc {
             let now = performance.now() / 1000;
             if(this.tokens.expiry > now) return Promise.resolve();
         }
+        if (this.backgroundAuth) {
+            if (this.tokens?.refresh_token && this.tokens.refresh_expiry > performance.now() / 1000) return refreshAccessToken();
+            throw Object.assign(new Error('Connect to the cloud with Sync library now to continue.'), { name:'AuthRequiredError' });
+        }
 
         // Detect extension context (uses launchWebAuthFlow, not window.open)
         let isExtension = window.chrome && chrome.identity && chrome.runtime?.id;
@@ -1034,6 +1038,7 @@ class GDriveSrc extends CachedSrc {
   async auth() {
     // If we already have a valid token, reuse it
     if (this.tokens && this.tokens.expiry > Date.now() / 1000) return;
+    if (this.backgroundAuth) throw Object.assign(new Error('Connect to Google Drive with Sync library now to continue.'), { name:'AuthRequiredError' });
 
     // Extension-specific authentication using launchWebAuthFlow
     if (window.chrome && chrome.identity && chrome.runtime?.id) {
@@ -1806,6 +1811,7 @@ class PCloudOAuthAuth {
       throw new Error("pCloud OAuth is available only in the Rostrum browser extension.");
     await this.restoreSession();
     if (this.accessToken && this.apiHost) return;
+    if (this.backgroundAuth) throw Object.assign(new Error('Connect to pCloud with Sync library now to continue.'), { name:'AuthRequiredError' });
 
     let redirectUri = chrome.identity.getRedirectURL();
     let state = getPlainChallenge();
@@ -2044,6 +2050,7 @@ class PCloudDirectAuth {
       this.password = await this.store.get();
     }
     if (this.email && this.password) return;
+    if (this.backgroundAuth) throw Object.assign(new Error('Connect to pCloud with Sync library now to continue.'), { name:'AuthRequiredError' });
 
     return new Promise((resolve, reject) => {
       let elm = dialog(
@@ -2120,6 +2127,14 @@ class PCloudAuth {
   active = null;
 
   async authenticate() {
+    this.oauth.backgroundAuth = this.direct.backgroundAuth = !!this.backgroundAuth;
+    if (this.backgroundAuth && !this.active) {
+      for (const candidate of PCloudOAuthAuth.available ? [this.oauth,this.direct] : [this.direct]) {
+        try { await candidate.authenticate(); this.active = candidate; return; }
+        catch (error) { if (error.name !== 'AuthRequiredError') throw error; }
+      }
+      throw Object.assign(new Error('Connect to pCloud with Sync library now to continue.'), { name:'AuthRequiredError' });
+    }
     if (this.active) return this.active.authenticate();
     // With no OAuth to choose, there is nothing to ask about.
     if (!PCloudOAuthAuth.available) {
@@ -2247,6 +2262,7 @@ class PCloudSrc extends CachedSrc {
   }
 
   async auth() {
+    this.authProvider.backgroundAuth = !!this.backgroundAuth;
     await this.authProvider.authenticate();
   }
 

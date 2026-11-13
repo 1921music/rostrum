@@ -1,7 +1,7 @@
 import { openLibraryStorage } from './bookshelf-storage.js';
 import { openConfiguredLibraryStorage } from './bookshelf-storage-policy.js';
 import { unzipSync } from 'fflate';
-import { exportLibraryPackage, readLibraryPackage, hashBytes } from './bookshelf-transfer.js';
+import { exportLibraryPackage, readLibraryPackage, hashBytes, scorePath } from './bookshelf-transfer.js';
 
 // All database and file mutations run serially in this worker. A second tab
 // must fail explicitly rather than silently switching to temporary storage.
@@ -147,6 +147,10 @@ function validateTransfer(manifest) {
     }
   }
   const documents = new Map(manifest.records.documents.map(doc => [doc.id, doc]));
+  for (const doc of documents.values()) {
+    scorePath(doc.storage_path);
+    if (!/^[a-f0-9]{64}$/.test(doc.content_hash) || !Number.isSafeInteger(doc.size_bytes) || doc.size_bytes < 0) throw new Error('Invalid score identity');
+  }
   for (const change of incoming.values()) if (change.entity_type === 'documents') {
     const row = JSON.parse(change.payload_json), doc = documents.get(row.id);
     if (!doc || ['storage_path', 'content_hash', 'size_bytes'].some(key => row[key] !== doc[key])) throw new Error('A document identity has different file contents');
@@ -154,6 +158,39 @@ function validateTransfer(manifest) {
     if (local && (local.id !== doc.id || ['storage_path', 'content_hash', 'size_bytes'].some(key => local[key] !== doc[key]))) throw new Error('The package would overwrite a different score');
   }
   return { incoming, normalize, known };
+}
+function mergeRecords(manifest) {
+  const { incoming, normalize, known } = validateTransfer(manifest);
+  transaction(() => {
+    sql('PRAGMA defer_foreign_keys=ON');
+    for (const change of incoming.values()) if (!known.has(change.id)) sql('INSERT INTO changes VALUES (?,?,?,?,?,?,?)',
+      [change.id, change.device_id, change.entity_type, change.entity_id, change.parent_revision_ids_json, change.payload_json, change.created_at]);
+    const entities = new Map([...incoming.values()].map(change => [change.entity_type + ':' + change.entity_id, change]));
+    for (const { entity_type:table, entity_id:id } of entities.values()) {
+      const chosen = heads(table,id).sort((a,b) => a.id.localeCompare(b.id)).at(-1);
+      writeRow(table,normalize(table,JSON.parse(chosen.payload_json)));
+    }
+    validateRelations();
+    if (sql('PRAGMA foreign_key_check').length) throw new Error('The changes contain broken library references');
+  });
+  return { addedChanges:[...incoming.keys()].filter(id => !known.has(id)).length, conflicts:actions.conflicts().length };
+}
+function getLocal(key, fallback = null) { const row = sql('SELECT value FROM local_state WHERE key=?',[key])[0]; return row ? JSON.parse(row.value) : fallback; }
+function setLocal(key,value) {
+  const text = JSON.stringify(value);
+  if (sql('SELECT value FROM local_state WHERE key=?',[key])[0]?.value !== text) sql('INSERT INTO local_state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',[key,text]);
+}
+function fileState(id) { return getLocal('file:' + id); }
+function setFileState(id, values) { const state = { present:false, pinned:false, ...fileState(id), ...values }; setLocal('file:' + id,state); return state; }
+async function localFile(doc) {
+  try { const file = await files.read(doc.storage_path); setFileState(doc.id,{ present:true }); return file; }
+  catch (error) { if (error.name !== 'NotFoundError') throw error; setFileState(doc.id,{ present:false }); return null; }
+}
+function associatedDocument(change) {
+  const row = JSON.parse(change.payload_json);
+  if (change.entity_type === 'documents') return row.id;
+  if (row.document_id) return row.document_id;
+  if (row.entry_id) return sql('SELECT document_id FROM entries WHERE id=?',[row.entry_id])[0]?.document_id;
 }
 async function open() {
   if (initialized) return;
@@ -187,6 +224,82 @@ async function open() {
 const importedDocument = hash => sql('SELECT * FROM documents WHERE content_hash=? ORDER BY deleted_at IS NOT NULL, replaced_by_id IS NOT NULL, id LIMIT 1', [hash])[0];
 const actions = {
   close() {},
+  async availability({ destination = '' } = {}) {
+    const inventory = getLocal('remote:' + destination,{ changeIds:[],paths:[] });
+    const remoteIds = new Set(inventory.changeIds), paths = new Set(inventory.paths);
+    const pending = new Set(sql('SELECT * FROM changes').filter(change => !remoteIds.has(change.id)).map(associatedDocument));
+    const result = [];
+    for (const doc of sql('SELECT * FROM documents')) {
+      if (!fileState(doc.id)) await localFile(doc);
+      result.push({ id:doc.id, ...fileState(doc.id), remote:paths.has(doc.storage_path), pending:pending.has(doc.id) });
+    }
+    return result;
+  },
+  async fileInfo({ id, verify = false }) {
+    const document = sql('SELECT * FROM documents WHERE id=?',[id])[0];
+    if (!document) throw new Error('Score not found');
+    const file = await localFile(document);
+    if (file && verify && (file.size !== document.size_bytes || await hashBytes(await file.arrayBuffer()) !== document.content_hash)) throw new Error('Local score contents do not match the imported file');
+    return { document, file };
+  },
+  async installFile({ id, file }) {
+    await actions.verifyFile({ id,file });
+    const doc = sql('SELECT * FROM documents WHERE id=?',[id])[0];
+    await files.write(doc.storage_path,file); return setFileState(id,{ present:true });
+  },
+  async verifyFile({ id, file }) {
+    const doc = sql('SELECT * FROM documents WHERE id=?',[id])[0];
+    if (!doc || !(file instanceof Blob) || file.size !== doc.size_bytes || await hashBytes(await file.arrayBuffer()) !== doc.content_hash) throw new Error('Downloaded score is damaged or does not match its hash');
+    return true;
+  },
+  pinFile({ id, pinned }) {
+    if (!sql('SELECT id FROM documents WHERE id=?',[id]).length) throw new Error('Score not found');
+    return setFileState(id,{ pinned:!!pinned });
+  },
+  async releaseFile({ id, destination }) {
+    const doc = sql('SELECT * FROM documents WHERE id=?',[id])[0];
+    if (!doc || !getLocal('remote:' + destination,{ paths:[] }).paths.includes(doc.storage_path)) throw new Error('Upload this score before releasing its download');
+    if (fileState(id)?.pinned) throw new Error('Turn off offline keeping before releasing this download');
+    await files.remove(doc.storage_path); return setFileState(id,{ present:false });
+  },
+  collectionDocuments({ table, id }) {
+    if (table === 'bookshelves') return sql('SELECT DISTINCT d.id FROM bookshelf_documents m JOIN documents d ON d.id=m.document_id WHERE m.bookshelf_id=? AND m.deleted_at IS NULL AND d.deleted_at IS NULL AND d.replaced_by_id IS NULL',[id]).map(row => row.id);
+    if (table === 'playlists') return sql('SELECT DISTINCT d.id FROM playlist_items m JOIN entries e ON e.id=m.entry_id JOIN documents d ON d.id=e.document_id WHERE m.playlist_id=? AND m.deleted_at IS NULL AND e.deleted_at IS NULL AND d.deleted_at IS NULL',[id]).map(row => row.id);
+    throw new Error('Choose a bookshelf or playlist');
+  },
+  syncData() { return { deviceId, changes:sql('SELECT * FROM changes'), documents:sql('SELECT * FROM documents'), batches:getLocal('delta-batches',{}) }; },
+  mergeDelta({ changes }) {
+    if (!Array.isArray(changes)) throw new Error('Invalid changes');
+    const records = Object.fromEntries(Object.keys(tables).map(table => [table,[]]));
+    const selected = new Map();
+    for (const change of changes) {
+      if (!change || !Object.hasOwn(tables,change.entity_type)) throw new Error('Invalid change entity');
+      selected.set(change.entity_type + ':' + change.entity_id,change);
+    }
+    for (const change of selected.values()) records[change.entity_type].push(JSON.parse(change.payload_json));
+    const existing = new Set(sql('SELECT id FROM documents').map(doc => doc.id));
+    const result = mergeRecords({ records, changes });
+    // Remote-only documents must not be mistaken for locally imported files.
+    for (const doc of records.documents) if (!existing.has(doc.id)) setFileState(doc.id,{ present:false });
+    return result;
+  },
+  rememberBatch({ destination, id, changeIds }) {
+    const batches = getLocal('delta-batches',{});
+    if (!Object.hasOwn(batches,destination)) Object.defineProperty(batches,destination,{ value:{},enumerable:true,configurable:true,writable:true });
+    Object.defineProperty(batches[destination],id,{ value:changeIds, enumerable:true, configurable:true, writable:true });
+    setLocal('delta-batches',batches);
+  },
+  remoteInventory({ destination, changeIds, paths }) {
+    if (!Array.isArray(changeIds) || !Array.isArray(paths) || [...changeIds,...paths].some(value => typeof value !== 'string')) throw new Error('Invalid remote inventory');
+    for (const path of paths) scorePath(path);
+    setLocal('remote:' + destination,{ changeIds:[...new Set(changeIds)].sort(), paths:[...new Set(paths)].sort() });
+    return actions.syncStatus({ destination });
+  },
+  syncStatus({ destination = '' } = {}) {
+    const inventory = getLocal('remote:' + destination,{ changeIds:[],paths:[] });
+    const known = new Set(inventory.changeIds);
+    return { pending:sql('SELECT id FROM changes').filter(row => !known.has(row.id)).length, verified:!!getLocal('remote:' + destination), conflicts:actions.conflicts().length };
+  },
   async findImportedFile({ file }) {
     const existing = importedDocument(await hashBytes(await file.arrayBuffer()));
     return existing ? { ...existing, alreadyImported: true } : null;
@@ -217,21 +330,8 @@ const actions = {
           await files.write(doc.storage_path, manifest.archive[doc.storage_path]); created.push(doc.storage_path);
         }
       }
-      transaction(() => {
-        sql('PRAGMA defer_foreign_keys=ON');
-        for (const change of incoming.values()) if (!known.has(change.id)) {
-          sql('INSERT INTO changes VALUES (?,?,?,?,?,?,?)', [change.id, change.device_id, change.entity_type,
-            change.entity_id, change.parent_revision_ids_json, change.payload_json, change.created_at]);
-        }
-        const entities = new Map([...incoming.values()].map(change => [change.entity_type + ':' + change.entity_id, change]));
-        for (const { entity_type: table, entity_id: id } of entities.values()) {
-          const alternatives = heads(table, id).sort((a,b) => a.id.localeCompare(b.id));
-          const chosen = alternatives.at(-1);
-          writeRow(table, normalize(table, JSON.parse(chosen.payload_json)));
-        }
-        validateRelations();
-        if (sql('PRAGMA foreign_key_check').length) throw new Error('The package contains broken library references');
-      });
+      mergeRecords(manifest);
+      for (const doc of manifest.records.documents) setFileState(doc.id,{ present:true });
       return { addedChanges: [...incoming.keys()].filter(id => !known.has(id)).length,
         conflicts: actions.conflicts().length, importedFiles: created.length };
     } catch (error) {
@@ -289,6 +389,7 @@ const actions = {
       return transaction(() => {
         const document = save('documents', { id, content_hash: hash, storage_path: path, size_bytes: file.size,
           settings_json: '{}', metadata_json: JSON.stringify({ displayName, originalFilename: file.name, format: file.name.split('.').pop().toLowerCase() }) });
+        setFileState(id,{ present:true });
         for (const entry of entries) save('entries', { id: entry.id, document_id: id, parent_id: entry.parent_id || null,
           anchor_json: JSON.stringify(entry.anchor), metadata_json: JSON.stringify(entry.metadata), deleted_at: entry.deleted_at || null });
         if (derivedFromId) save('documents', { id, derived_from_id: derivedFromId });
@@ -432,7 +533,12 @@ const actions = {
       return save('documents', { id: documentId, settings_json: JSON.stringify(settings) });
     });
   },
-  update({ table, values }) { return transaction(() => save(table, values)); },
+  update({ table, values, expectedRevisionId }) {
+    return transaction(() => {
+      if (expectedRevisionId && sql(`SELECT revision_id FROM ${Object.hasOwn(tables,table) ? table : 'documents'} WHERE id=?`,[values.id])[0]?.revision_id !== expectedRevisionId) throw new Error('This item changed. Refresh the list before editing it.');
+      return save(table,values);
+    });
+  },
   link({ table, values }) {
     if (!['document_tags', 'entry_tags', 'bookshelf_documents', 'playlist_items'].includes(table)) throw new Error('Invalid membership');
     return transaction(() => {
