@@ -59,7 +59,7 @@ test.beforeEach(async ({ page }) => {
       && request.url() !== 'https://accounts.google.com/gsi/client') external.push(request.url());
   });
   page.__external = external;
-  await page.goto('/podium.html');
+  await page.goto('/rostrum.html');
   await page.waitForFunction(() => !!window._Score_ && !!window._menu_);
 });
 test.afterEach(async ({ page }) => { expect(page.__external).toEqual([]); });

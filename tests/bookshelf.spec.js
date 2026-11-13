@@ -105,7 +105,7 @@ test('reimport skips identical bytes without new files, songs or changes, includ
   expect(result).toEqual({ same: true, skipped: true, unchanged: true, songs: 1, files: 1, visible: 0 });
 });
 
-for (const url of ['/pod.html', '/podium.html']) test(`remembered folder prompts for permission and retries without a picker (${url})`, async ({ page }) => {
+for (const url of ['/pod.html', '/rostrum.html']) test(`remembered folder prompts for permission and retries without a picker (${url})`, async ({ page }) => {
   await page.goto(url); await page.waitForFunction(() => !!window._bookshelf_ && !!window._menu_);
   const id = await page.evaluate(async () => {
     const directory = await (await navigator.storage.getDirectory()).getDirectoryHandle('Remembered scores', { create: true });
@@ -516,7 +516,7 @@ test('damaged backup files and forged change records are rejected without alteri
 });
 
 test('standalone file URL starts the embedded Worker and persists with an explicit backend', async ({ page }) => {
-  await page.goto(pathToFileURL(path.resolve('build/podium.html')).href);
+  await page.goto(pathToFileURL(path.resolve('build/rostrum.html')).href);
   await page.waitForFunction(() => !!window._bookshelf_ && !!window._menu_);
   const result = await page.evaluate(async () => {
     await _bookshelf_.configure({ kind: 'indexeddb', name: 'file-library-test-' + crypto.randomUUID() });

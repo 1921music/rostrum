@@ -17,12 +17,12 @@ import subprocess
 
 
 if len(sys.argv) == 1:
-   args = argparse.Namespace(verbose=True, font=True, sample=True, podium=True, yin=True, extension=False, doc=False, pages=False, guide=True, cert=False, clean=False, cert_host='') ;
+   args = argparse.Namespace(verbose=True, font=True, sample=True, rostrum=True, yin=True, extension=False, doc=False, pages=False, guide=True, cert=False, clean=False, cert_host='') ;
 else:
   parser = argparse.ArgumentParser()
   parser.add_argument('-s','--sample', action='store_true', help='(re)build build/sample.js')
   parser.add_argument('-f','--font', action='store_true', help='(re)build build/font.js')
-  parser.add_argument('-p','--podium', action='store_true', help='(re)build build/podium.html')
+  parser.add_argument('-p','--rostrum', action='store_true', help='(re)build build/rostrum.html')
   parser.add_argument('-y','--yin', action='store_true', help='(re)build build/yin.js')
   parser.add_argument('-e','--extension', action='store_true', help='(re)build the personal Chrome extension')
   parser.add_argument('--doc', action='store_true', help='(re)build build/doc-assets/, the guidebook media recompressed for deployment')
@@ -178,7 +178,7 @@ if args.font:
       return this._bytes;
     }.bind({});
 
-    // Noto Sans JP, subset to Podium's Japanese glyph set (see build_font.py).
+    // Noto Sans JP, subset to Rostrum's Japanese glyph set (see build_font.py).
     // Registered for CSS as well as for PDF embedding, so what the canvas draws
     // and what gets written to the PDF are the same shapes.
     const notoSansJpBase64 = \"""")
@@ -296,7 +296,7 @@ export {pianoSamples}
       except OSError:
         pass
 
-# Define Packager class (used by both --podium and --ext builds)
+# Define Packager class (used by both --rostrum and --ext builds)
 import shutil
 
 class Packager(object):
@@ -450,7 +450,7 @@ class Packager(object):
             outFileObj.write(fileContentsUtf8) ;
         outFileObj.write('" ;\n') ;
 
-# Helper function to build using Packager (used by both --podium and --ext builds)
+# Helper function to build using Packager (used by both --rostrum and --ext builds)
 def build(inFileName, outFileName):
     with open(inFileName, encoding='utf-8') as inFileObj:
         with open(outFileName, "w", encoding='utf-8', newline='\n') as outFileObj:
@@ -465,9 +465,9 @@ if args.yin:
 # Only what must differ is patched in: the license in full, the PWA links, the
 # service worker, and the scripts, which are all included inline. Every patch
 # must match exactly once: a change to pod.html that breaks one stops the build.
-PODIUM_PAGE_INCLUDE = '      // #include src/main.js minified\n'
+ROSTRUM_PAGE_INCLUDE = '      // #include src/main.js minified\n'
 
-def podium_page_patches(canonical):
+def rostrum_page_patches(canonical):
   # canonical is None for a deployment whose URL is not known at build time, such
   # as build/pages/: claiming another site as canonical would be wrong there.
   return [
@@ -509,7 +509,7 @@ def podium_page_patches(canonical):
      '      }\n'
      '    </script>\n'
      '    <script type="module">\n'
-     + PODIUM_PAGE_INCLUDE +
+     + ROSTRUM_PAGE_INCLUDE +
      '    </script>\n'),
 ]
 
@@ -533,7 +533,7 @@ def bundle_local_guide(destination, extension=False):
     """Ship Japanese prose and media beside local HTML, without file:// fetch probes."""
     guide_dir = os.path.join(destination, 'guidebook')
     os.makedirs(guide_dir, exist_ok=True)
-    compressed = os.path.isfile(os.path.join('build', 'doc-assets', 'podium-icon.webp'))
+    compressed = os.path.isfile(os.path.join('build', 'doc-assets', 'rostrum-icon.webp'))
     media_dir = os.path.join('build', 'doc-assets') if compressed else os.path.join('doc', 'assets')
     shutil.copytree(media_dir, os.path.join(guide_dir, 'assets'), dirs_exist_ok=True,
                     ignore=shutil.ignore_patterns('.*'))
@@ -563,7 +563,7 @@ def bundle_local_guide(destination, extension=False):
         target.write(guide)
 
 
-def build_podium_page(outFileName, canonical="https://1921music.github.io/rostrum/"):
+def build_rostrum_page(outFileName, canonical="https://1921music.github.io/rostrum/"):
     subprocess.run(['node', 'build_browser_fs.mjs'], check=True)
     for asset in ('bookshelf-worker.js', 'sqlite3.wasm'):
         source = os.path.join('build', asset)
@@ -574,17 +574,17 @@ def build_podium_page(outFileName, canonical="https://1921music.github.io/rostru
         page = f.read()
     with open("LICENSE", encoding='utf-8') as f:
         license = f.read()
-    for old, new in podium_page_patches(canonical):
+    for old, new in rostrum_page_patches(canonical):
         if page.count(old) != 1:
             sys.exit(f'Error: page patch target not found exactly once in src/pod.html: {old!r}')
         page = page.replace(old, new.replace('{LICENSE}', license))
     # Only main.js goes through the Packager. The page itself is written as is:
     # the Packager reads its input as javascript, and would strip, say, the
     # rest of any line of html text containing "//".
-    head, tail = page.split(PODIUM_PAGE_INCLUDE)
+    head, tail = page.split(ROSTRUM_PAGE_INCLUDE)
     packaged = StringIO()
     packaged.write(head)
-    Packager("src/pod.html", StringIO(PODIUM_PAGE_INCLUDE), packaged)
+    Packager("src/pod.html", StringIO(ROSTRUM_PAGE_INCLUDE), packaged)
     packaged.write(tail)
     # Stamp the build so the Version panel can say which one is running. The
     # version alone cannot answer that, and it is the question every PWA update
@@ -592,12 +592,12 @@ def build_podium_page(outFileName, canonical="https://1921music.github.io/rostru
     # says when, the commit says from what. Matched loosely because the Packager
     # minifies the spacing away.
     stamped = packaged.getvalue()
-    if os.path.basename(outFileName) == 'podium.html':
+    if os.path.basename(outFileName) == 'rostrum.html':
         bundle_local_guide(os.path.dirname(outFileName))
-        stamped = stamped.replace('</head>', '<script>window._podiumGuideJa_ = "guidebook/Guidebook.ja.html";</script>\n</head>')
+        stamped = stamped.replace('</head>', '<script>window._rostrumGuideJa_ = "guidebook/Guidebook.ja.html";</script>\n</head>')
     for name, value in (
-            ('_podiumBuild_', datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')),
-            ('_podiumCommit_', git_commit())):
+            ('_rostrumBuild_', datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')),
+            ('_rostrumCommit_', git_commit())):
         stamped, count = re.subn(
             r'window\.%s\s*=\s*"dev"' % name, 'window.%s = "%s"' % (name, value),
             stamped, count=1)
@@ -607,15 +607,15 @@ def build_podium_page(outFileName, canonical="https://1921music.github.io/rostru
         outFileObj.write(stamped)
 
 if args.extension:
-    # A packaged Podium page always references this worklet. Keep extension
+    # A packaged Rostrum page always references this worklet. Keep extension
     # development possible without Emscripten; a real --yin build replaces it.
     yin_worklet = os.path.join('build', 'yin-worklet.js')
     if not os.path.exists(yin_worklet):
         shutil.copyfile(os.path.join('src', 'yin-worklet-fallback.js'), yin_worklet)
         print('  NOTE: using fallback YIN worklet; pitch detection is unavailable.')
     # The extension page starts from the very same packaged page as the 1-file
-    # build, so the two cannot drift apart (see build_podium_page above).
-    build_podium_page("build/podium.html")
+    # build, so the two cannot drift apart (see build_rostrum_page above).
+    build_rostrum_page("build/rostrum.html")
     extension_dir = os.path.join('build', 'extension')
     extension_app_dir = os.path.join(extension_dir, 'build')
     # Check dependencies before replacing an existing unpacked extension.
@@ -646,7 +646,7 @@ if args.extension:
             target_file.write(pdf_source)
     # Manifest V3 forbids inline JavaScript. Extract every packaged script to
     # a local file while retaining attributes such as type="module".
-    with open(os.path.join('build', 'podium.html'), encoding='utf-8') as packaged:
+    with open(os.path.join('build', 'rostrum.html'), encoding='utf-8') as packaged:
         extension_html = packaged.read()
     script_index = [0]
     def extract_extension_script(match):
@@ -665,7 +665,7 @@ if args.extension:
                 script_source
             )
         script_index[0] += 1
-        filename = f'podium-script-{script_index[0]}.js'
+        filename = f'rostrum-script-{script_index[0]}.js'
         with open(os.path.join(extension_app_dir, filename), 'w', encoding='utf-8', newline='\n') as script_file:
             script_file.write(script_source)
         return f'<script{match.group(1)} src="{filename}"></script>'
@@ -674,15 +674,15 @@ if args.extension:
     # These PWA-only resources are deliberately absent from the extension.
     extension_html = re.sub(r'\s*<link rel="manifest"[^>]*>', '', extension_html)
     extension_html = re.sub(r'\s*<link rel="apple-touch-icon"[^>]*>', '', extension_html)
-    with open(os.path.join(extension_app_dir, 'podium.html'), 'w', encoding='utf-8', newline='\n') as extension_page:
+    with open(os.path.join(extension_app_dir, 'rostrum.html'), 'w', encoding='utf-8', newline='\n') as extension_page:
         extension_page.write(extension_html)
     bundle_local_guide(extension_app_dir, extension=True)
-    if args.verbose: print('-- personal extension podium.html (re)built.')
+    if args.verbose: print('-- personal extension rostrum.html (re)built.')
 
-if args.podium:
-    # Build 1-file, all-included version of podium as "build/podium.html":
-    build_podium_page("build/podium.html")
-    if args.verbose: print('-- podium.html (re)built.')
+if args.rostrum:
+    # Build 1-file, all-included version of rostrum as "build/rostrum.html":
+    build_rostrum_page("build/rostrum.html")
+    if args.verbose: print('-- rostrum.html (re)built.')
 
     # Generate PWA icons from SVG
     if args.verbose: print('Generating PWA icons...')
@@ -690,7 +690,7 @@ if args.podium:
 
     # Use the same SVG as the extension, but with solid background and 20% safe zone padding for maskable icons.
     # PWA icon with maskable safe zone (80% size centered = 20% padding)
-    podium_icon_svg = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="{size}" height="{size}">
+    rostrum_icon_svg = '''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="{size}" height="{size}">
   <rect width="24" height="24" fill="#2d3748"/>
   <g transform="translate(2.4, 2.4) scale(0.8)">
     <path fill="#aaaaaa" stroke="#fff" stroke-width=".6" stroke-linejoin="round"
@@ -716,7 +716,7 @@ if args.podium:
     def write_icon_svgs():
         for size in (192, 512):
             with open(f'build/icons/icon{size}.svg', 'w', encoding='utf-8') as f:
-                f.write(podium_icon_svg.format(size=size))
+                f.write(rostrum_icon_svg.format(size=size))
 
     def remove_icon_svgs():
         for size in (192, 512):
@@ -730,7 +730,7 @@ if args.podium:
         # build: the wheel installs cleanly on Windows without the cairo DLL.
         import cairosvg
         for size in [192, 512]:
-            svg_content = podium_icon_svg.format(size=size)
+            svg_content = rostrum_icon_svg.format(size=size)
             cairosvg.svg2png(bytestring=svg_content.encode('utf-8'),
                            write_to=f'build/icons/icon{size}.png',
                            output_width=size,
@@ -816,7 +816,7 @@ if args.pages:
     os.makedirs(pages_dir, exist_ok=True)
     # The entry is index.html, so the URL is just the directory, which is what
     # the manifest's "./" start_url and scope resolve to.
-    build_podium_page(os.path.join(pages_dir, 'index.html'), canonical=None)
+    build_rostrum_page(os.path.join(pages_dir, 'index.html'), canonical=None)
     for name in ('manifest.webmanifest', 'podauth.html'):
         shutil.copyfile(os.path.join('src', name), os.path.join(pages_dir, name))
 
@@ -911,7 +911,7 @@ if args.pages:
         else:
             missing_icons.append(f'icon{size}.png')
     if missing_icons:
-        print(f'  NOTE: {", ".join(missing_icons)} missing; run build.py --podium to generate them.')
+        print(f'  NOTE: {", ".join(missing_icons)} missing; run build.py --rostrum to generate them.')
     if args.verbose: print(f'-- {pages_dir} (re)built.')
 
 if(args.cert):
@@ -945,7 +945,7 @@ if(args.cert):
     if not (os.path.exists('devCA.pem') and os.path.exists('devCA-key.pem')):
         print("  Creating local dev CA -> devCA.pem  (install this on your test devices)")
         os.system('openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -sha256 '
-                  '-keyout devCA-key.pem -out devCA.pem -subj "/CN=Podium Dev CA" '
+                  '-keyout devCA-key.pem -out devCA.pem -subj "/CN=Rostrum Dev CA" '
                   '-addext "basicConstraints=critical,CA:true" '
                   '-addext "keyUsage=critical,keyCertSign,cRLSign"') ;
 
@@ -957,7 +957,7 @@ if(args.cert):
                 "keyUsage=critical,digitalSignature,keyEncipherment\n"
                 "extendedKeyUsage=serverAuth\n")
     os.system('openssl req -newkey rsa:2048 -nodes -keyout key.pem -out cert.csr '
-              '-subj "/CN=Podium Dev Server"') ;
+              '-subj "/CN=Rostrum Dev Server"') ;
     os.system('openssl x509 -req -in cert.csr -CA devCA.pem -CAkey devCA-key.pem '
               '-CAcreateserial -days 397 -sha256 -out cert.pem -extfile cert.ext') ;
     for tmp in ('cert.csr', 'cert.ext'):

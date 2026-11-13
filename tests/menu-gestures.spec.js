@@ -11,7 +11,7 @@ test.beforeEach(async ({ page }) => {
 });
 test.afterEach(async ({ page }) => expect(page.external).toEqual([]));
 
-for (const url of ['/pod.html', '/podium.html']) for (const surface of ['background', 'score']) test(`long press releases the menu before mouse hover (${url}, ${surface})`, async ({ page }) => {
+for (const url of ['/pod.html', '/rostrum.html']) for (const surface of ['background', 'score']) test(`long press releases the menu before mouse hover (${url}, ${surface})`, async ({ page }) => {
   await page.goto(url);
   await page.waitForFunction(() => !!window._menu_);
   if (surface === 'score') {
@@ -34,7 +34,7 @@ for (const url of ['/pod.html', '/podium.html']) for (const surface of ['backgro
   expect(await position()).toEqual(released);
 });
 
-for (const url of ['/pod.html', '/podium.html']) for (const panel of ['library', 'about']) test(`panel content does not summon the ring menu (${url}, ${panel})`, async ({ page }) => {
+for (const url of ['/pod.html', '/rostrum.html']) for (const panel of ['library', 'about']) test(`panel content does not summon the ring menu (${url}, ${panel})`, async ({ page }) => {
   await page.goto(url);
   await page.waitForFunction(() => !!window._menu_);
   await page.evaluate(panel => _menu_.notify(panel === 'library' ? 'score/open/up' : 'app/about/up'), panel);

@@ -186,8 +186,8 @@ is run with `emcc` available and the extension is rebuilt/reloaded.
 
 | Command | Description |
 |---------|-------------|
-| `mise exec -- python build.py` | Full build (font, sample, yin, podium, guide) |
-| `mise exec -- python build.py --podium` | Build single-file app (`build/podium.html`) |
+| `mise exec -- python build.py` | Full build (font, sample, yin, rostrum, guide) |
+| `mise exec -- python build.py --rostrum` | Build single-file app (`build/rostrum.html`) |
 | `mise exec -- python build.py --doc` | Recompress the guidebook's media for deployment (`build/doc-assets/`, requires ffmpeg) |
 | `mise exec -- python build.py --pages` | Build a static-host deployment (`build/pages/`) |
 | `mise exec -- python build.py --guide` | Build Guidebook keyword index |
@@ -197,7 +197,7 @@ is run with `emcc` available and the extension is rebuilt/reloaded.
 | `mise exec -- python build.py --cert` | Generate SSL certificate (requires openssl) |
 | `mise exec -- python build.py --clean` | Clean build artifacts |
 
-The build system creates a single-file distribution at `build/podium.html` that includes all dependencies, assets, and source code inline.
+The build system creates a single-file distribution at `build/rostrum.html` that includes all dependencies, assets, and source code inline.
 Packaged builds automatically bundle the pinned browser-fs-access dependency
 with esbuild, including both native and fallback paths and its license. No CDN
 or dynamic module download is needed. `npm test` also builds this adapter before
@@ -207,7 +207,7 @@ running browser tests; direct source development uses the command shown above.
 
 `--pages` writes `build/pages/`: the packaged page as `index.html`, plus
 `manifest.webmanifest`, `sw.js`, `podauth.html` and the two PWA icons. Upload
-the directory anywhere static — GitHub Pages, for instance — and Podium
+the directory anywhere static — GitHub Pages, for instance — and Rostrum
 installs as a PWA from it. Everything is referenced relatively, so it works from
 any subdirectory and the directory may be renamed.
 
@@ -233,7 +233,7 @@ once the translation has caught up.
 branch:
 
 ```bash
-mise exec -- python build.py --podium --pages
+mise exec -- python build.py --rostrum --pages
 mise exec -- python deploy_pages.py
 ```
 
@@ -286,12 +286,12 @@ Build and deploy from the corresponding branch:
 
 ```bash
 # main -> the site root; preserves the experimental subdirectory
-mise exec -- python build.py --podium --pages
+mise exec -- python build.py --rostrum --pages
 mise exec -- python deploy_pages.py
 
 # feature/wink-page-turn -> the experimental subdirectory; preserves the stable app
 mise exec -- sh fetch-wink-assets.sh
-mise exec -- python build.py --podium --pages
+mise exec -- python build.py --rostrum --pages
 mise exec -- python deploy_pages.py --path wink-page-turn
 ```
 

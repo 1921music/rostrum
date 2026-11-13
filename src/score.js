@@ -3,20 +3,20 @@
 /**
   Copyright 2025 Glendon Diener
  
-  This file is part of Podium.
+  This file is part of Rostrum.
  
-  Podium is free software: you can redistribute it and/or modify it
+  Rostrum is free software: you can redistribute it and/or modify it
   under the terms of the GNU Affero General Public License as
   published by the Free Software Foundation, either version 3 of the
   License, or (at your option) any later version.
 
-  Podium is distributed in the hope that it will be useful, but
+  Rostrum is distributed in the hope that it will be useful, but
   WITHOUT ANY WARRANTY; without even the implied warranty of
   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
   Affero General Public License for more details.
 
   You should have received a copy of the GNU Affero General Public
-  License along with Podium. If not, see
+  License along with Rostrum. If not, see
   <https://www.gnu.org/licenses/>.
 **/
 
@@ -161,11 +161,11 @@ class Pg {
   // Rostrum's custom properties on fabric objects. fabric drops unknown
   // properties on serialize unless they're listed, so EVERY serialization
   // (toJson, and the undo snapshots) must pass this list: "flatten" (see
-  // flattenObjects; toPdf relies on it), "podiumType" (the tool that made the
+  // flattenObjects; toPdf relies on it), "rostrumType" (the tool that made the
   // object: pencil/pen/rastrum/...; control rendering keys off it, see
-  // canvas.js) and "podiumStash" (the tool settings it was drawn with, which
+  // canvas.js) and "rostrumStash" (the tool settings it was drawn with, which
   // its panel loads when it is selected).
-  static customProps = ["flatten", "podiumType", "podiumStash", "rostrumAnchor", "rostrumId"];
+  static customProps = ["flatten", "rostrumType", "rostrumStash", "rostrumAnchor", "rostrumId"];
 
   // Default color used to pad pages < maxWidth and/or maxHeight:
   static paddingColor = "#fff";
@@ -1497,12 +1497,12 @@ class Score {
           dialog("This PDF restricts modifications — saving annotations or other changes may not be possible.", { OK: { svg: "OK" } });
       }
 
-      // Grab podium attachment, if available
+      // Grab rostrum attachment, if available
       let scoreJson = null;
-      let podiumAttachment = (await this.mozDoc.getAttachments())?.podium;
-      if (podiumAttachment) {
+      let rostrumAttachment = (await this.mozDoc.getAttachments())?.rostrum;
+      if (rostrumAttachment) {
         // scoreJson, if it exists
-        scoreJson = JSON.parse(new TextDecoder().decode(podiumAttachment.content));
+        scoreJson = JSON.parse(new TextDecoder().decode(rostrumAttachment.content));
         this.created = scoreJson.created || this.created;
         this.modified = scoreJson.modified || this.modified;
         this.quality = scoreJson.quality ?? this.quality;
@@ -1859,7 +1859,7 @@ class Score {
     copiedPages.forEach((page,idx) => docA.insertPage(pn + idx, page));
     let mergedPdfData = await docA.save();
     let mergedScore = await new Score().init(this.source, this.path, this.name, mergedPdfData, false);
-    // Get podium attachment from docB, if any. Note that PDFLib has no "high level" api for this, so
+    // Get rostrum attachment from docB, if any. Note that PDFLib has no "high level" api for this, so
     // its a bit involved. Code adapted from //github.com/Hopding/pdf-lib/issues/534.
     let json = null;
 
@@ -1872,7 +1872,7 @@ class Score {
       let EFNames = EmbeddedFiles.lookup(PDFName.of("Names"), PDFArray);
       for (let idx = 0, len = EFNames.size(); idx < len; idx += 2) {
         let fileName = EFNames.lookup(idx);
-        if (fileName.decodeText() == "podium") {
+        if (fileName.decodeText() == "rostrum") {
           let fileSpec = EFNames.lookup(idx + 1, PDFDict);
           let stream = fileSpec.lookup(PDFName.of("EF"), PDFDict).lookup(PDFName.of("F"), PDFStream);
           json = new TextDecoder().decode(PDFLib.decodePDFRawStream(stream).decode());
@@ -2360,9 +2360,9 @@ class Score {
 
       // Add the pdf attachment
       let jsonString = JSON.stringify(attachment);
-      await dstPLibDoc.attach(new TextEncoder().encode(jsonString), "podium", {
+      await dstPLibDoc.attach(new TextEncoder().encode(jsonString), "rostrum", {
         mimeType: "application/json",
-        description: "podium json metadata",
+        description: "rostrum json metadata",
         creationDate: now,
         modificationDate: now,
       });
@@ -2383,7 +2383,7 @@ class Score {
       } else {
         // New score created from scratch - set Rostrum metadata
         dstPLibDoc.setCreationDate(now);
-        dstPLibDoc.setCreator("Rostrum vers." + _podiumVersion_);
+        dstPLibDoc.setCreator("Rostrum vers." + _rostrumVersion_);
         dstPLibDoc.setProducer("pdf-lib v1.17.1");
       }
       if (doc) return dstPLibDoc;

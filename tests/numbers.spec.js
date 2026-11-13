@@ -7,8 +7,8 @@ const { test, expect } = require("@playwright/test");
 // whether they take anything at all is the reader's: "L-R" runs a tall band
 // down each side, "T-B" a wide one across the top and the foot, and "Over"
 // draws them on the pages, where they cost nothing.
-const pageFile = path.join(__dirname, "..", "build", "podium.html");
-test.skip(!fs.existsSync(pageFile), "build/podium.html is missing; run build.py --podium");
+const pageFile = path.join(__dirname, "..", "build", "rostrum.html");
+test.skip(!fs.existsSync(pageFile), "build/rostrum.html is missing; run build.py --rostrum");
 
 // A landscape window and the default A4 pages: every layout's fit is then
 // settled by the height, so a band across the ends costs page size and a band
@@ -21,7 +21,7 @@ const GS = 618;
 const LAYOUTS = ["book", "horizontal", "vertical"];
 
 test.beforeEach(async ({ page }) => {
-  await page.goto("/podium.html");
+  await page.goto("/rostrum.html");
   await page.waitForFunction(() => !!window._menu_?.rings?.layout?.cells?.vertical);
   await page.evaluate(() => { window._menu_.rings.score.cells.new.stash.pages = 4; });
   await page.evaluate(() => window._menu_.notify("score/new/up"));
@@ -31,7 +31,7 @@ test.beforeEach(async ({ page }) => {
 // Open @key with the given Numbers settings and report the page size the fit
 // arrived at, plus where the two bands ended up. @axis is "Off", "L-R" or
 // "T-B"; "Off" leaves the band key out altogether, as a score saved by a
-// Podium that never had one does, so the default edges are exercised too.
+// Rostrum that never had one does, so the default edges are exercised too.
 async function build(page, key, axis, place = "Inset") {
   return page.evaluate(async ([key, axis, place]) => {
     const Layout = window._Layout_;
@@ -107,7 +107,7 @@ for (const key of LAYOUTS) {
   test(`${key} reads a score saved before the edges could be chosen`, async ({ page }) => {
     // Layout settings travel inside the score file, and Numbers has always been
     // On or Off, so scores with no band key at all keep turning up -- including
-    // from a Podium that has never heard of one. They open on the edges that
+    // from a Rostrum that has never heard of one. They open on the edges that
     // layout used at the time, which is where whoever saved them expects to
     // find the numbers.
     const on = await page.evaluate(async (key) => {

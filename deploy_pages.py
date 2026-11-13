@@ -53,7 +53,7 @@ def main():
     source = git(repo, 'rev-parse', 'HEAD')
     html = page.read_text(encoding='utf-8')
     if source not in html or source + '-dirty' in html:
-        parser.error('the build does not match HEAD; rebuild with build.py --podium --pages')
+        parser.error('the build does not match HEAD; rebuild with build.py --rostrum --pages')
     # Avoid accidentally publishing a copied full deployment inside itself.
     if (args.directory / 'wink-page-turn').exists():
         parser.error('the input must contain one variant, without a wink-page-turn directory')

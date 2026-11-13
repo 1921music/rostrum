@@ -45,8 +45,8 @@ async function choose(page, bytes, name = 'Single.pdf') {
   await expect(review(page)).toBeVisible();
 }
 
-for (const url of ['/pod.html', '/podium.html', pathToFileURL(path.resolve('build/podium.html')).href]) test(`single PDF review validates, previews and commits edited songs (${url.startsWith('file:') ? 'file URL' : url})`, async ({ page }) => {
-  if (url === '/podium.html') await page.setViewportSize({ width:390, height:844 });
+for (const url of ['/pod.html', '/rostrum.html', pathToFileURL(path.resolve('build/rostrum.html')).href]) test(`single PDF review validates, previews and commits edited songs (${url.startsWith('file:') ? 'file URL' : url})`, async ({ page }) => {
+  if (url === '/rostrum.html') await page.setViewportSize({ width:390, height:844 });
   await start(page,url); const bytes = await pdfBytes(page);
   await choose(page,bytes);
   const dlg = review(page), song = dlg.getByRole('group', { name:'Song 1', exact:true });

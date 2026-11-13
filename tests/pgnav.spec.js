@@ -8,15 +8,15 @@ const { test, expect } = require("@playwright/test");
 // not there, and it has to stay that rare: a tap that wanders a pixel or two
 // before it lifts used to raise it, so page one answered a tap on its right
 // half with "this is the beginning" while turning the page anyway.
-const pageFile = path.join(__dirname, "..", "build", "podium.html");
-test.skip(!fs.existsSync(pageFile), "build/podium.html is missing; run build.py --podium");
+const pageFile = path.join(__dirname, "..", "build", "rostrum.html");
+test.skip(!fs.existsSync(pageFile), "build/rostrum.html is missing; run build.py --rostrum");
 
 const GS = 618;
 
 test.use({ hasTouch: true });
 
 test.beforeEach(async ({ page }) => {
-  await page.goto("/podium.html");
+  await page.goto("/rostrum.html");
   await page.waitForFunction(() => !!window._menu_?.rings?.layout?.cells?.vertical);
   await page.evaluate(() => { window._menu_.rings.score.cells.new.stash.pgCount = 8; });
   await page.evaluate(() => window._menu_.notify("score/new/up"));

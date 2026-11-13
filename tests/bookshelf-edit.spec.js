@@ -114,7 +114,7 @@ test('cancel discards list edits, and an empty song list can be populated and cl
   },id)).toEqual(['New index']);
 });
 
-for (const url of ['/podium.html',pathToFileURL(path.resolve('build/podium.html')).href]) test(`existing MSCZ uses the shared editor and retains songs after reload (${url.startsWith('file:') ? 'file URL' : 'mobile'})`, async ({ page }) => {
+for (const url of ['/rostrum.html',pathToFileURL(path.resolve('build/rostrum.html')).href]) test(`existing MSCZ uses the shared editor and retains songs after reload (${url.startsWith('file:') ? 'file URL' : 'mobile'})`, async ({ page }) => {
   if (!url.startsWith('file:')) await page.setViewportSize({ width:390,height:844 });
   await start(page,url);
   const bytes = zipSync({ 'score.mscx':fs.readFileSync(path.join(__dirname,'fixtures/font-score.mscx')) });

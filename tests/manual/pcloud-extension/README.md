@@ -1,7 +1,7 @@
 # pCloud Chrome-extension capability probe
 
 This unpacked Manifest V3 extension verifies the one uncertain provider boundary
-before pCloud support is added to Podium: whether an extension can call
+before pCloud support is added to Rostrum: whether an extension can call
 `getfilelink` and read the returned private file URL as an `ArrayBuffer`.
 
 ## Fixed identity
@@ -29,4 +29,4 @@ only and disappear when the probe tab is closed or reloaded.
 Direct login exists only to unblock this manual capability test. Its password is
 never stored; it remains in function memory only while the test runs. Any
 resulting auth token remains in memory with a one-hour expiry. This flow must not
-be copied into Podium's production implementation.
+be copied into Rostrum's production implementation.

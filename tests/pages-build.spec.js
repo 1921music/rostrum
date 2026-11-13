@@ -70,7 +70,7 @@ test("the static-host build references everything relatively", async () => {
 
   const worker = fs.readFileSync(path.join(pagesDir, "sw.js"), "utf8");
   expect(worker).not.toMatch(/urlsToCache\s*=\s*\[[^\]]*['"]\//);
-  expect(worker).not.toContain("'./podium.html'");
+  expect(worker).not.toContain("'./rostrum.html'");
   expect(fs.existsSync(path.join(pagesDir, "podauth.html"))).toBe(true);
 });
 
@@ -78,19 +78,19 @@ test("the static-host build stamps itself so a device can be checked", async ({ 
   // "Which build is this device running?" is the question every PWA update
   // raises, because the service worker may still be answering from its cache.
   await page.goto("/pages/index.html");
-  const build = await page.evaluate(() => window._podiumBuild_);
+  const build = await page.evaluate(() => window._rostrumBuild_);
   expect(build).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC$/);
 
   // And the date alone cannot be matched against the repository, so the commit
   // is stamped beside it: a whole hash, optionally marked as carrying
   // uncommitted changes. "unknown" is allowed, for a build made without git.
-  const commit = await page.evaluate(() => window._podiumCommit_);
+  const commit = await page.evaluate(() => window._rostrumCommit_);
   expect(commit).toMatch(/^([0-9a-f]{40}(-dirty)?|unknown)$/);
 
   // Served from src/ the sources are unstamped, and must say so rather than
   // claiming a build they are not.
   await page.goto("/pod.html");
-  expect(await page.evaluate(() => [window._podiumBuild_, window._podiumCommit_]))
+  expect(await page.evaluate(() => [window._rostrumBuild_, window._rostrumCommit_]))
     .toEqual(["dev", "dev"]);
 });
 
@@ -109,7 +109,7 @@ test("the About panel names the build's commit both ways", async ({ page }) => {
   await expect(face).toBeVisible();
   const shown = {
     text: await face.textContent(),
-    commit: await page.evaluate(() => window._podiumCommit_),
+    commit: await page.evaluate(() => window._rostrumCommit_),
   };
   expect(shown.text).toContain("Version 1.0.0");
   expect(shown.text).toContain("Based on Podium 2.3.1");
@@ -160,7 +160,7 @@ test("the deployed guidebook is used in place of the published one", async ({ pa
 });
 
 test("the guidebook panel offers the language it cannot read offline", async ({ page }) => {
-  // The title bar is Podium's DOM, not the iframe's, which is the whole reason
+  // The title bar is Rostrum's DOM, not the iframe's, which is the whole reason
   // the switch can be there at all: it stays put while the document under it is
   // replaced, and works the same for the published copy as for the local one.
   await page.goto("/pages/index.html");
@@ -260,7 +260,7 @@ test("every deployed screenshot decodes, and so does a re-encoded clip", async (
 test("the worker precaches the guidebook and its images, but no video", async () => {
   const worker = fs.readFileSync(path.join(pagesDir, "sw.js"), "utf8");
   const listed = [...worker.matchAll(/^\s*'(\.\/[^']*)',$/gm)].map(m => m[1]);
-  const precached = listed.filter(url => url !== "./podium.html" && url !== "./index.html"); // absent by design
+  const precached = listed.filter(url => url !== "./rostrum.html" && url !== "./index.html"); // absent by design
 
   expect(precached).toContain("./");
   expect(precached).toContain("./Guidebook.ja.html");
@@ -283,7 +283,7 @@ test("the service worker's cache name follows everything it serves", async () =>
   // an unchanged page would otherwise never reach a device that had installed.
   const worker = fs.readFileSync(path.join(pagesDir, "sw.js"), "utf8");
   const precached = [...worker.matchAll(/^\s*'(\.\/[^']*)',$/gm)]
-    .map(m => m[1]).filter(url => url !== "./podium.html" && url !== "./index.html");
+    .map(m => m[1]).filter(url => url !== "./rostrum.html" && url !== "./index.html");
   const hash = crypto.createHash("sha256").update(fs.readFileSync(pageFile));
   for (const url of precached)
     if (url !== "./") hash.update(fs.readFileSync(path.join(pagesDir, url.slice(2))));

@@ -3,12 +3,12 @@ const path = require("node:path");
 const { test, expect } = require("@playwright/test");
 
 // The bundled fonts live in build/font.js, which only the packaged page carries,
-// so these run against build/podium.html and skip when it has not been built.
-const pageFile = path.join(__dirname, "..", "build", "podium.html");
-test.skip(!fs.existsSync(pageFile), "build/podium.html is missing; run build.py --podium");
+// so these run against build/rostrum.html and skip when it has not been built.
+const pageFile = path.join(__dirname, "..", "build", "rostrum.html");
+test.skip(!fs.existsSync(pageFile), "build/rostrum.html is missing; run build.py --rostrum");
 
 test.beforeEach(async ({ page }) => {
-  await page.goto("/podium.html");
+  await page.goto("/rostrum.html");
   await page.waitForFunction(
     () => window._resolveTextFont_ && window.fontData?.["Noto Sans JP"] && window.PDFLib && window.fontkit,
     null, { timeout: 60_000 });

@@ -2,8 +2,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { test, expect } = require('@playwright/test');
 
-test.skip(!fs.existsSync(path.join(__dirname, '../build/podium.html')),
-  'Build with mise exec -- python build.py --podium');
+test.skip(!fs.existsSync(path.join(__dirname, '../build/rostrum.html')),
+  'Build with mise exec -- python build.py --rostrum');
 test.use({ viewport: { width: 1280, height: 720 } });
 test.setTimeout(60_000);
 
@@ -14,7 +14,7 @@ async function open(page, key) {
       throw new Error(`Unexpected external request: ${url.origin}`);
     return route.continue();
   });
-  await page.goto('/podium.html');
+  await page.goto('/rostrum.html');
   await page.waitForFunction(() => !!window._menu_?.rings?.layout?.cells?.vertical);
   await page.evaluate(async key => {
     _menu_.rings.layout.stash.active = key;

@@ -3,20 +3,20 @@
 /**
   Copyright 2025 Glendon Diener
  
-  This file is part of Podium.
+  This file is part of Rostrum.
  
-  Podium is free software: you can redistribute it and/or modify it
+  Rostrum is free software: you can redistribute it and/or modify it
   under the terms of the GNU Affero General Public License as
   published by the Free Software Foundation, either version 3 of the
   License, or (at your option) any later version.
 
-  Podium is distributed in the hope that it will be useful, but
+  Rostrum is distributed in the hope that it will be useful, but
   WITHOUT ANY WARRANTY; without even the implied warranty of
   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
   Affero General Public License for more details.
 
   You should have received a copy of the GNU Affero General Public
-  License along with Podium. If not, see
+  License along with Rostrum. If not, see
   <https://www.gnu.org/licenses/>.
 **/
 
@@ -1057,7 +1057,7 @@ class Clock extends Surface {
           <textPath startOffset="100%" href="#face"><tspan  text-anchor="middle">XII</tspan></textPath>
         </text>
         // clock logo
-        <text x="510" y="500" style="font-size:45px;font-family:Liminari;font-style:italic;">PODIUM</text>
+        <text x="510" y="500" style="font-size:45px;font-family:Liminari;font-style:italic;">ROSTRUM</text>
         // hands
         <path data-tag="hourHand" fill="black" id="hourHand" d="M585,640 L600,400 L615,640,Z"/>
         <path data-tag="minuteHand" fill="black" id="minuteHand" d="M590,640 L600,300 L610,640,Z"/>
@@ -1199,7 +1199,7 @@ class Stopwatch extends Surface {
          <rect data-tag="crownArea" x="450" y="0" width="300" height="300" fill="#0000"/>
          <rect data-tag="splitArea" x="800" y="75" width="300" height="300" fill="#0000"/>
         // logo
-        <text x="510" y="500" style="font-size:45px;font-family:Liminari;font-style:italic;">PODIUM</text>
+        <text x="510" y="500" style="font-size:45px;font-family:Liminari;font-style:italic;">ROSTRUM</text>
         // dome overlay: curved glass effect
         <circle cx="600" cy="600" r="450" fill="url(#watchDome)" pointer-events="none"/>
        </svg>`);
@@ -2093,7 +2093,7 @@ class Review {
       console.error("Review getUserMedia failed:", error.name, error.message);
       let detail =
         error.name == "NotAllowedError"  ? "Permission to use the camera/microphone was denied or dismissed." :
-        error.name == "NotReadableError" ? "The camera/microphone is unavailable — it's in use by another app, or the system audio/video stack was reset. <strong>Reloading Podium usually fixes this.</strong>" :
+        error.name == "NotReadableError" ? "The camera/microphone is unavailable — it's in use by another app, or the system audio/video stack was reset. <strong>Reloading Rostrum usually fixes this.</strong>" :
         error.name == "NotFoundError"    ? "No camera or microphone was found on this device." :
         error.name == "OverconstrainedError" ? "No device matches the requested audio+video constraints." :
         `${error.name}: ${error.message}`;

@@ -6,7 +6,7 @@ const xml=baseXml.replaceAll('<measure number="2">','<measure number="2"><print 
 test.beforeEach(async({page})=>{
  const external=[];page.__external=external;page.__errors=[];page.on('pageerror',e=>page.__errors.push(e.message));
  await page.route('**/*',r=>{const u=r.request().url();if(u.startsWith('http://127.0.0.1:9876/'))return r.continue();if(u==='https://accounts.google.com/gsi/client')return r.fulfill({contentType:'application/javascript',body:'window.google={accounts:{oauth2:{}}};'});external.push(u);return r.abort();});
- await page.goto('/podium.html');await page.waitForFunction(()=>!!window._Score_&&!!window._menu_);
+ await page.goto('/rostrum.html');await page.waitForFunction(()=>!!window._Score_&&!!window._menu_);
 });
 test.afterEach(async({page})=>{expect(page.__external).toEqual([]);expect(page.__errors).toEqual([]);});
 for(const layoutKey of ['book','horizontal','vertical'])test(`${layoutKey}: mode starts on visible page; paused seek follows pages and note taps`,async({page})=>{

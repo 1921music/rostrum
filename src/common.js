@@ -3,20 +3,20 @@
 /**
   Copyright 2025 Glendon Diener
  
-  This file is part of Podium.
+  This file is part of Rostrum.
  
-  Podium is free software: you can redistribute it and/or modify it
+  Rostrum is free software: you can redistribute it and/or modify it
   under the terms of the GNU Affero General Public License as
   published by the Free Software Foundation, either version 3 of the
   License, or (at your option) any later version.
 
-  Podium is distributed in the hope that it will be useful, but
+  Rostrum is distributed in the hope that it will be useful, but
   WITHOUT ANY WARRANTY; without even the implied warranty of
   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
   Affero General Public License for more details.
 
   You should have received a copy of the GNU Affero General Public
-  License along with Podium. If not, see
+  License along with Rostrum. If not, see
   <https://www.gnu.org/licenses/>.
 **/
 
@@ -80,19 +80,19 @@ Element.prototype["replace"] = function(newElm) {
 // are distinguished using the convention of leading+trailing underscores:
 
 // window._menu_  // defined in main.js
-window._podiumVersion_ = "1.0.0";
-window._podiumUpstreamVersion_ = "2.3.1";
+window._rostrumVersion_ = "1.0.0";
+window._rostrumUpstreamVersion_ = "2.3.1";
 // Replaced by build.py with the build's UTC timestamp. It stays "dev" when the
 // sources are served directly, and the Version panel shows it, because the
 // version alone cannot tell you whether a deployment reached a device: that
 // question comes up on every PWA update, where the service worker may still be
 // answering from its cache.
-window._podiumBuild_ = "dev";
+window._rostrumBuild_ = "dev";
 // The commit those sources came from, stamped by the same build step. A date
 // narrows a build down; a hash names it. "dev" when the sources are served
 // directly, "unknown" when built without git, and a "-dirty" suffix when the
 // tree had uncommitted changes, so the hash does not fully describe the build.
-window._podiumCommit_ = "dev";
+window._rostrumCommit_ = "dev";
 window._body_ = document.body;
 window._lastTarget_ = null; // last touched .pz element, excluding EditPanel
 window._dvPxRt_ = 1 + (devicePixelRatio - 1) * 0.3;
@@ -178,7 +178,7 @@ let panSvgDark =
 
 
 // css helpers:
-// Podium uses css extensively, but does not use css files: other than some common css definitions,
+// Rostrum uses css extensively, but does not use css files: other than some common css definitions,
 // css is defined within the javascript classes that use it by calling the css(...) function to
 // inject a stylesheet into the dom.
 
@@ -788,7 +788,7 @@ class ButtonGroup {
 
 /**
 class ColorPicker
-    Podium's ColorPicker widget. It wraps the HTML native color picker
+    Rostrum's ColorPicker widget. It wraps the HTML native color picker
     together with a slider for adjusting alpa.
 **/
 class ColorPicker {
@@ -1165,18 +1165,18 @@ class Drag {
 class PodumSlider
   A custom html element that replaces <input type="range"> for use in
   the SliderGroup class defined later in this file.  Most widgets in
-  Podium "wrap" html elements to provide additional functionality, but
-  the PodiumSlider and PodiumInput defines a new, "custom" html elements.
+  Rostrum "wrap" html elements to provide additional functionality, but
+  the RostrumSlider and RostrumInput defines a new, "custom" html elements.
 **/
 
 
-class PodiumSlider extends HTMLElement {
+class RostrumSlider extends HTMLElement {
   static get observedAttributes() {
     return ["min", "max", "value", "step", "curve"];
   }
 
   static css = css(
-    "PodiumSlider",
+    "RostrumSlider",
     `.Slider {
        position: absolute;
        width: calc(100% - 2.5em);
@@ -1349,14 +1349,14 @@ class PodiumSlider extends HTMLElement {
   }
 }
 
-customElements.define("pod-slider", PodiumSlider);
+customElements.define("pod-slider", RostrumSlider);
 
 /**
-class PodiumInput
+class RostrumInput
    Class that defines a custom text widget dom element that selects
    all text and focuses when attached to the dom
  **/
-class PodiumInput extends HTMLInputElement {
+class RostrumInput extends HTMLInputElement {
   // usage: <input is="pod-input" type="text" placeholder="spot input">
   static observedAttributes = ["value"];
 
@@ -1374,7 +1374,7 @@ class PodiumInput extends HTMLInputElement {
   }
 }
 
-customElements.define("pod-input", PodiumInput, { extends: "input" });
+customElements.define("pod-input", RostrumInput, { extends: "input" });
 
 /**
 class Schedule
@@ -1689,7 +1689,7 @@ class SliderGroup {
       sliderElm.max = tagDef.max;
       sliderElm.step = tagDef.step;
       // Delay setAttribute because refresh is sometimes called before
-      // slider(s) attached to dom, but PodiumSliders need to be attached
+      // slider(s) attached to dom, but RostrumSliders need to be attached
       // to work properly:
       delay(5, () => sliderElm.setAttribute("value", this.props[tag]));
       if (tagDef.disabled)
@@ -2658,7 +2658,7 @@ function pnToDiv(pn, div, autoSize = true) {
   div.style.letterSpacing = "normal";
   if(!roman) div.style.paddingTop = 0 ; // this keeps or bravura chars more centererd
   let str = pnToString(pn, true);
-  // Page numbers are exempt from the browser's auto-translation (which Podium relies on
+  // Page numbers are exempt from the browser's auto-translation (which Rostrum relies on
   // for i18n): it turns both roman numerals (e.g. "vi", "mix") and Bravura's digit glyphs
   // (private-use code points, meaningless to a translator) into garbage, e.g. "NaN".
   div.translate = false;

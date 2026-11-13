@@ -35,8 +35,13 @@ test('stable and wink deployments keep separate workers and offline caches', asy
     await wink.reload();
     await stable.waitForFunction(() => typeof window._FileSrc_ === 'function');
     await wink.waitForFunction(() => typeof window._WinkJudge_ === 'function');
-    expect(await stable.evaluate(() => window._podiumVersion_)).toBe('1.0.0');
-    expect(await wink.evaluate(() => window._podiumVersion_)).toBe('1.0.0');
+    // These fixtures can be released builds with older internal global names.
+    // Compare their displayed version; current-build identifiers are tested in branding.spec.js.
+    for (const page of [stable, wink]) {
+      await page.waitForFunction(() => !!window._menu_);
+      await page.evaluate(() => _menu_.notify('app/about/up'));
+      await expect(page.getByText('Version 1.0.0', { exact:true })).toBeVisible();
+    }
     expect(await stable.evaluate(() => typeof window._WinkJudge_)).toBe('undefined');
     await verify();
     expect(errors).toEqual([]);

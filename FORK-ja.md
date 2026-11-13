@@ -124,7 +124,7 @@ Noto Sans JP を Bravura と同じやり方で subset して同梱した。グ�
 
 - `errDialog` の想定外エラー枝は "Details in console" と言って理由をコンソールに落としていた。名前とメッセージをダイアログに出す（`8665c5f`）。
 - pCloud のエラーは cause を持っていなかったので、保存失敗が「failed to upload file to cloud server」だけになっていた。`srcErr` を通して cause `"fileSrc"` を付け、pCloud の結果コードがダイアログに乗るようにした（`a951b8c`）。
-- **ビルドの刻印。** `build.py` が `window._podiumBuild_` に UTC 時刻を、`window._podiumCommit_` に `git rev-parse HEAD` を埋め、About がその両方を出す（`8665c5f` `d65ef72`）。コミットは短縮形（人が読んで引用する）と完全形（ツールに渡す、`user-select:text`）の両方。作業ツリーに未コミット変更があれば `-dirty` が付く（`git describe --dirty` と同じ綴り）。`build/` は追跡していないので「コミット → ビルド」の順が常に成り立ち、循環は無い。
+- **ビルドの刻印。** `build.py` が `window._rostrumBuild_` に UTC 時刻を、`window._rostrumCommit_` に `git rev-parse HEAD` を埋め、About がその両方を出す（`8665c5f` `d65ef72`）。コミットは短縮形（人が読んで引用する）と完全形（ツールに渡す、`user-select:text`）の両方。作業ツリーに未コミット変更があれば `-dirty` が付く（`git describe --dirty` と同じ綴り）。`build/` は追跡していないので「コミット → ビルド」の順が常に成り立ち、循環は無い。
 
 ## 9. ビルドと開発環境
 
@@ -132,7 +132,7 @@ Noto Sans JP を Bravura と同じやり方で subset して同梱した。グ�
 
 いずれも upstream にそのまま戻せる類のもの。
 
-- `build_podium_page` がプラットフォーム既定のエンコーディングでファイルを開いていたため、`pod.html` に非 ASCII バイトがあると**日本語 Windows（cp932）でビルドが死ぬ**（`50cb289`）。
+- `build_rostrum_page` がプラットフォーム既定のエンコーディングでファイルを開いていたため、`pod.html` に非 ASCII バイトがあると**日本語 Windows（cp932）でビルドが死ぬ**（`50cb289`）。
 - 拡張のビルドが、前回より少ないスクリプトを出したときに余りを `build/extension` に残し、それを一緒にパッケージしていた（`37d479c`）。
 - `gh`（GitHub CLI）を `.mise.toml` に追加（`928c40f`）。
 - シェルスクリプトを LF に固定（`398bf18`）。CRLF だと bash が余分な CR を見る。

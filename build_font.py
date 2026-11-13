@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Build Podium's embedded Bravura font from the pristine upstream original.
+"""Build Rostrum's embedded Bravura font from the pristine upstream original.
 
 Everything that turns the one tracked font binary (lib/BravuraText.otf, the
-unmodified upstream BravuraText) into the glyph set Podium ships lives here:
+unmodified upstream BravuraText) into the glyph set Rostrum ships lives here:
 
   pristine lib/BravuraText.otf
     -> subset to the glyphs the symbol palette exposes (src/smufl.js; layout
@@ -29,7 +29,7 @@ SMUFL_JS = 'src/smufl.js'   # the symbol palette; defines what glyphs the app ca
 def curated_codepoints():
     """The glyphs to embed = every SMuFL codepoint the symbol palette exposes.
 
-    Podium can only display a glyph the palette (smuflTable in src/smufl.js)
+    Rostrum can only display a glyph the palette (smuflTable in src/smufl.js)
     offers — nothing in the app addresses other codepoints, and we drop the
     OpenType features that would reach the font's optional/alternate glyphs.
     So we subset to exactly the palette's codepoints, read straight from it:
@@ -45,7 +45,7 @@ def curated_codepoints():
 # These do NOT exist in pristine BravuraText. They are stacked from glyphs that
 # do: the 14 key sigs from accidentalSharp/accidentalFlat at the standard staff
 # positions, the 10 combined time sigs from the time-sig digits. Each is assigned
-# a Podium-private PUA codepoint that the app references directly.
+# a Rostrum-private PUA codepoint that the app references directly.
 #
 # To add a signature, add one row to COMPOSITES:
 #   * key sig : (codepoint, name, 'sharp'|'flat', count)   count 1-7 only
@@ -188,14 +188,14 @@ def build_composites(pristine_path=PRISTINE,
     fb = FontBuilder(upm, isTTF=False)
     fb.setupGlyphOrder(glyph_order)
     fb.setupCharacterMap(cmap_out)
-    fb.setupCFF('PodiumComposites', {'FullName': 'Podium Composites'}, charstrings, {})
+    fb.setupCFF('RostrumComposites', {'FullName': 'Rostrum Composites'}, charstrings, {})
     fb.setupHorizontalMetrics(metrics)
     # Pin lsb explicitly (FontBuilder derives lsb=0 for CFF) so it matches each
     # glyph's true ink left edge.
     for name, mtx in metrics.items():
         fb.font['hmtx'].metrics[name] = mtx
     fb.setupHorizontalHeader(ascent=hhea.ascent, descent=hhea.descent)
-    fb.setupNameTable({'familyName': 'Podium Composites', 'styleName': 'Regular'})
+    fb.setupNameTable({'familyName': 'Rostrum Composites', 'styleName': 'Regular'})
     fb.setupOS2(sTypoAscender=os2.sTypoAscender, sTypoDescender=os2.sTypoDescender,
                 usWinAscent=os2.usWinAscent, usWinDescent=os2.usWinDescent)
     fb.setupPost()
@@ -242,7 +242,7 @@ if __name__ == '__main__':
 # --- Japanese text font ---------------------------------------------------
 # pdf-lib's standard fonts are WinAnsi-encoded, so saving a score with Japanese
 # text fails outright ("WinAnsi cannot encode"). A custom font is worse in its
-# own way: it does not fail, it silently substitutes glyph 0. So Podium ships a
+# own way: it does not fail, it silently substitutes glyph 0. So Rostrum ships a
 # Japanese font, subset here because the pristine original is 4.5 MB.
 #
 # The glyph set is defined by JIS X 0208 rather than by hand: its non-kanji rows
@@ -297,7 +297,7 @@ def noto_jp_codepoints():
 
 
 def build_noto_jp(out_path='build/NotoSansJP-subset.otf'):
-    """Subset the pristine Noto Sans JP to Podium's Japanese glyph set."""
+    """Subset the pristine Noto Sans JP to Rostrum's Japanese glyph set."""
     try:
         from fontTools.ttLib import TTFont
         from fontTools.subset import Subsetter, Options

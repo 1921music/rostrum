@@ -26,7 +26,7 @@ If possible, attach a screenshot showing the problem. (Drag and drop an image he
 **Your setup**
 - Device: (e.g., MacBook, iPad, Android phone, Windows PC)
 - Browser: (e.g., Chrome, Safari, Firefox, Edge)
-- How are you running Podium: (website, installed app, or browser extension)
+- How are you running Rostrum: (website, installed app, or browser extension)
 
 **Anything else?**
 Any other details that might help us understand the problem.

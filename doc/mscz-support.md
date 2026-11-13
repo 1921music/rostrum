@@ -24,7 +24,7 @@ before the embedded license, including standalone and extension builds.
 
 The local HTML and extension builds ship the Japanese guide with its media and
 music font in a sibling `guidebook/` directory. Keep `build/guidebook/` alongside
-`build/podium.html` when copying the local app. App → Guide opens this copy
+`build/rostrum.html` when copying the local app. App → Guide opens this copy
 offline; the extension opens its own packaged guide in a new tab.
 
 Local Open/Save uses the locally bundled browser-fs-access library. When native
@@ -113,7 +113,7 @@ mise install
 BUILD_DIR=/absolute/path/to/rostrum-wasm mise exec -- bash scripts/build-wasm.sh
 mise exec -- python ../build_score_engine.py --web /absolute/path/to/rostrum-wasm/web
 cd ..
-mise exec -- python build.py --podium
+mise exec -- python build.py --rostrum
 mise exec -- npx playwright test tests/music-score.spec.js
 ```
 

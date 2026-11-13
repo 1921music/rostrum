@@ -7,8 +7,8 @@ const { test, expect } = require("@playwright/test");
 // pages cost ~0.5s each, a jump landed in 7s because the page being read
 // rasterised alongside nine pages nobody was looking at yet; with those nine held
 // back it landed in 0.2s. So the page being read goes first and alone.
-const pageFile = path.join(__dirname, "..", "build", "podium.html");
-test.skip(!fs.existsSync(pageFile), "build/podium.html is missing; run build.py --podium");
+const pageFile = path.join(__dirname, "..", "build", "rostrum.html");
+test.skip(!fs.existsSync(pageFile), "build/rostrum.html is missing; run build.py --rostrum");
 
 test.use({ viewport: { width: 1280, height: 720 } });
 test.setTimeout(120_000);
@@ -22,7 +22,7 @@ test.beforeEach(async ({ page }) => {
       throw new Error(`Unexpected external request: ${url.origin}`);
     return route.continue();
   });
-  await page.goto("/podium.html");
+  await page.goto("/rostrum.html");
   await page.waitForFunction(() => !!window._menu_?.rings?.layout?.cells?.vertical);
 });
 

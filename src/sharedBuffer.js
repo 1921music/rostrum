@@ -3,20 +3,20 @@
 /**
   Copyright 2025 Glendon Diener
  
-  This file is part of Podium.
+  This file is part of Rostrum.
  
-  Podium is free software: you can redistribute it and/or modify it
+  Rostrum is free software: you can redistribute it and/or modify it
   under the terms of the GNU Affero General Public License as
   published by the Free Software Foundation, either version 3 of the
   License, or (at your option) any later version.
 
-  Podium is distributed in the hope that it will be useful, but
+  Rostrum is distributed in the hope that it will be useful, but
   WITHOUT ANY WARRANTY; without even the implied warranty of
   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
   Affero General Public License for more details.
 
   You should have received a copy of the GNU Affero General Public
-  License along with Podium. If not, see
+  License along with Rostrum. If not, see
   <https:/\/www.gnu.org/licenses/>.
 **/
 
@@ -30,15 +30,15 @@ export { SharedBuffer }
 
 class SharedBuffer {
 
-  // List of podium tab ids, assigned starting from the end (popped off as tabs open).
-  // Tab titles use these ids to distinguish multiple open tabs: "Podium (do)", "Podium (re)", etc.
-  // Web/PWA tabs use parentheses: Podium (do). Extension tabs use square brackets: Podium [do].
+  // List of rostrum tab ids, assigned starting from the end (popped off as tabs open).
+  // Tab titles use these ids to distinguish multiple open tabs: "Rostrum (do)", "Rostrum (re)", etc.
+  // Web/PWA tabs use parentheses: Rostrum (do). Extension tabs use square brackets: Rostrum [do].
   podIds = ["sf","pp","mp","mf","ff","ti","la","so","fa","mi","re","do"];
 
   constructor() {
     this.db = null;
-    this.dbName = 'Podium';
-    this.storeName = 'podium';
+    this.dbName = 'Rostrum';
+    this.storeName = 'rostrum';
     this.dbKey = "pod-pb-pdf";
     this.version = 1;
     this.score = null;
@@ -68,7 +68,7 @@ class SharedBuffer {
         let ids = [...this.podIds];
         window._podId_ = ids.pop();
         // Extension tabs use [brackets], web/PWA tabs use (parens), to distinguish them in the tab bar.
-        let podTitle = (window.chrome && chrome.runtime?.id) ? id => `PODIUM [${id}]` : id => `PODIUM (${id})`;
+        let podTitle = (window.chrome && chrome.runtime?.id) ? id => `Rostrum [${id}]` : id => `Rostrum (${id})`;
         // set up storage listener now that _podId_ exists
         listen(window, 'storage', async (e) => {
           if (!e.newValue) return;
@@ -87,7 +87,7 @@ class SharedBuffer {
               // id should process it...
               if(data.podId != _podId_) break; // then this is not the tab trying to get an id...
               if(ids.length == 0) // No return from this dialog...need to enforce this.
-                dialog(`<em>Error: only ${this.podIds.length} Podium tabs can be open at the same time.<em><br>`, {});
+                dialog(`<em>Error: only ${this.podIds.length} Rostrum tabs can be open at the same time.<em><br>`, {});
               else {
                 window._podId_ = ids.pop();
                 this.signal("pod-id-check");
@@ -132,7 +132,7 @@ class SharedBuffer {
   }
 
   signal(msg, data={}) {
-    // Send given message to all other existing podium tabs through localStorage
+    // Send given message to all other existing rostrum tabs through localStorage
     let payload = Object.assign({podId: _podId_, score: _score_?.name || '?', ts: Date.now()}, data);
     localStorage.setItem(msg, JSON.stringify(payload));
   }

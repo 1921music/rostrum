@@ -3,29 +3,29 @@
 /**
   Copyright 2025 Glendon Diener
  
-  This file is part of Podium.
+  This file is part of Rostrum.
  
-  Podium is free software: you can redistribute it and/or modify it
+  Rostrum is free software: you can redistribute it and/or modify it
   under the terms of the GNU Affero General Public License as
   published by the Free Software Foundation, either version 3 of the
   License, or (at your option) any later version.
 
-  Podium is distributed in the hope that it will be useful, but
+  Rostrum is distributed in the hope that it will be useful, but
   WITHOUT ANY WARRANTY; without even the implied warranty of
   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
   Affero General Public License for more details.
 
   You should have received a copy of the GNU Affero General Public
-  License along with Podium. If not, see
+  License along with Rostrum. If not, see
   <https://www.gnu.org/licenses/>.
 **/
 
 
 
 
-// Podium uses in own build system that can package the entire application
-// into a single file, build/podium.html. This file is built by running
-// python3 build.py --podium.  All text  between +/- skip fill be stripped out,
+// Rostrum uses in own build system that can package the entire application
+// into a single file, build/rostrum.html. This file is built by running
+// python3 build.py --rostrum.  All text  between +/- skip fill be stripped out,
 // and all the following // #include files will be  textually included.
 
 import { animate, clamp, delay, delayMs, helm, listen, numb, numbed, schedule, Schedule, unlisten } from "./common.js";
@@ -564,7 +564,7 @@ async function main() {
 }
 
 
- // Preserve native menus for mouse input; reserve touch/pen holds for Podium.
+ // Preserve native menus for mouse input; reserve touch/pen holds for Rostrum.
 listen(document, "contextmenu", (e) => {
   if (e.target.closest("input, textarea, [contenteditable]")) return;
   if (e.pointerType === "touch" || e.pointerType === "pen")

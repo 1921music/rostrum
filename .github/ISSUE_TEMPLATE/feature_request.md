@@ -1,16 +1,16 @@
 ---
 name: Feature Request
-about: Suggest an idea or improvement for Podium
+about: Suggest an idea or improvement for Rostrum
 title: ''
 labels: enhancement
 assignees: ''
 ---
 
-**What would you like Podium to do?**
+**What would you like Rostrum to do?**
 Describe the feature or improvement you have in mind.
 
 **Why would this be useful?**
-How would this help you or other musicians using Podium?
+How would this help you or other musicians using Rostrum?
 
 **How do you currently work around this?**
 If applicable, describe any workarounds you're using today.

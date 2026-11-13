@@ -3,20 +3,20 @@
 /**
   Copyright 2025 Glendon Diener
  
-  This file is part of Podium.
+  This file is part of Rostrum.
  
-  Podium is free software: you can redistribute it and/or modify it
+  Rostrum is free software: you can redistribute it and/or modify it
   under the terms of the GNU Affero General Public License as
   published by the Free Software Foundation, either version 3 of the
   License, or (at your option) any later version.
 
-  Podium is distributed in the hope that it will be useful, but
+  Rostrum is distributed in the hope that it will be useful, but
   WITHOUT ANY WARRANTY; without even the implied warranty of
   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
   Affero General Public License for more details.
 
   You should have received a copy of the GNU Affero General Public
-  License along with Podium. If not, see
+  License along with Rostrum. If not, see
   <https://www.gnu.org/licenses/>.
 **/
 
@@ -317,7 +317,7 @@ class Panel {
   }
 
   // The ink tools whose objects carry the settings they were made with, as
-  // podiumStash (see Pg.customProps): their panels show the selected object's
+  // rostrumStash (see Pg.customProps): their panels show the selected object's
   // settings, and changes made in the panel apply to that object.
   static stashKeys = ["pencil", "pen", "rastrum", "text", "symbols"];
 
@@ -327,16 +327,16 @@ class Panel {
     // stash, and into the cell's panel if it exists (it needn't, and needn't
     // be onscreen).
     if (!target || target.flatten) return;
-    let key = target.type == "textbox" ? "text" : target.podiumType;
+    let key = target.type == "textbox" ? "text" : target.rostrumType;
     if (!Panel.stashKeys.includes(key)) return;
-    let stash = target.podiumStash ?? Panel.deriveStash(key, target);
+    let stash = target.rostrumStash ?? Panel.deriveStash(key, target);
     if (!stash) return;
     Object.assign(_menu_.rings.ink.cells[key].stash, stash);
     _panels_[key]?.sync();
   }
 
   static deriveStash(key, target) {
-    // For an object saved before podiumStash existed: the settings that can be
+    // For an object saved before rostrumStash existed: the settings that can be
     // had from the object itself (not a stroke's style, nor anything of a rastrum).
     // @return a (partial) stash, or null
     let paint = key == "pencil" || key == "pen" ? target.stroke : target.fill;
@@ -734,12 +734,12 @@ for more details.</p>
     `<div style="display:flex;flex-direction:column;align-items:center;justify-content:space-between;min-height:100%;width:100%;box-sizing:border-box;padding:2em 1em;text-align:center;">
         <div style="font-size:1.5em;display:flex;flex-direction:column;align-items:center;gap:0.2em;">
           <div style="white-space:nowrap;">ROSTRUM: Sheet Music Studio</div>
-          ${iconSvg("Podium", { size: "8em" })}
-          <div>Version ${_podiumVersion_}</div>
-          <div style="font-size:.6em;">Based on Podium ${_podiumUpstreamVersion_}</div>
-          <a style="font-size:.6em;" href="https://github.com/1921music/rostrum/blob/v${_podiumVersion_}/CHANGELOG.md">Release Notes</a>
+          ${iconSvg("Rostrum", { size: "8em" })}
+          <div>Version ${_rostrumVersion_}</div>
+          <div style="font-size:.6em;">Based on Podium ${_rostrumUpstreamVersion_}</div>
+          <a style="font-size:.6em;" href="https://github.com/1921music/rostrum/blob/v${_rostrumVersion_}/CHANGELOG.md">Release Notes</a>
           <div style="font-size:.6em;color:#888;margin-top:0.5em;">${typeof chrome !== "undefined" && chrome.runtime?.id ? "Browser Extension" : window.matchMedia("(display-mode: standalone)").matches ? "Progressive Web App" : location.protocol + "//" + location.host}</div>
-          <div style="font-size:.6em;color:#888;" translate="no">Build ${_podiumBuild_}</div>
+          <div style="font-size:.6em;color:#888;" translate="no">Build ${_rostrumBuild_}</div>
           ${this.commitLines()}
         </div>
         <div style="font-size:1.2em;text-align:center;font-variant-emoji:text;margin-top:2em;line-height:1.6em;">
@@ -759,11 +759,11 @@ for more details.</p>
     // tablet. "dirty" says the build carried uncommitted changes and so is not
     // fully described by its hash (see git_commit() in build.py). The hash is
     // only shown as one when it looks like one: an unstamped build says "dev".
-    let dirty = _podiumCommit_.endsWith("-dirty");
-    let hash = dirty ? _podiumCommit_.slice(0, -"-dirty".length) : _podiumCommit_;
+    let dirty = _rostrumCommit_.endsWith("-dirty");
+    let hash = dirty ? _rostrumCommit_.slice(0, -"-dirty".length) : _rostrumCommit_;
     let line = (text, style = "") =>
       `<div style="font-size:.6em;color:#888;${style}" translate="no">${text}</div>`;
-    if (!/^[0-9a-f]{7,}$/.test(hash)) return line(`Commit ${_podiumCommit_}`);
+    if (!/^[0-9a-f]{7,}$/.test(hash)) return line(`Commit ${_rostrumCommit_}`);
     return (
       line(`Commit ${hash.slice(0, 8)}${dirty ? "-dirty" : ""}`) +
       line(hash, "user-select:text;-webkit-user-select:text;word-break:break-all;")
@@ -1315,7 +1315,7 @@ class GuidePanel extends Panel {
   // Shown on the button that switches away from the language being read, so it
   // names where the tap goes rather than where it already is.
   static labels = { ja: "日本語", en: "EN" };
-  static preference = "podium-guide-language";
+  static preference = "rostrum-guide-language";
   static urls = null;
 
   static css = css(
@@ -1352,7 +1352,7 @@ class GuidePanel extends Panel {
     // @return the real URL of each guidebook this deployment can show, keyed by
     //   language. English always has one, falling back to the published copy.
     if (this.urls) return this.urls;
-    if (window._podiumGuideJa_) return this.urls = { ja: new URL(window._podiumGuideJa_, location.href).href };
+    if (window._rostrumGuideJa_) return this.urls = { ja: new URL(window._rostrumGuideJa_, location.href).href };
     if (this.isExtension) return this.urls = { en: this.publishedUrl };
     let urls = {};
     for (let [language, name] of Object.entries(this.localNames)) {
@@ -1449,8 +1449,8 @@ class GuidePanel extends Panel {
     if (GuidePanel.isExtension) {
       // Extension: open in new tab (cross-origin iframe restrictions prevent embedding)
       if (this.guideWin && !this.guideWin.closed) this.guideWin.focus();
-      else this.guideWin = window.open(window._podiumGuideJa_
-        ? new URL(window._podiumGuideJa_, location.href).href : GuidePanel.publishedUrl, "podium-guidebook");
+      else this.guideWin = window.open(window._rostrumGuideJa_
+        ? new URL(window._rostrumGuideJa_, location.href).href : GuidePanel.publishedUrl, "rostrum-guidebook");
       return this;
     }
     super.show();
@@ -2331,12 +2331,12 @@ class PencilPanel extends Panel {
     // selected stroke, but only one drawn with this panel's tool (and never one
     // that has been flattened). Style is how a stroke gets drawn: it can't be
     // changed afterwards.
-    if (!changed || active?.podiumType != this.cell.key || active.type != "path" || active.flatten) return;
+    if (!changed || active?.rostrumType != this.cell.key || active.type != "path" || active.flatten) return;
     let color = fabric.Color.fromHex(rgb);
     color.setAlpha(alpha);
     let center = active.getCenterPoint(); // a width change grows the stroke about its center
     active.set({ stroke: color.toRgba(), strokeWidth: width, dirty: true });
-    active.podiumStash = { ...active.podiumStash, alpha, rgb, width };
+    active.rostrumStash = { ...active.rostrumStash, alpha, rgb, width };
     active.setPositionByOrigin(center, "center", "center");
     active.setCoords();
     active.canvas.fire("object:modified", { target: active }); // so undo records it
@@ -2417,7 +2417,7 @@ class RastrumPanel extends PencilPanel {
 
     // A change to any setting immediately redraws the rastrum, but only the
     // currently selected one (and never one that has been flattened).
-    if (!changed || active?.podiumType != this.cell.key || active.flatten) return;
+    if (!changed || active?.rostrumType != this.cell.key || active.flatten) return;
     fabric.RastrumBrush.redraw(active, this.cell.stash);
     active.canvas.fire("object:modified", { target: active }); // so undo records it
     _score_.setDirty(true);
@@ -2496,7 +2496,7 @@ class TextPanel extends PencilPanel {
     active.fontSize = size - 1;
     active.lineHeight = height / size;
     Object.assign(active, fontMap[font]);
-    active.podiumStash = { alpha, font, size, height, rgb };
+    active.rostrumStash = { alpha, font, size, height, rgb };
     active.initDimensions();
     active.setCoords();
     active.canvas.requestRenderAll();
@@ -2694,7 +2694,7 @@ class Pzr extends Surface {
  
   update() {
     let getIconPath = () => {
-      let type = EditPanel.pzrTarget?.podiumType || EditPanel.pzrTarget?.type ;
+      let type = EditPanel.pzrTarget?.rostrumType || EditPanel.pzrTarget?.type ;
       this.grid.classList.remove("Pz__noTarget") ;
       switch(type) {
         case undefined: return iconPaths["Void"];
@@ -3401,12 +3401,12 @@ class SymbolsPanel extends Panel {
     let active = _score_?.getActiveObject(); // (the panel can outlive its score)
     // A change to color, opacity or size immediately applies to the currently
     // selected symbol (and never to one that has been flattened).
-    if (!changed || active?.podiumType != "symbols" || active.flatten) return;
+    if (!changed || active?.rostrumType != "symbols" || active.flatten) return;
     let color = fabric.Color.fromHex(rgb);
     color.setAlpha(parseFloat(alpha));
     // Bravura Text has five staff spaces per em, matching symbol insertion.
     active.set({ fill: color.toRgba(), fontSize: size * 5 });
-    active.podiumStash = { alpha, rgb, size };
+    active.rostrumStash = { alpha, rgb, size };
     active.setCoords();
     active.canvas.fire("object:modified", { target: active }); // so undo records it
     active.canvas.requestRenderAll();

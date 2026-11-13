@@ -5,7 +5,7 @@
 - This repository uses `mise` to install and run development tools.
 - Do not run `mise activate` or depend on shell activation.
 - Always run toolchain commands through `mise exec --`, for example:
-  - `mise exec -- python build.py --podium`
+  - `mise exec -- python build.py --rostrum`
   - `mise exec -- npm test`
   - `mise exec -- npx playwright test`
 - Run `mise install` after changing `.mise.toml`.

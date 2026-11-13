@@ -9,8 +9,8 @@ const readChunkBytes = 1 << 20;
 // whole request is round-trip latency. Saving an annotated score uploads
 // megabytes, so the size is selectable and the deployed-origin run should use a
 // realistic one.
-const writeProbeFolder = "podium-write-probe";
-const writeProbeFile = "podium-write-probe.pdf";
+const writeProbeFolder = "rostrum-write-probe";
+const writeProbeFile = "rostrum-write-probe.pdf";
 const writeProbeMaxKiB = 64 << 10;
 // tokenParam is "auth" for a direct-login token and "access_token" for OAuth.
 const state = { authToken: null, tokenParam: "auth", apiHost: null };
@@ -272,7 +272,7 @@ async function testDownload(file, button) {
 /**
  * Reads a file through the descriptor API, which answers from api.pcloud.com
  * itself. getfilelink instead hands back a content host (CloudHTTPd and
- * CacheHTTPd) that sends no Access-Control-Allow-Origin, which is why Podium's
+ * CacheHTTPd) that sends no Access-Control-Allow-Origin, which is why Rostrum's
  * pCloud support is currently confined to the browser extension, where
  * host_permissions bypass CORS. If this path passes from a deployed origin, a
  * plain web app or PWA can read pCloud files without an extension.
@@ -449,7 +449,7 @@ async function testZipRead(file, button) {
 
 /** A PDF whose body is random, so a round trip can be compared exactly. */
 function makeWriteProbeBytes(bodyBytes) {
-  const header = new TextEncoder().encode("%PDF-1.4\n% Podium pCloud write probe\n");
+  const header = new TextEncoder().encode("%PDF-1.4\n% Rostrum pCloud write probe\n");
   const trailer = new TextEncoder().encode("\n%%EOF\n");
   const body = new Uint8Array(bodyBytes);
   // getRandomValues refuses more than 65536 bytes at a time.
@@ -488,7 +488,7 @@ async function cleanUpWriteProbe(apiHost, email, password, folder, fileIds) {
 }
 
 /**
- * Exercises the metadata methods Podium calls that no probe had reached yet.
+ * Exercises the metadata methods Rostrum calls that no probe had reached yet.
  *
  * PCloudSrc funnels every method through one request(), and the only methods
  * that have ever behaved differently from a web origin are the two that do not
@@ -537,7 +537,7 @@ async function testMetadataMethods(apiHost, email, password, folder, fileIds) {
     throw new Error(`renamefile left the name as "${renamedFile?.name}".`);
 
   // deletefolder, unlike deletefolderrecursive, refuses a folder with contents,
-  // which is why Podium uses it: it cannot destroy anything unexpectedly.
+  // which is why Rostrum uses it: it cannot destroy anything unexpectedly.
   diagnostic("Calling deletefile and deletefolder...");
   await call("deletefile", { fileid: String(nestedFileId) });
   fileIds.splice(fileIds.indexOf(nestedFileId), 1);
@@ -552,7 +552,7 @@ async function testMetadataMethods(apiHost, email, password, folder, fileIds) {
  * Answers whether a web origin can write a file back to pCloud.
  *
  * Reading was the question that forced pCloud support into the extension, but
- * writing was never actually tested from a web origin, and Podium's current
+ * writing was never actually tested from a web origin, and Rostrum's current
  * upload cannot work there: PCloudSrc.putFileSrc sends PUT with
  * "Content-Type: application/octet-stream", which is not a CORS-safelisted
  * value, so the request is preflighted. api.pcloud.com answers OPTIONS with
@@ -595,14 +595,14 @@ async function testWrite(button) {
       "success"
     );
 
-    // Podium's current upload path, expected to fail from a web origin.
+    // Rostrum's current upload path, expected to fail from a web origin.
     try {
-      diagnostic("Uploading with PUT and Content-Type: application/octet-stream (Podium's current code)...");
+      diagnostic("Uploading with PUT and Content-Type: application/octet-stream (Rostrum's current code)...");
       const put = await directJson(apiHost, email, password, "uploadfile",
         { folderid: String(folder.id), filename: `put-${writeProbeFile}`, nopartial: 1 },
         { method: "PUT", headers: { "Content-Type": "application/octet-stream" }, body: payload });
       for (const entry of put.metadata || []) fileIds.push(entry.fileid);
-      diagnostic("The preflighted PUT upload succeeded, so Podium's current code needs no change.", "success");
+      diagnostic("The preflighted PUT upload succeeded, so Rostrum's current code needs no change.", "success");
     } catch (error) {
       diagnostic(`PREFLIGHTED PUT UPLOAD FAIL: ${error.message}`, "failure");
     }

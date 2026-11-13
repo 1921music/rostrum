@@ -4,14 +4,14 @@
 let CACHE_NAME = 'rostrum-v1.0.0';
 // Cache Storage is shared by every app on this origin; isolate each deployment.
 const CACHE_SCOPE = 'rostrum-scope:' + self.registration.scope + ':';
-// Relative to this script, so Podium works when served from a subdirectory.
-// The packaged page is podium.html where Podium is deployed alongside the rest
-// of the site, and index.html where the deployment is Podium alone, so try both
+// Relative to this script, so Rostrum works when served from a subdirectory.
+// The packaged page is rostrum.html where Rostrum is deployed alongside the rest
+// of the site, and index.html where the deployment is Rostrum alone, so try both
 // and keep whichever exists: addAll would reject the whole install if either
 // were missing.
 let urlsToCache = [
   './',
-  './podium.html',
+  './rostrum.html',
   './index.html',
 ];
 // The static-host build replaces this with the guidebook and its images, which
@@ -26,7 +26,7 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_SCOPE + CACHE_NAME)
       .then((cache) => {
-        console.log('Podium: Cache opened');
+        console.log('Rostrum: Cache opened');
         return Promise.all([...urlsToCache, ...docToCache]
           .map(async (url) => {
             try {
@@ -46,7 +46,7 @@ self.addEventListener('activate', (event) => {
       return Promise.all(
         cacheNames.map((cacheName) => {
           if (cacheName.startsWith(CACHE_SCOPE) && cacheName !== CACHE_SCOPE + CACHE_NAME) {
-            console.log('Podium: Deleting old cache:', cacheName);
+            console.log('Rostrum: Deleting old cache:', cacheName);
             return caches.delete(cacheName);
           }
         })

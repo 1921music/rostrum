@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Recompress the guidebook's media for deployment alongside Podium.
+"""Recompress the guidebook's media for deployment alongside Rostrum.
 
 doc/assets/ is the pristine set: 62 screenshots as JPEG at capture resolution
 (up to 2856px wide) and 16 silent screen recordings as VP9. Together they are
