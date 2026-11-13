@@ -1,11 +1,17 @@
 const { test, expect } = require('@playwright/test');
 
-for (const url of ['/pod.html', '/podium.html']) for (const surface of ['background', 'score']) test(`long press releases the menu before mouse hover (${url}, ${surface})`, async ({ page }) => {
+test.beforeEach(async ({ page }) => {
+  page.external = [];
   await page.route('**/*', route => {
     const url = new URL(route.request().url());
-    return url.hostname === '127.0.0.1' || ['data:', 'blob:'].includes(url.protocol)
-      ? route.continue() : route.abort();
+    if (url.hostname === '127.0.0.1' || ['data:', 'blob:'].includes(url.protocol)) return route.continue();
+    if (url.href === 'https://accounts.google.com/gsi/client') return route.fulfill({ contentType: 'application/javascript', body: 'window.google = { accounts: { oauth2: {} } };' });
+    page.external.push(url.href); return route.abort();
   });
+});
+test.afterEach(async ({ page }) => expect(page.external).toEqual([]));
+
+for (const url of ['/pod.html', '/podium.html']) for (const surface of ['background', 'score']) test(`long press releases the menu before mouse hover (${url}, ${surface})`, async ({ page }) => {
   await page.goto(url);
   await page.waitForFunction(() => !!window._menu_);
   if (surface === 'score') {
@@ -26,4 +32,26 @@ for (const url of ['/pod.html', '/podium.html']) for (const surface of ['backgro
   expect(released).toEqual({ left: '850px', top: '550px' });
   await page.mouse.move(650, 350, { steps: 5 });
   expect(await position()).toEqual(released);
+});
+
+for (const url of ['/pod.html', '/podium.html']) for (const panel of ['library', 'about']) test(`panel content does not summon the ring menu (${url}, ${panel})`, async ({ page }) => {
+  await page.goto(url);
+  await page.waitForFunction(() => !!window._menu_);
+  await page.evaluate(panel => _menu_.notify(panel === 'library' ? 'score/open/up' : 'app/about/up'), panel);
+  if (panel === 'library') await page.getByText('Library', { exact: true }).click();
+  const content = panel === 'library' ? page.getByText('No scores found', { exact: true }) : page.getByText('ROSTRUM: Sheet Music Studio', { exact: true }).first();
+  await expect(content).toBeVisible();
+  await page.waitForTimeout(1600);
+  const position = () => page.evaluate(() => ({ left: _menu_.elm.style.left, top: _menu_.elm.style.top }));
+  const before = await position();
+  const box = await content.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(1500);
+  expect(await position()).toEqual(before);
+  await page.mouse.up();
+  if (panel === 'library') {
+    await page.getByLabel('Library view').selectOption('entries');
+    await expect(page.getByLabel('Library view')).toHaveValue('entries');
+  }
 });

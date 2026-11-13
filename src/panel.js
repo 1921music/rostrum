@@ -477,6 +477,10 @@ class Panel {
     this.elm.panel = this;
     this.setIcon(cell.svgPath);
     this.setTitle(cell.name);
+    // All panel content owns its presses, including plain text and empty space.
+    // Gestures.watch checks this flag after the hold delay. Do not stop event
+    // propagation: controls, header dragging and detached surfaces still need it.
+    this.listeners.push(listen(this.panel, 'pointerdown', e => { e.taken = true; }, { capture: true }));
     this.listeners.push(
       listen(this.closer, "pointerdown", (e) => {
         e.stopPropagation();
