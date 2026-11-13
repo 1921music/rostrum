@@ -7,6 +7,15 @@ and manages tags, bookshelves and playlists. PDF outlines produce song entries;
 MusicXML/MSCZ metadata provides an initial title. Song details and start pages
 can be edited. **Import current score** imports an exported copy of the score
 currently open, including a score opened through the existing cloud tabs.
+File selection, **Import current score** and replacement all open **Review score
+import** before registration. Each file is reviewed separately. Edit the library
+display name, song titles, composers and 1-based start pages; choose songs, use a
+filename as a title, or browse the preview and add a missing song. PDF and music
+scores share the preview. Unchecking all songs imports only the file. Cancel or
+Escape skips that file; a failed commit keeps the editable draft for retry.
+Unselected extracted entries are kept as tombstones so rebuilding the index
+does not bring them back. Included children can outlive an excluded heading;
+the adjusted parent and edited fields survive reindex. Original files stay intact.
 Imports skip an already registered SHA-256 hash, even under another filename.
 Previous/deleted documents also count as registered; use the history view to
 restore them. Skipping does not create songs, copies, revisions or replacement

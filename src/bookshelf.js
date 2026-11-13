@@ -4,6 +4,7 @@ import { checkUnsaved, FileSrc } from './file.js';
 import { toast, css, listen } from './common.js';
 import { exchangeLibraryPackages } from './bookshelf-sync.js';
 import { LibraryCloudTransport } from './bookshelf-cloud.js';
+import { reviewScoreImport } from './bookshelf-import.js';
 // -skip
 
 class BookshelfStore extends EventTarget {
@@ -20,6 +21,7 @@ class BookshelfStore extends EventTarget {
     if (Score.activeScore?.libraryDocumentId) await this.flush(Score.activeScore);
   }
   async configure(storage) {
+    if (this.reviewPending) throw new Error('Finish the score import review before changing its library location.');
     if (this.syncPending) throw new Error('Wait for library sync before changing its location.');
     if (Score.activeScore?.libraryDocumentId) {
       await this.flush(Score.activeScore); await Score.activeScore.dispose();
@@ -32,6 +34,7 @@ class BookshelfStore extends EventTarget {
     return result;
   }
   async sync(transport) {
+    if (this.reviewPending) throw new Error('Finish the score import review before syncing.');
     if (this.syncPending) throw new Error('Library sync is already running.');
     const previous = Score.activeScore;
     const documentId = previous?.libraryDocumentId;
@@ -181,11 +184,11 @@ class BookshelfStore extends EventTarget {
       throw error;
     }
   }
-  async analyze(file) {
+  async analyze(file, previewScore = null) {
     if (!/\.(pdf|mscz|mxl|musicxml|xml)$/i.test(file.name)) throw new Error('Unsupported score format');
     const entries = [];
     if (/\.pdf$/i.test(file.name)) {
-      const analysis = await new Score().init(null, null, file.name, await file.arrayBuffer(), false);
+      const analysis = previewScore || await new Score().init(null, null, file.name, await file.arrayBuffer(), false);
       const pdf = analysis.mozDoc;
       try {
         const walk = async (items, parent_id = null) => {
@@ -195,16 +198,17 @@ class BookshelfStore extends EventTarget {
             let pageIndex = null;
             if (Array.isArray(dest)) pageIndex = typeof dest[0] === 'number' ? dest[0] : await pdf.getPageIndex(dest[0]);
             const id = crypto.randomUUID();
-            if (Number.isInteger(pageIndex) && pageIndex >= 0 && pageIndex < pdf.numPages) entries.push({ id, parent_id, anchor: { type: 'pdf', pageIndex }, metadata: { title: item.title,
+            const validPage = Number.isInteger(pageIndex) && pageIndex >= 0 && pageIndex < pdf.numPages;
+            if (validPage) entries.push({ id, parent_id, anchor: { type: 'pdf', pageIndex }, metadata: { title: item.title,
               source: { type: 'pdf-outline', key: JSON.stringify([item.title, pageIndex]) } } });
-            await walk(item.items, pageIndex !== null ? id : parent_id);
+            await walk(item.items, validPage ? id : parent_id);
           }
         };
         await walk(await pdf.getOutline());
         if (!entries.length) entries.push({ id: crypto.randomUUID(), anchor: { type: 'pdf', pageIndex: 0 }, metadata: {
           title: analysis.pdfInfo?.Title || file.name.replace(/\.[^.]+$/, ''), composer: '',
           source: { type: 'file-title', key: 'root' } } });
-      } finally { await analysis.dispose(); }
+      } finally { if (!previewScore) await analysis.dispose(); }
     }
     if (!entries.length) {
       let title = file.name.replace(/\.[^.]+$/, ''), composer = '', source = 'filename';
@@ -242,6 +246,19 @@ class BookshelfStore extends EventTarget {
     if (existing) return existing;
     // importFile checks again in the serial Worker queue for concurrent imports.
     return this.call('importFile', { file, entries: await this.analyze(file), ...options });
+  }
+  async importReviewed(file, options = {}) {
+    if (this.reviewPending) throw new Error('Finish the current score import review first.');
+    this.reviewPending = true;
+    let preview;
+    try {
+      const existing = await this.call('findImportedFile', { file });
+      if (existing) return existing;
+      preview = await new Score().init(null, null, file.name, await file.arrayBuffer(), false);
+      const entries = await this.analyze(file, preview);
+      return await reviewScoreImport(file, entries, preview, draft => this.call('importFile', { file, ...draft, ...options }),
+        this.storage?.kind === 'directory' ? () => this.reauthorizeStorage() : null);
+    } finally { try { await preview?.dispose(); } finally { this.reviewPending = false; } }
   }
   async reindex(id) {
     const { document: doc, file } = await this.call('read', { id });
@@ -588,9 +605,13 @@ class BookshelfView {
           });
           const replacement = document.createElement('input'); replacement.type = 'file'; replacement.accept = input.accept; replacement.setAttribute('aria-label', 'Replace score file');
           replacement.onchange = () => run(async () => {
-            if (!replacement.files[0] || !await checkUnsaved()) return;
-            const imported = await bookshelfStore.import(replacement.files[0], { replacesId: row.id }); await this.refresh();
-            if (imported.alreadyImported) status.textContent = 'Score already imported; replacement skipped. Previous or deleted scores remain in history.';
+            if (!replacement.files[0]) return;
+            try {
+              if (!await checkUnsaved()) return;
+              replacement.disabled = true;
+              const imported = await bookshelfStore.importReviewed(replacement.files[0], { replacesId: row.id }); await this.refresh();
+              if (imported?.alreadyImported) status.textContent = 'Score already imported; replacement skipped. Previous or deleted scores remain in history.';
+            } finally { replacement.value = ''; replacement.disabled = false; }
           });
           card.append(replacement);
         }
@@ -603,15 +624,17 @@ class BookshelfView {
     });
     input.onchange = () => run(async () => {
       input.disabled = true;
-      let imported = 0, skipped = 0;
+      let imported = 0, skipped = 0, cancelled = 0;
       try { for (const file of input.files) {
         status.textContent = 'Importing ' + file.name;
-        const result = await bookshelfStore.import(file);
-        result.alreadyImported ? skipped++ : imported++;
+        const result = await bookshelfStore.importReviewed(file);
+        if (!result) cancelled++;
+        else if (result.alreadyImported) skipped++;
+        else imported++;
       } }
       finally { input.disabled = false; input.value = ''; }
       await this.refresh();
-      status.textContent = `Imported ${imported} scores; skipped ${skipped} already imported scores.`;
+      status.textContent = `Imported ${imported} scores; skipped ${skipped} already imported scores; cancelled ${cancelled} scores.`;
       if (skipped) status.textContent += ' Previous or deleted scores remain in history.';
     });
     search.oninput = () => this.refresh();
@@ -625,11 +648,14 @@ class BookshelfView {
     });
     importCurrent.onclick = () => run(async () => {
       if (!_score_) throw new Error('Open a score first');
-      const name = _score_.saveName;
-      const bytes = await _score_.toFile();
-      const imported = await bookshelfStore.import(new File([bytes], name));
-      await this.refresh();
-      if (imported.alreadyImported) status.textContent = 'Score already imported; skipped. Previous or deleted scores remain in history.';
+      importCurrent.disabled = true;
+      try {
+        const name = _score_.saveName;
+        const bytes = await _score_.toFile();
+        const imported = await bookshelfStore.importReviewed(new File([bytes], name));
+        await this.refresh();
+        if (imported?.alreadyImported) status.textContent = 'Score already imported; skipped. Previous or deleted scores remain in history.';
+      } finally { importCurrent.disabled = false; }
     });
   }
   select() { this.refresh(); requestAnimationFrame(this.resize); }

@@ -271,7 +271,7 @@ const actions = {
     return Object.fromEntries(Object.entries(selected).map(([name, bytes]) => [name, new TextDecoder().decode(bytes)]));
   },
   async open() { await open(); return { version: 1 }; },
-  async importFile({ file, entries, replacesId = null, derivedFromId = null }) {
+  async importFile({ file, entries, displayName = file.name, replacesId = null, derivedFromId = null }) {
     const id = crypto.randomUUID();
     const bytes = await file.arrayBuffer();
     const hash = await hashBytes(bytes);
@@ -288,9 +288,9 @@ const actions = {
       await files.write(path, bytes);
       return transaction(() => {
         const document = save('documents', { id, content_hash: hash, storage_path: path, size_bytes: file.size,
-          settings_json: '{}', metadata_json: JSON.stringify({ displayName: file.name, originalFilename: file.name, format: file.name.split('.').pop().toLowerCase() }) });
+          settings_json: '{}', metadata_json: JSON.stringify({ displayName, originalFilename: file.name, format: file.name.split('.').pop().toLowerCase() }) });
         for (const entry of entries) save('entries', { id: entry.id, document_id: id, parent_id: entry.parent_id || null,
-          anchor_json: JSON.stringify(entry.anchor), metadata_json: JSON.stringify(entry.metadata) });
+          anchor_json: JSON.stringify(entry.anchor), metadata_json: JSON.stringify(entry.metadata), deleted_at: entry.deleted_at || null });
         if (derivedFromId) save('documents', { id, derived_from_id: derivedFromId });
         if (replacesId) {
           if (!sql('SELECT id FROM documents WHERE id=? AND deleted_at IS NULL', [replacesId]).length) throw new Error('Original score not found');
@@ -356,7 +356,7 @@ const actions = {
           Object.assign(metadata, old);
           for (const [key, value] of Object.entries(entry.metadata)) if (!(old.userEditedFields || []).includes(key)) metadata[key] = value;
         }
-        save('entries', { id, document_id: documentId, parent_id: entry.parent_id ? mapping.get(entry.parent_id) || null : null,
+        save('entries', { id, document_id: documentId, parent_id: match && (metadata.userEditedFields || []).includes('parent') ? match.parent_id : entry.parent_id ? mapping.get(entry.parent_id) || null : null,
           anchor_json: match && (metadata.userEditedFields || []).includes('anchor') ? match.anchor_json : JSON.stringify(entry.anchor),
           metadata_json: JSON.stringify(metadata) });
       }

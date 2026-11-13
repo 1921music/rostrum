@@ -50,6 +50,7 @@ test('Library imports through the UI and opens the owned PDF', async ({ page }) 
     const pdf = await PDFLib.PDFDocument.create(); pdf.addPage([300, 400]); return [...await pdf.save()];
   });
   await page.getByLabel('Import scores').setInputFiles({ name: 'Owned.pdf', mimeType: 'application/pdf', buffer: Buffer.from(bytes) });
+  await page.getByRole('dialog', { name:'Review score import' }).getByRole('button', { name:'Import into library', exact:true }).click();
   await page.getByRole('button', { name: 'Owned.pdf', exact: true }).click();
   await expect.poll(() => page.evaluate(() => _score_?.name)).toBe('Owned.pdf');
   expect(await page.evaluate(() => !!_score_.libraryDocumentId)).toBe(true);
@@ -69,6 +70,9 @@ test('single-song PDF without outlines and MSCZ imports appear in Songs', async 
     { name: 'Single.pdf', mimeType: 'application/pdf', buffer: Buffer.from(pdf) },
     { name: 'Single.mscz', mimeType: 'application/octet-stream', buffer: Buffer.from(mscz) },
   ]);
+  await page.getByRole('dialog', { name:'Review score import' }).getByRole('button', { name:'Import into library', exact:true }).click();
+  await expect(page.getByRole('dialog', { name:'Review score import' }).getByText('Single.mscz', { exact:true })).toBeVisible();
+  await page.getByRole('dialog', { name:'Review score import' }).getByRole('button', { name:'Import into library', exact:true }).click();
   await expect(page.getByRole('button', { name: 'Single.mscz', exact: true })).toBeVisible();
   await page.getByLabel('Library view').selectOption('entries');
   await expect(page.getByRole('button', { name: 'PDF internal title', exact: true })).toBeVisible();
