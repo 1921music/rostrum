@@ -55,6 +55,27 @@ test('Library imports through the UI and opens the owned PDF', async ({ page }) 
   expect(await page.evaluate(() => !!_score_.libraryDocumentId)).toBe(true);
 });
 
+test('single-song PDF without outlines and MSCZ imports appear in Songs', async ({ page }) => {
+  await page.goto('/pod.html');
+  await page.waitForFunction(() => !!window._bookshelf_ && !!window._menu_);
+  const pdf = await page.evaluate(async () => {
+    const file = await PDFLib.PDFDocument.create(); file.addPage([300, 400]);
+    file.setTitle('PDF internal title'); return [...await file.save()];
+  });
+  const mscz = zipSync({ 'score.mscx': fs.readFileSync(path.join(__dirname, 'fixtures/font-score.mscx')) });
+  await page.evaluate(() => _menu_.notify('score/open/up'));
+  await page.getByText('Library', { exact: true }).click();
+  await page.getByLabel('Import scores').setInputFiles([
+    { name: 'Single.pdf', mimeType: 'application/pdf', buffer: Buffer.from(pdf) },
+    { name: 'Single.mscz', mimeType: 'application/octet-stream', buffer: Buffer.from(mscz) },
+  ]);
+  await expect(page.getByRole('button', { name: 'Single.mscz', exact: true })).toBeVisible();
+  await page.getByLabel('Library view').selectOption('entries');
+  await expect(page.getByRole('button', { name: 'PDF internal title', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Shared fonts', exact: true })).toBeVisible();
+  expect(await page.evaluate(async () => (await _bookshelf_.call('search')).length)).toBe(2);
+});
+
 test('file adapter uses the supplied directory and rejects escaping paths', async ({ page }) => {
   await page.goto('/pod.html');
   const result = await page.evaluate(async () => {
