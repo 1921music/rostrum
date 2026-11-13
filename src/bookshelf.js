@@ -1,13 +1,24 @@
 // +skip
 import { Score } from './score.js';
 import { checkUnsaved, FileSrc } from './file.js';
-import { toast, css } from './common.js';
+import { toast, css, listen } from './common.js';
 import { exchangeLibraryPackages } from './bookshelf-sync.js';
 import { LibraryCloudTransport } from './bookshelf-cloud.js';
 // -skip
 
-class BookshelfStore {
-  constructor() { this.pending = new Map(); this.sequence = 0; }
+class BookshelfStore extends EventTarget {
+  constructor() { super(); this.pending = new Map(); this.sequence = 0; }
+  setPermissionRequired(required) {
+    this.permissionRequired = required;
+    this.dispatchEvent(new Event('permissionchange'));
+  }
+  async reauthorizeStorage() {
+    // Call requestPermission before any other await to retain user activation.
+    await window.RostrumLibraryHost.requestStoragePermission(this.storage);
+    this.setPermissionRequired(false);
+    await this.call('open');
+    if (Score.activeScore?.libraryDocumentId) await this.flush(Score.activeScore);
+  }
   async configure(storage) {
     if (this.syncPending) throw new Error('Wait for library sync before changing its location.');
     if (Score.activeScore?.libraryDocumentId) {
@@ -99,6 +110,11 @@ class BookshelfStore {
     if (this.workerStarting) return this.workerStarting;
     this.workerStarting = (async () => {
       if (this.storage === undefined) this.storage = await window.RostrumLibraryHost.loadSelection() || {};
+      if (await window.RostrumLibraryHost.queryStoragePermission(this.storage) !== 'granted') {
+        this.setPermissionRequired(true);
+        throw new DOMException('Allow access to the remembered library folder to continue.', 'NotAllowedError');
+      }
+      this.setPermissionRequired(false);
       let url = new URL('bookshelf-worker.js', location.href).href;
       if (location.protocol === 'file:') {
         this.hostStorage = await window.RostrumLibraryHost.openHostStorage(this.storage || {});
@@ -132,7 +148,7 @@ class BookshelfStore {
         const pending = this.pending.get(data.id);
         if (!pending) return;
         this.pending.delete(data.id);
-        data.error ? pending.reject(Object.assign(new Error(data.error), { persistenceFailed: data.persistenceFailed })) : pending.resolve(data.value);
+        data.error ? pending.reject(Object.assign(new Error(data.error), { name: data.errorName || 'Error', persistenceFailed: data.persistenceFailed })) : pending.resolve(data.value);
       };
       this.worker.onerror = () => {
         clearTimeout(startupTimeout); readyReject(new Error('Could not start library storage.'));
@@ -158,7 +174,13 @@ class BookshelfStore {
       catch (error) { this.pending.delete(id); reject(error); }
     });
   }
-  async call(action, args = {}) { await this.ensureWorker(); return this.send(action, args); }
+  async call(action, args = {}) {
+    try { await this.ensureWorker(); return await this.send(action, args); }
+    catch (error) {
+      if (this.storage?.kind === 'directory' && ['NotAllowedError', 'SecurityError'].includes(error.name)) this.setPermissionRequired(true);
+      throw error;
+    }
+  }
   async analyze(file) {
     if (!/\.(pdf|mscz|mxl|musicxml|xml)$/i.test(file.name)) throw new Error('Unsupported score format');
     const entries = [];
@@ -216,6 +238,9 @@ class BookshelfStore {
     return entries;
   }
   async import(file, options = {}) {
+    const existing = await this.call('findImportedFile', { file });
+    if (existing) return existing;
+    // importFile checks again in the serial Worker queue for concurrent imports.
     return this.call('importFile', { file, entries: await this.analyze(file), ...options });
   }
   async reindex(id) {
@@ -284,11 +309,21 @@ class BookshelfView {
     const search = document.createElement('input');
     search.type = 'search'; search.placeholder = 'Search songs'; search.setAttribute('aria-label', 'Search songs');
     const status = document.createElement('div'); status.setAttribute('role', 'status');
+    const permission = document.createElement('div'); permission.hidden = true;
+    const permissionMessage = document.createElement('div');
+    const allowAccess = document.createElement('button'); allowAccess.textContent = 'Allow library folder access';
+    permission.append(permissionMessage, allowAccess);
     const results = document.createElement('div');
     const tagFilter = document.createElement('select'); tagFilter.multiple = true; tagFilter.setAttribute('aria-label', 'Filter by tags');
     const tagMatch = document.createElement('select'); tagMatch.setAttribute('aria-label', 'Tag matching');
     tagMatch.add(new Option('Any selected tag', 'any')); tagMatch.add(new Option('All selected tags', 'all'));
-    this.elm.append(input, search, status, results);
+    this.elm.append(input, search, status, permission, results);
+    const updatePermission = () => {
+      permission.hidden = !bookshelfStore.permissionRequired;
+      permissionMessage.textContent = 'Access is required for library folder: ' + (bookshelfStore.storage?.directory?.name || '');
+    };
+    panel.listeners.push(listen(bookshelfStore, 'permissionchange', updatePermission));
+    updatePermission();
     const importCurrent = document.createElement('button'); importCurrent.textContent = 'Import current score';
     this.elm.insertBefore(importCurrent, results);
     this.elm.insertBefore(tagFilter, results); this.elm.insertBefore(tagMatch, results);
@@ -304,6 +339,11 @@ class BookshelfView {
       try { status.textContent = ''; await task(); }
       catch (error) { status.textContent = error.message; }
     };
+    allowAccess.onclick = () => run(async () => {
+      allowAccess.disabled = true;
+      try { await bookshelfStore.reauthorizeStorage(); await this.refresh(); status.textContent = 'Library folder access restored'; }
+      finally { allowAccess.disabled = false; }
+    });
     const transfers = document.createElement('details');
     const transferTitle = document.createElement('summary'); transferTitle.textContent = 'Backups and conflicting edits'; transfers.append(transferTitle);
     const backup = document.createElement('button'); backup.textContent = 'Export library';
@@ -549,7 +589,8 @@ class BookshelfView {
           const replacement = document.createElement('input'); replacement.type = 'file'; replacement.accept = input.accept; replacement.setAttribute('aria-label', 'Replace score file');
           replacement.onchange = () => run(async () => {
             if (!replacement.files[0] || !await checkUnsaved()) return;
-            await bookshelfStore.import(replacement.files[0], { replacesId: row.id }); await this.refresh();
+            const imported = await bookshelfStore.import(replacement.files[0], { replacesId: row.id }); await this.refresh();
+            if (imported.alreadyImported) status.textContent = 'Score already imported; replacement skipped. Previous or deleted scores remain in history.';
           });
           card.append(replacement);
         }
@@ -562,9 +603,16 @@ class BookshelfView {
     });
     input.onchange = () => run(async () => {
       input.disabled = true;
-      try { for (const file of input.files) { status.textContent = 'Importing ' + file.name; await bookshelfStore.import(file); } }
+      let imported = 0, skipped = 0;
+      try { for (const file of input.files) {
+        status.textContent = 'Importing ' + file.name;
+        const result = await bookshelfStore.import(file);
+        result.alreadyImported ? skipped++ : imported++;
+      } }
       finally { input.disabled = false; input.value = ''; }
       await this.refresh();
+      status.textContent = `Imported ${imported} scores; skipped ${skipped} already imported scores.`;
+      if (skipped) status.textContent += ' Previous or deleted scores remain in history.';
     });
     search.oninput = () => this.refresh();
     tagFilter.onchange = tagMatch.onchange = () => this.refresh();
@@ -579,8 +627,9 @@ class BookshelfView {
       if (!_score_) throw new Error('Open a score first');
       const name = _score_.saveName;
       const bytes = await _score_.toFile();
-      await bookshelfStore.import(new File([bytes], name));
+      const imported = await bookshelfStore.import(new File([bytes], name));
       await this.refresh();
+      if (imported.alreadyImported) status.textContent = 'Score already imported; skipped. Previous or deleted scores remain in history.';
     });
   }
   select() { this.refresh(); requestAnimationFrame(this.resize); }

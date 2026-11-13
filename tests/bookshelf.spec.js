@@ -76,6 +76,89 @@ test('single-song PDF without outlines and MSCZ imports appear in Songs', async 
   expect(await page.evaluate(async () => (await _bookshelf_.call('search')).length)).toBe(2);
 });
 
+test('reimport skips identical bytes without new files, songs or changes, including deleted scores', async ({ page }) => {
+  await page.goto('/pod.html'); await page.waitForFunction(() => !!window._bookshelf_ && !!window._menu_);
+  const result = await page.evaluate(async () => {
+    const pdf = await PDFLib.PDFDocument.create(); pdf.addPage([300, 400]); const bytes = await pdf.save();
+    const first = await _bookshelf_.import(new File([bytes], 'First.pdf'));
+    const changesBefore = await _bookshelf_.call('changeIds');
+    const [second, third] = await Promise.all([
+      _bookshelf_.import(new File([bytes], 'First.pdf')),
+      _bookshelf_.import(new File([bytes], 'Renamed.pdf')),
+    ]);
+    // A duplicate must skip parsing too, even if its extension was changed.
+    const renamedType = await _bookshelf_.import(new File([bytes], 'Renamed.mscz'));
+    const unchanged = JSON.stringify(changesBefore) === JSON.stringify(await _bookshelf_.call('changeIds'));
+    const entries = await _bookshelf_.call('search');
+    const directory = await (await navigator.storage.getDirectory()).getDirectoryHandle('scores');
+    const names = []; for await (const name of directory.keys()) names.push(name);
+    await _bookshelf_.call('update', { table: 'documents', values: { id: first.id, deleted_at: new Date().toISOString() } });
+    const deleted = await _bookshelf_.import(new File([bytes], 'First.pdf'));
+    return { same: first.id === second.id && first.id === third.id && first.id === deleted.id,
+      skipped: second.alreadyImported && third.alreadyImported && deleted.alreadyImported && renamedType.alreadyImported,
+      unchanged, songs: entries.length, files: names.length, visible: (await _bookshelf_.call('list')).length };
+  });
+  expect(result).toEqual({ same: true, skipped: true, unchanged: true, songs: 1, files: 1, visible: 0 });
+});
+
+for (const url of ['/pod.html', '/podium.html']) test(`remembered folder prompts for permission and retries without a picker (${url})`, async ({ page }) => {
+  await page.goto(url); await page.waitForFunction(() => !!window._bookshelf_ && !!window._menu_);
+  const id = await page.evaluate(async () => {
+    const directory = await (await navigator.storage.getDirectory()).getDirectoryHandle('Remembered scores', { create: true });
+    await _bookshelf_.configure({ kind: 'directory', directory });
+    const pdf = await PDFLib.PDFDocument.create(); pdf.addPage([300, 400]);
+    return (await _bookshelf_.import(new File([await pdf.save()], 'Remembered.pdf'))).id;
+  });
+  await page.reload(); await page.waitForFunction(() => !!window._bookshelf_ && !!window._menu_);
+  await page.evaluate(() => {
+    window.permissionState = 'prompt'; window.permissionRequests = [];
+    FileSystemHandle.prototype.queryPermission = async options => {
+      if (options.mode !== 'readwrite') throw new Error('Wrong permission mode');
+      return permissionState;
+    };
+    FileSystemHandle.prototype.requestPermission = async options => {
+      permissionRequests.push({ mode: options.mode, userGesture: navigator.userActivation.isActive });
+      return permissionState;
+    };
+    window.showDirectoryPicker = () => { throw new Error('Must use the remembered handle'); };
+    _menu_.notify('score/open/up');
+  });
+  await page.getByText('Library', { exact: true }).click();
+  const allow = page.getByRole('button', { name: 'Allow library folder access', exact: true });
+  await expect(allow).toBeVisible();
+  await expect(page.getByText('Access is required for library folder: Remembered scores', { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => permissionRequests.length)).toBe(0);
+  await page.evaluate(() => { permissionState = 'denied'; });
+  await allow.click();
+  await expect(page.getByRole('status')).toContainText('was not allowed');
+  await expect(allow).toBeEnabled();
+  expect(await page.evaluate(() => _bookshelf_.storage.directory.name)).toBe('Remembered scores');
+  await page.evaluate(() => { permissionState = 'granted'; });
+  await allow.click();
+  await expect(allow).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Remembered.pdf', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => permissionRequests)).toEqual([
+    { mode: 'readwrite', userGesture: true }, { mode: 'readwrite', userGesture: true },
+  ]);
+  expect(await page.evaluate(async () => (await _bookshelf_.call('list'))[0].id)).toBe(id);
+  // Revoke access after the Worker is already connected. A typed error from
+  // its storage adapter must expose the same recovery UI without discarding it.
+  const errorName = await page.evaluate(async () => {
+    const worker = _bookshelf_.worker, original = worker.postMessage;
+    worker.postMessage = message => queueMicrotask(() => worker.dispatchEvent(new MessageEvent('message', {
+      data: { id: message.id, error: 'Folder access revoked', errorName: 'NotAllowedError' },
+    })));
+    try { await _bookshelf_.call('list'); }
+    catch (error) { return error.name; }
+    finally { worker.postMessage = original; }
+  });
+  expect(errorName).toBe('NotAllowedError');
+  await expect(allow).toBeVisible();
+  await allow.click();
+  await expect(allow).toBeHidden();
+  expect(await page.evaluate(async () => (await _bookshelf_.call('list'))[0].id)).toBe(id);
+});
+
 test('file adapter uses the supplied directory and rejects escaping paths', async ({ page }) => {
   await page.goto('/pod.html');
   const result = await page.evaluate(async () => {
@@ -248,7 +331,8 @@ test('replacing a file preserves the old references and keeps replacement separa
     const entry = (await _bookshelf_.call('search', {}))[0];
     const shelf = crypto.randomUUID(); await _bookshelf_.call('update', { table: 'bookshelves', values: { id: shelf } });
     await _bookshelf_.call('link', { table: 'bookshelf_documents', values: { bookshelf_id: shelf, document_id: first.id, order_key: '1' } });
-    const second = await _bookshelf_.import(new File([bytes], 'New.pdf'), { replacesId: first.id });
+    pdf.setTitle('Updated edition');
+    const second = await _bookshelf_.import(new File([await pdf.save()], 'New.pdf'), { replacesId: first.id });
     const old = await _bookshelf_.call('read', { id: first.id });
     const visible = await _bookshelf_.call('list');
     const links = await _bookshelf_.call('records', { table: 'bookshelf_documents', parent: 'bookshelf_id', id: shelf });

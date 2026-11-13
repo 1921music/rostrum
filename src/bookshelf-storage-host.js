@@ -1,6 +1,18 @@
 import { openIndexedDbBytes } from './bookshelf-storage-bytes-indexeddb.js';
 import { openDirectoryBytes } from './bookshelf-storage-bytes-directory.js';
 
+// Permission prompts must run on the host page from an explicit user gesture,
+// even when the selected directory is otherwise used by a Worker.
+export async function queryStoragePermission(options) {
+  if (options?.kind !== 'directory') return 'granted';
+  return options.directory.queryPermission({ mode: 'readwrite' });
+}
+export async function requestStoragePermission(options) {
+  if (options?.kind !== 'directory') return;
+  const result = await options.directory.requestPermission({ mode: 'readwrite' });
+  if (result !== 'granted') throw new DOMException('Library folder access was not allowed. You can try again or choose another folder.', 'NotAllowedError');
+}
+
 // file:// workers have an opaque origin. Keep origin-bound storage APIs on
 // the host page and pass only file bytes/Blobs to the SQLite worker.
 export async function openHostStorage(options) {

@@ -7,6 +7,10 @@ and manages tags, bookshelves and playlists. PDF outlines produce song entries;
 MusicXML/MSCZ metadata provides an initial title. Song details and start pages
 can be edited. **Import current score** imports an exported copy of the score
 currently open, including a score opened through the existing cloud tabs.
+Imports skip an already registered SHA-256 hash, even under another filename.
+Previous/deleted documents also count as registered; use the history view to
+restore them. Skipping does not create songs, copies, revisions or replacement
+relationships. It does not remove duplicates registered by older app versions.
 
 Library scores autosave annotations and per-score settings to SQLite without
 rewriting their imported PDF/MSCZ. Save As remains the explicit file export path.
@@ -28,6 +32,11 @@ backend silently falls back to temporary storage. A second tab receives a lock
 error rather than opening another writer. Directory locking is conservative
 for folders with the same name; external database changes are detected before
 writing. Use a dedicated folder, not a database shared with another application.
+When the remembered folder needs permission, Library displays its name and an
+**Allow library folder access** button. The read/write permission request runs
+on the host page in that button's user gesture, including for file-URL builds.
+Denial keeps the selection and permits retrying. Runtime permission failures
+also expose the button; granting access retries persistence and any dirty score.
 
 Standalone file-URL builds embed a Worker and WASM runtime. Origin-bound file
 and IndexedDB operations run in the host-page adapter and are bridged to the

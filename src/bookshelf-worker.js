@@ -175,6 +175,7 @@ async function open() {
     sql('CREATE TABLE IF NOT EXISTS local_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
     sql('CREATE INDEX IF NOT EXISTS changes_entity ON changes(entity_type, entity_id)');
     sql("CREATE INDEX IF NOT EXISTS entries_document ON entries(document_id)");
+    sql('CREATE INDEX IF NOT EXISTS documents_hash ON documents(content_hash)');
     sql("CREATE INDEX IF NOT EXISTS entries_title ON entries(json_extract(metadata_json, '$.title'))");
     sql('PRAGMA user_version=1');
     sql('PRAGMA application_id=1381192781');
@@ -183,8 +184,13 @@ async function open() {
   sql("INSERT OR IGNORE INTO local_state VALUES ('device', ?)", [deviceId]);
   initialized = true;
 }
+const importedDocument = hash => sql('SELECT * FROM documents WHERE content_hash=? ORDER BY deleted_at IS NOT NULL, replaced_by_id IS NOT NULL, id LIMIT 1', [hash])[0];
 const actions = {
   close() {},
+  async findImportedFile({ file }) {
+    const existing = importedDocument(await hashBytes(await file.arrayBuffer()));
+    return existing ? { ...existing, alreadyImported: true } : null;
+  },
   changeIds() { return sql('SELECT id FROM changes ORDER BY id').map(row => row.id); },
   localState(args) {
     if (typeof args.key !== 'string' || !['sync-packages:', 'sync-published:'].some(prefix => args.key.startsWith(prefix))) throw new Error('Invalid sync state key');
@@ -268,7 +274,11 @@ const actions = {
   async importFile({ file, entries, replacesId = null, derivedFromId = null }) {
     const id = crypto.randomUUID();
     const bytes = await file.arrayBuffer();
-    const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(x => x.toString(16).padStart(2, '0')).join('');
+    const hash = await hashBytes(bytes);
+    // Keep old/deleted documents intact too: reimporting must not silently
+    // restore a tombstone or change replacement/annotation relationships.
+    const existing = importedDocument(hash);
+    if (existing) return { ...existing, alreadyImported: true };
     const normalized = file.name.normalize('NFC').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[ .]+$/, '');
     const extension = normalized.match(/\.[a-z0-9]{1,12}$/i)?.[0] || '';
     const stem = extension ? normalized.slice(0, -extension.length) : normalized;
@@ -451,7 +461,7 @@ self.onmessage = ({ data }) => {
       // SQLite has already committed the in-memory state at this point.
       if (!['backup', 'export'].includes(action)) await db.flush();
       self.postMessage({ id, value });
-    } catch (error) { self.postMessage({ id, error: error.message, persistenceFailed: actionCompleted }); }
+    } catch (error) { self.postMessage({ id, error: error.message, errorName: error.name, persistenceFailed: actionCompleted }); }
   });
 };
 self.postMessage({ ready: true });
