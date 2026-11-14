@@ -37,6 +37,7 @@ import "./music.js";
 import { ScreenPanel } from "./panel.js";
 import { initFabric } from "./canvas.js";
 import { SharedBuffer } from "./sharedBuffer.js";
+import { DeviceViewState } from "./view-state.js";
 import "./appearance.js";
 
 window.pdfjsLib.GlobalWorkerOptions.workerPort = new Worker("pdf.worker.min.mjs", { type: "module" });
@@ -71,6 +72,7 @@ window.pdfjsLib.GlobalWorkerOptions.workerPort = new Worker("pdf.worker.min.mjs"
 // #include src/yin.js minified
 // #include src/tool.js minified
 // #include src/sharedBuffer.js minified
+// #include src/view-state.js minified
 // #include src/appearance.js minified
 
 /**
@@ -339,6 +341,8 @@ async function main() {
     animate(_menu_.menuHolder, { transform: "rotate(-1turn)" },
       { transform: "rotate(0)" }, `transform ${1000000 / _gs_}ms`);
     animate(_menu_.disk, { transform: "rotate(2turn)" }, { transform: "rotate(0)" }, `transform ${1000000 / _gs_}ms`);
+    window._viewState_ = new DeviceViewState(_menu_);
+    await _viewState_.ready;
     await new SharedBuffer().init() ;
     // Extension-specific code: load PDF from URL parameter if present
     if (typeof chrome !== "undefined" && chrome.runtime?.id &&
@@ -349,6 +353,9 @@ async function main() {
     if (!_score_) {
       _menu_.showLibrary();
       _menu_.park();
+      // Keep the library entry parked, but retain the user's circular-menu size.
+      if (_viewState_.state?.menu?.w === innerWidth && _viewState_.state.menu.h === innerHeight)
+        _menu_.elm.style.fontSize = _viewState_.state.menu.fontSize;
     }
   }) ;
 

@@ -242,6 +242,7 @@ class Layout {
     }
     if (Layout.activeLayout) ScreenPanel.update(Layout.activeLayout.elm);
     _score_?.music?.view.resetFollow();
+    window._viewState_?.schedule();
   }
 
   constructor(score, cell) {
@@ -327,6 +328,7 @@ class Layout {
     // after a cut or a paste must leave the reader's view alone, so place it.
     await this.build(false);
     this.place();
+    window._viewState_?.schedule();
   }
 
   place() {

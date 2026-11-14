@@ -30,6 +30,27 @@ selecting Magnify again exits the tool and releases page holds/pointer tracking.
 `tests/magnify.spec.js` checks pixels, idle use and mouse/touch across all layouts
 in the source and standalone builds.
 
+### Device View preferences
+
+`src/view-state.js` stores device-wide View preferences in the host page's
+`rostrum-device-view` IndexedDB database. It restores the layout choice and each
+layout's fit, gaps, page bands and pace, display fit/quality, magnifier zoom,
+score pan/zoom and explicitly adjusted circular-menu geometry. Reading position,
+open dialogs and fullscreen are not part of this preference record; startup
+continues to show the library. Absolute geometry applies only at the same viewport
+size; other screen sizes refit while retaining the layout/display preferences.
+
+Preferences load before URL/score activation, then override embedded/imported
+View settings when a score is activated. Score loading is guarded so temporary
+defaults cannot overwrite preferences. User interactions commit to IndexedDB;
+`rostrum-device-view-pending` in localStorage is a synchronous recovery journal
+for a write interrupted by immediate navigation and is removed after commit.
+Both stores are specific to this browser/origin and remain outside library sync
+and backup. Library settings snapshots strip View fields; explicit PDF/MSCZ
+exports retain their existing embedded settings for backwards compatibility.
+`tests/view-state.spec.js` covers reloads, import precedence, viewport changes,
+device isolation, sync exclusion, invalid data and unavailable storage.
+
 `Menu.configureNavigation()` maps stable logical tool paths to visible sectors.
 These keys remain unchanged for score metadata, local settings, undo and tool
 state; `displayCells` controls only presentation. Panel-only actions reuse their

@@ -3145,7 +3145,8 @@ class ScreenPanel extends Panel {
     if (!this.items.includes(ScreenPanel.pzTarget)) ScreenPanel.pzTarget = this.items[0];
     for (const target of targets) if (!this.initial.has(target)) {
       this.initial.set(target, {left:target.style.left, top:target.style.top, fontSize:target.style.fontSize,
-        adjusted:target.classList.contains('pz-set')});
+        adjusted:target.classList.contains('pz-set'),
+        pz:target === Layout.activeLayout?.elm ? JSON.parse(JSON.stringify(Layout.activeLayout.cell.stash.pz ?? null)) : null});
     }
     this.targetSelect.replaceChildren(...this.items.map((target, index) => {
       const option = document.createElement('option'); option.value = index;
@@ -3168,9 +3169,11 @@ class ScreenPanel extends Panel {
         const initial = this.initial.get(target);
         if (!initial) continue;
         Object.assign(target.style, {left:initial.left, top:initial.top, fontSize:initial.fontSize});
+        if (target === Layout.activeLayout?.elm) Layout.activeLayout.cell.stash.pz = initial.pz ? {...initial.pz} : null;
         target.classList.toggle('pz-set', initial.adjusted);
       } else if (action === 'larger' || action === 'smaller') {
-        const size = parseFloat(getComputedStyle(target).fontSize) / _pxPerEm_;
+        const size = target.style.fontSize.endsWith('em') ? parseFloat(target.style.fontSize)
+          : parseFloat(getComputedStyle(target).fontSize) / _pxPerEm_;
         target.style.fontSize = Math.max(.1, size * (action === 'larger' ? 1.1 : 1/1.1)) + 'em';
         target.classList.add('pz-set');
       } else {
