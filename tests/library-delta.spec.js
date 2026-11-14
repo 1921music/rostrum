@@ -137,11 +137,10 @@ test('cloud-only rows show download progress, offline keeping and local-only rel
   await devices(page);
   await page.evaluate(async () => {
     await _bookshelf_.configure(deviceB); await _bookshelf_.sync(deltaCloud.transport);
-    deltaCloud.pauseRead = true; _menu_.notify('score/open/up');
+    deltaCloud.pauseRead = true; _menu_.notify('score/library/up');
   });
-  await page.getByText('Library',{ exact:true }).click();
   await expect(page.getByText(/Cloud only.*File uploaded/)).toBeVisible();
-  await page.getByText('Edit and organize',{ exact:true }).click();
+  await page.getByLabel('Edit and organize',{ exact:true }).click();
   await page.getByRole('button',{ name:'Download to this device',exact:true }).click();
   await page.waitForFunction(() => typeof deltaCloud.resumeRead === 'function');
   await expect(page.getByLabel('Device save status')).toHaveText('Device: downloading scores');
@@ -212,10 +211,10 @@ test('automatic sync publishes after local saving, displays separate states and 
     _bookshelf_.transport = deltaCloud.transport; _bookshelf_.autoSync.delay = 150; _bookshelf_.autoSync.interval = 1000;
     const pdf = await PDFLib.PDFDocument.create(); pdf.addPage([300,400]);
     await _bookshelf_.import(new File([await pdf.save()],'Automatic.pdf'));
-    _menu_.notify('score/open/up');
+    _menu_.notify('score/library/up');
   });
-  await page.getByText('Library',{ exact:true }).click();
-  await page.getByText('Backups and conflicting edits',{ exact:true }).click();
+  await page.locator('summary[aria-label="Library settings"]').click();
+  await page.getByText('Cloud sync',{ exact:true }).click();
   await page.getByLabel('Automatic library sync').check();
   await expect.poll(() => page.evaluate(() => deltaCloud.batches.size)).toBe(1);
   await expect(page.getByLabel('Device save status')).toHaveText('Device: saved');
@@ -234,8 +233,9 @@ test('automatic sync publishes after local saving, displays separate states and 
   await page.waitForTimeout(800);
   expect(await page.evaluate(() => deltaCloud.batches.size)).toBe(2);
   await page.reload(); await page.waitForFunction(() => !!window._bookshelf_ && !!window._menu_);
-  await page.evaluate(() => _menu_.notify('score/open/up')); await page.getByText('Library',{ exact:true }).click();
-  await page.getByText('Backups and conflicting edits',{ exact:true }).click();
+  await page.evaluate(() => _menu_.notify('score/library/up'));
+  await page.locator('summary[aria-label="Library settings"]').click();
+  await page.getByText('Cloud sync',{ exact:true }).click();
   await expect(page.getByLabel('Automatic library sync')).not.toBeChecked();
 });
 
@@ -261,11 +261,12 @@ test('automatic sync never opens an interactive sign-in dialog', async ({ page }
     const source = _FileSrc_.get('Drive'); source.tokens = null;
     source.authPopupOpen = () => { throw new Error('Interactive popup must not be opened'); };
     _bookshelf_.cloudSelection = { source:'Drive',path:'' }; _bookshelf_.autoSync.delay = 50; _bookshelf_.autoSync.interval = 100;
-    await _bookshelf_.setAutoSync(true); _menu_.notify('score/open/up');
+    await _bookshelf_.setAutoSync(true); _menu_.notify('score/library/up');
   });
-  await page.getByText('Library',{ exact:true }).click();
   await expect(page.getByLabel('Cloud sync status')).toContainText('sign-in required');
-  await expect(page.getByRole('dialog')).toHaveCount(0);
+  // The library itself is now an accessible dialog; no sign-in dialog may replace it.
+  await expect(page.getByRole('dialog')).toHaveCount(1);
+  await expect(page.getByRole('dialog')).toHaveAttribute('aria-label', 'Library');
   await page.evaluate(() => _bookshelf_.setAutoSync(false));
 });
 

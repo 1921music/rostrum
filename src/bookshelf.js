@@ -1,7 +1,7 @@
 // +skip
 import { Score } from './score.js';
 import { checkUnsaved, FileSrc } from './file.js';
-import { toast, css, listen } from './common.js';
+import { toast, css, listen, iconSvg } from './common.js';
 import { exchangeLibraryChanges, LibraryAutoSync } from './bookshelf-sync.js';
 import { LibraryCloudTransport } from './bookshelf-cloud.js';
 import { reviewScoreImport } from './bookshelf-import.js';
@@ -78,6 +78,9 @@ class BookshelfStore extends EventTarget {
     if (Score.activeScore?.libraryDocumentId) {
       await this.flush(Score.activeScore); await Score.activeScore.dispose();
     }
+    // The startup library may still be initializing the remembered backend.
+    // Finish that attempt before switching, so its failure cannot clear the new worker.
+    if (this.workerStarting) await this.workerStarting.catch(() => {});
     if (this.worker) { await this.call('close'); this.worker.terminate(); }
     this.worker = this.workerStarting = null; this.storage = storage; this.localError = null; this.cloudPending = true; this.fileErrors.clear();
     const result = await this.call('open');
@@ -507,26 +510,174 @@ window.addEventListener('beforeunload', event => {
 
 class BookshelfView {
   static css = css('Bookshelf', `
-    .Bookshelf [hidden] { display:none !important; }
-    .Bookshelf > * { flex-shrink:0; }
-    .Bookshelf input, .Bookshelf select, .Bookshelf button {
-      box-sizing:border-box; max-width:100%; min-width:0;
+    .LibraryWindow {
+      --library-bg:var(--ui-bg); --library-surface:var(--ui-surface); --library-line:var(--ui-line);
+      --library-text:var(--ui-text); --library-muted:var(--ui-muted); --library-brand:var(--ui-primary);
+      --library-selected:var(--ui-selected); --library-hover:var(--ui-hover);
+      position:fixed; inset:0; pointer-events:none; font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;
+      color:var(--library-text); text-align:left; color-scheme:light;
     }
-    .Bookshelf select { margin:.2em 0; width:100%; font-size:inherit; }
-    .Bookshelf select[multiple] { height:5em; }
-    .Bookshelf input { font-size:inherit; }
-    .Bookshelf button { font-size:inherit; }
+    [data-theme=Dark] .LibraryWindow {
+      --library-bg:var(--ui-bg); --library-surface:var(--ui-surface); --library-line:var(--ui-line);
+      --library-text:var(--ui-text); --library-muted:var(--ui-muted); --library-brand:var(--ui-primary);
+      --library-selected:var(--ui-selected); --library-hover:var(--ui-hover); color-scheme:dark;
+    }
+    .LibraryWindow[hidden], .LibraryWindow [hidden] { display:none !important; }
+    .LibraryWindow *, .LibraryWindow *::before, .LibraryWindow *::after { box-sizing:border-box; }
+    .LibraryWindow .LibraryWindow__panel {
+      pointer-events:auto; position:absolute; inset:0; display:flex; flex-direction:column;
+      width:100%; height:100%; max-width:none; max-height:none; margin:0;
+      border:0; border-radius:0; box-shadow:none; background:var(--library-bg); color:var(--library-text);
+    }
+    .LibraryWindow[data-full=false] .LibraryWindow__panel {
+      right:auto; width:min(460px,100vw); border-right:1px solid var(--library-line);
+      box-shadow:12px 0 32px #172b4d14;
+    }
+    .LibraryWindow__header {
+      display:flex; align-items:center; justify-content:space-between; gap:16px;
+      flex:none; height:72px; padding:0 24px; border-bottom:1px solid var(--library-line); background:var(--library-bg);
+    }
+    .LibraryWindow__brand { display:flex; gap:12px; align-items:center; }
+    .LibraryWindow__mark { color:var(--library-brand); font-size:28px; line-height:1; }
+    .LibraryWindow h1 { margin:0; font-size:22px; font-weight:650; letter-spacing:-.5px; }
+    .LibraryWindow__actions { display:flex; align-items:center; gap:8px; }
+    .LibraryWindow__body { flex:1; min-height:0; }
+    .LibraryWindow button, .LibraryWindow input, .LibraryWindow select { font:inherit; color:inherit; margin:0; }
+    .LibraryWindow button, .LibraryWindow summary { -webkit-tap-highlight-color:transparent; }
+    .LibraryWindow button {
+      border:1px solid var(--library-line); border-radius:8px; background:var(--library-bg);
+      padding:9px 14px; min-height:40px; cursor:pointer; line-height:1.4; transition:background .12s;
+    }
+    .LibraryWindow button:hover { background:var(--library-hover); }
+    .LibraryWindow button:disabled { cursor:default; opacity:.45; }
+    .LibraryWindow :is(button,input,select,summary):focus-visible { outline:2px solid var(--library-brand); outline-offset:3px; }
+    .LibraryWindow input:not([type=checkbox]), .LibraryWindow select {
+      width:100%; min-width:0; max-width:100%; min-height:42px; padding:9px 12px;
+      border:1px solid var(--library-line); border-radius:8px; background:var(--library-bg);
+    }
+    .LibraryWindow input[type=checkbox] { accent-color:var(--library-brand); width:18px; height:18px; vertical-align:middle; }
+    .LibraryWindow input::placeholder { color:var(--library-muted); opacity:1; }
+    .LibraryWindow__icon { width:40px; height:40px; padding:0 !important; border:0 !important; font-size:24px !important; }
+    .LibraryWindow .LibraryWindow__primary { background:var(--library-brand); color:var(--library-bg); border-color:transparent; font-weight:600; }
+    .LibraryWindow .LibraryWindow__primary:hover { filter:brightness(.95); }
+    .Bookshelf { display:flex; flex-direction:column; height:100%; min-height:0; }
+    .Bookshelf__workspace { display:grid; grid-template-columns:208px minmax(0,1fr); min-height:0; flex:1; position:relative; }
+    .Bookshelf__sidebar { background:var(--library-surface); padding:28px 12px; overflow:auto; border-right:1px solid var(--library-line); }
+    .Bookshelf__nav-title { margin:0 12px 12px; color:var(--library-muted); font-size:11px; font-weight:700; letter-spacing:1.4px; text-transform:uppercase; }
+    .Bookshelf__nav { display:flex; flex-direction:column; gap:4px; }
+    .LibraryWindow .Bookshelf__nav button { border:0; text-align:left; border-radius:8px; padding:12px; background:transparent; }
+    .LibraryWindow .Bookshelf__nav button[aria-pressed=true] { background:var(--library-selected); color:var(--library-brand); font-weight:600; }
+    .Bookshelf__nav button span { display:inline-block; width:26px; opacity:.7; }
+    .Bookshelf__main { display:flex; flex-direction:column; min-width:0; min-height:0; }
+    .Bookshelf__toolbar { display:flex; gap:12px; align-items:center; padding:24px 32px 16px; flex:none; }
+    .LibraryWindow .Bookshelf__search { border:0 !important; background:var(--library-surface) !important; border-radius:12px !important; height:46px; }
+    .Bookshelf__heading { display:flex; justify-content:space-between; align-items:baseline; gap:16px; padding:0 32px 16px; }
+    .Bookshelf__heading h2 { font-size:20px; font-weight:600; margin:0; letter-spacing:-.3px; }
+    .Bookshelf__count { color:var(--library-muted); font-size:13px; white-space:nowrap; }
+    .Bookshelf__context { display:flex; gap:8px; flex-wrap:wrap; padding:0 32px 16px; }
+    .Bookshelf__context:has(select[hidden]) { display:none; }
+    .Bookshelf__context select { flex:1 1 180px; }
+    .Bookshelf__context input { flex:1 1 180px; }
+    .Bookshelf__results { overflow:auto; overscroll-behavior:contain; min-height:0; flex:1; padding:0 32px 24px; }
+    .Bookshelf__row { display:grid; grid-template-columns:44px minmax(0,1fr) 40px; column-gap:14px; padding:16px 0; border-bottom:1px solid var(--library-line); align-items:center; cursor:pointer; }
+    .Bookshelf__row[data-selected=true] { background:var(--library-selected); border-radius:10px; padding-left:12px; padding-right:12px; }
+    .Bookshelf__type { grid-row:1 / span 4; width:42px; height:50px; display:grid; place-items:center; border:1px solid var(--library-line); border-radius:7px; background:var(--library-surface); font-size:10px; font-weight:700; color:var(--library-muted); letter-spacing:.5px; }
+    .LibraryWindow .Bookshelf__open { grid-column:2; padding:0; border:0; border-radius:3px; min-height:26px; background:none; text-align:left; font-weight:600; overflow-wrap:anywhere; }
+    .LibraryWindow .Bookshelf__open:hover { color:var(--library-brand); }
+    .Bookshelf__row > div:not(.Bookshelf__type) { grid-column:2; color:var(--library-muted); font-size:12px; overflow-wrap:anywhere; }
+    .Bookshelf__row > details { grid-column:3; grid-row:1; align-self:start; }
+    .Bookshelf__row > details > summary { cursor:pointer; width:36px; height:36px; display:grid; place-items:center; font-size:22px; border-radius:50%; list-style:none; }
+    .Bookshelf__row > details > summary:hover { background:var(--library-hover); }
+    .LibraryWindow summary::-webkit-details-marker { display:none; }
+    .Bookshelf__footer { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:56px; padding:10px 24px; border-top:1px solid var(--library-line); background:var(--library-bg); flex:none; }
+    .Bookshelf__save-state { display:flex; gap:16px; flex-wrap:wrap; color:var(--library-muted); font-size:12px; }
+    .LibraryWindow .Bookshelf__sync { border:0; color:var(--library-brand); padding:6px 10px; white-space:nowrap; min-height:36px; }
+    .Bookshelf__message:empty { display:none; }
+    .Bookshelf__message { padding:10px 24px; background:var(--library-selected); font-size:13px; flex:none; overflow-wrap:anywhere; }
+    .Bookshelf__permission { padding:12px 24px; background:var(--library-selected); font-size:13px; flex:none; }
+    .Bookshelf__permission button { margin-top:8px; }
+    .LibraryWindow details.Bookshelf__popover > summary { display:flex; align-items:center; justify-content:center; gap:8px; min-height:40px; padding:8px 12px; list-style:none; border-radius:8px; cursor:pointer; white-space:nowrap; }
+    .LibraryWindow svg { flex:none; vertical-align:middle; pointer-events:none; }
+    .Bookshelf__popover[open] > summary { background:var(--library-selected); color:var(--library-brand); }
+    .Bookshelf__add { position:relative; }
+    .LibraryWindow .Bookshelf__add > summary { background:var(--library-brand); color:var(--library-bg); font-weight:600; }
+    .Bookshelf__add-content, .Bookshelf__filter-content { position:absolute; z-index:3; padding:16px; width:300px; max-width:calc(100vw - 32px); background:var(--library-bg); border:1px solid var(--library-line); border-radius:12px; box-shadow:0 8px 28px #172b4d20; }
+    .Bookshelf__add-content { top:48px; right:0; display:flex; flex-direction:column; gap:8px; }
+    .Bookshelf__file-input { position:absolute; width:1px !important; height:1px; min-height:0 !important; padding:0 !important; clip-path:inset(50%); overflow:hidden; }
+    .Bookshelf__filters { position:relative; }
+    .Bookshelf__filter-content { top:48px; right:0; display:flex; flex-direction:column; gap:12px; }
+    .Bookshelf__filter-content select[multiple] { min-height:120px; }
+    .Bookshelf__settings-content { position:absolute; z-index:6; inset:72px 0 56px; padding:24px max(24px,calc((100% - 800px)/2)); overflow:auto; background:var(--library-bg); }
+    .Bookshelf__settings-content h2 { margin:16px 0 24px; font-size:24px; }
+    .Bookshelf__settings-content > details { border-bottom:1px solid var(--library-line); padding:16px 0; }
+    .Bookshelf__settings-content > details > summary { font-weight:600; list-style:none; cursor:pointer; padding:8px 0; }
+    .Bookshelf__settings-content > details[open] > :not(summary) { display:block; margin:12px 0; max-width:100%; }
+    .Bookshelf__settings-content label:has(input[type=checkbox]) { display:flex !important; gap:8px; align-items:center; }
+    .Bookshelf__settings-content :is(p,div) { overflow-wrap:anywhere; }
+    .Bookshelf__settings-content pre { font-size:12px; }
+    .Bookshelf__inspector { min-width:0; min-height:0; overflow:auto; padding:24px; background:var(--library-bg); border-left:1px solid var(--library-line); }
+    .Bookshelf__inspector h2 { font-size:20px; line-height:1.4; margin:20px 0 8px; overflow-wrap:anywhere; }
+    .Bookshelf__inspector p { color:var(--library-muted); font-size:13px; overflow-wrap:anywhere; }
+    .Bookshelf__inspector > button { margin:8px 0 20px; }
+    .Bookshelf__inspector details > summary { cursor:pointer; list-style:none; font-weight:600; color:var(--library-brand); padding:12px 0; }
+    .Bookshelf__record-section { width:100%; display:flex; flex-wrap:wrap; gap:8px; border-top:1px solid var(--library-line); padding:16px 0; }
+    .Bookshelf__record-section h4 { width:100%; margin:0 0 8px; font-size:13px; font-weight:600; }
+    .Bookshelf__record-section > input { flex:1 1 100%; }
+    .Bookshelf__record-section button { font-size:13px; }
+    .Bookshelf__record-section:last-child button { color:#b42332; }
+    .Bookshelf__empty { padding:64px 16px; text-align:center; color:var(--library-muted); }
+    .Bookshelf__empty-mark { font-size:40px; color:var(--library-line); margin-bottom:16px; }
+    .Bookshelf__empty h3 { color:var(--library-text); font-size:18px; font-weight:600; margin:0 0 8px; }
+    .Bookshelf__empty p { font-size:13px; margin:0; }
+    .Bookshelf__compact-mode { display:none; }
+    .LibraryWindow[data-full=false] .Bookshelf__workspace { grid-template-columns:minmax(0,1fr); }
+    .LibraryWindow[data-full=false] .Bookshelf__sidebar { display:none; }
+    .LibraryWindow[data-full=false] .Bookshelf__compact-mode { display:block; }
+    .LibraryWindow[data-full=false] .Bookshelf__toolbar { padding:20px 20px 12px; }
+    .LibraryWindow[data-full=false] .Bookshelf__heading, .LibraryWindow[data-full=false] .Bookshelf__context { padding-left:20px; padding-right:20px; }
+    .LibraryWindow[data-full=false] .Bookshelf__results { padding-left:20px; padding-right:20px; }
+    .LibraryWindow[data-full=false] .LibraryWindow__header { padding:0 16px; gap:8px; }
+    .LibraryWindow[data-full=false] .LibraryWindow__brand { gap:8px; }
+    .LibraryWindow[data-full=false] .Bookshelf__add-content { position:fixed; top:80px; left:16px; right:auto; }
+    .LibraryWindow[data-full=false] .Bookshelf__settings > summary { font-size:0; width:40px; padding:0; }
+    .LibraryWindow[data-full=false] .Bookshelf__settings > summary { gap:0; }
+    .Bookshelf[data-detail-open=true] .Bookshelf__inspector { position:absolute; z-index:4; inset:0; }
+    @media(min-width:1100px) {
+      .LibraryWindow[data-mode=full] .Bookshelf[data-detail-open=true] .Bookshelf__workspace { grid-template-columns:208px minmax(0,1fr) 360px; }
+      .LibraryWindow[data-mode=full] .Bookshelf[data-detail-open=true] .Bookshelf__inspector { position:static; }
+    }
+    @media(max-width:720px) {
+      .LibraryWindow__header { height:64px; padding:0 16px; gap:8px; }
+      .LibraryWindow h1 { font-size:20px; }
+      .LibraryWindow__brand { gap:8px; }
+      .LibraryWindow__mark { font-size:24px; }
+      .LibraryWindow__actions { gap:2px; }
+      .LibraryWindow__actions > .LibraryWindow__icon { width:40px; }
+      .LibraryWindow .Bookshelf__settings > summary { font-size:0; width:36px; padding:0; }
+      .LibraryWindow .Bookshelf__settings > summary { gap:0; }
+      .Bookshelf__workspace { grid-template-columns:minmax(0,1fr); }
+      .Bookshelf__sidebar { display:none; }
+      .Bookshelf__compact-mode { display:block; }
+      .Bookshelf__toolbar { padding:16px 16px 12px; }
+      .Bookshelf__heading, .Bookshelf__context { padding-left:16px; padding-right:16px; }
+      .Bookshelf__results { padding-left:16px; padding-right:16px; }
+      .Bookshelf__footer { padding:8px 16px; }
+      .Bookshelf__save-state { gap:2px; flex-direction:column; font-size:11px; }
+      .Bookshelf__settings-content { top:64px; padding:20px; }
+      .LibraryWindow .Bookshelf__add-content { position:fixed; top:72px; left:16px; right:16px; width:auto; max-width:none; }
+    }
+    @media(prefers-reduced-motion:no-preference) {
+      .LibraryWindow:not([hidden]) .LibraryWindow__panel { animation:library-enter .16s ease-out; }
+      @keyframes library-enter { from { opacity:0; translate:-12px 0; } to { opacity:1; translate:0 0; } }
+    }
   `);
+
   constructor(panel) {
     this.panel = panel;
     this.elm = document.createElement('div');
     this.elm.className = 'Bookshelf';
-    this.elm.style.cssText = 'padding:1em;display:flex;flex-direction:column;gap:.6em;max-height:65vh;overflow:auto';
-    this.resize = () => {
-      if (!this.elm.isConnected || !this.elm.getClientRects().length) return;
-      const available = panel.panel.getBoundingClientRect().bottom - this.elm.getBoundingClientRect().top - 8;
-      this.elm.style.maxHeight = Math.max(60, available - 2 * parseFloat(getComputedStyle(this.elm).paddingTop)) + 'px';
-    };
+    this.elm.dataset.detailOpen = 'false';
+    this.resize = () => this.updatePresentation();
     this.resizeObserver = new ResizeObserver(this.resize);
     this.resizeObserver.observe(panel.panel);
     const input = document.createElement('input');
@@ -554,7 +705,7 @@ class BookshelfView {
       clearTimeout(refreshTimer);
       refreshTimer = setTimeout(() => {
         if (!this.elm.isConnected || !this.elm.getClientRects().length) return;
-        if (results.contains(document.activeElement) && document.activeElement.matches('input,select,textarea')) { this.refreshNeeded = true; return; }
+        if (this.elm.contains(document.activeElement) && document.activeElement.matches('input,select,textarea')) { this.refreshNeeded = true; return; }
         this.refresh?.();
       },50);
     };
@@ -571,14 +722,16 @@ class BookshelfView {
     this.elm.insertBefore(tagFilter, results); this.elm.insertBefore(tagMatch, results);
     const mode = document.createElement('select');
     mode.setAttribute('aria-label', 'Library view');
-    for (const [value, label] of [['documents', 'All scores'], ['entries', 'Songs'], ['bookshelves', 'Bookshelves'], ['playlists', 'Playlists'], ['tags', 'Tags'], ['history', 'Previous and deleted scores']]) mode.add(new Option(label, value));
+    for (const [value, label] of [['documents', 'All scores'], ['entries', 'Songs'], ['bookshelves', 'Bookshelves'], ['playlists', 'Playlists'], ['tags', 'Tags'], ['history', 'Previous and deleted scores']]) {
+      const option = new Option(label, value); option.hidden = value === 'history'; mode.add(option);
+    }
     const collection = document.createElement('select'); collection.setAttribute('aria-label', 'Collection');
     const createName = document.createElement('input'); createName.placeholder = 'New collection name'; createName.setAttribute('aria-label', 'New collection name');
     const create = document.createElement('button'); create.textContent = 'Create';
     this.elm.insertBefore(mode, results); this.elm.insertBefore(collection, results);
     this.elm.insertBefore(createName, results); this.elm.insertBefore(create, results);
-    const run = async task => {
-      try { status.textContent = ''; await task(); }
+    const run = async (task, clearStatus = true) => {
+      try { if (clearStatus) status.textContent = ''; await task(); }
       catch (error) { status.textContent = error.message; }
     };
     allowAccess.onclick = () => run(async () => {
@@ -587,7 +740,16 @@ class BookshelfView {
       finally { allowAccess.disabled = false; }
     });
     const transfers = document.createElement('details');
-    const transferTitle = document.createElement('summary'); transferTitle.textContent = 'Backups and conflicting edits'; transfers.append(transferTitle);
+    const transferTitle = document.createElement('summary'); transferTitle.textContent = 'Library settings'; transfers.append(transferTitle);
+    const settingsSection = title => {
+      const section = document.createElement('details');
+      const summary = document.createElement('summary'); summary.textContent = title;
+      section.append(summary); transfers.append(section); return section;
+    };
+    const storageSettings = settingsSection('Storage location');
+    const syncSettings = settingsSection('Cloud sync');
+    const backupSettings = settingsSection('Backup and restore');
+    const historySettings = settingsSection('History and conflicts');
     const backup = document.createElement('button'); backup.textContent = 'Export library';
     const restore = document.createElement('input'); restore.type = 'file'; restore.accept = '.zip,application/zip'; restore.setAttribute('aria-label', 'Import library backup');
     const explanation = document.createElement('div'); explanation.textContent = 'Import adds the saved library and keeps conflicting edits for review.';
@@ -597,8 +759,13 @@ class BookshelfView {
     const defaultLibrary = document.createElement('button'); defaultLibrary.textContent = 'Use default library';
     const browserLibrary = document.createElement('button'); browserLibrary.textContent = 'Use browser compatibility library';
     const location = document.createElement('div'); location.textContent = 'Library location: default';
-    transfers.append(backup, explanation, restore, review, conflictResults); this.elm.insertBefore(transfers, results);
-    transfers.append(folder, defaultLibrary, browserLibrary, location);
+    backupSettings.append(backup, explanation, restore);
+    historySettings.append(review, conflictResults);
+    const history = document.createElement('button'); history.textContent = 'Previous and deleted scores';
+    history.onclick = () => { mode.value = 'history'; this.refresh(); };
+    historySettings.prepend(history);
+    this.elm.insertBefore(transfers, results);
+    storageSettings.append(folder, defaultLibrary, browserLibrary, location);
     const cloud = document.createElement('select'); cloud.setAttribute('aria-label', 'Library cloud service'); cloud.add(new Option('Choose cloud service', ''));
     for (const source of [Score.sources.gdrive, Score.sources.dbx, Score.sources.odrive, Score.sources.pcloud]) cloud.add(new Option(source, source));
     const cloudPath = document.createElement('input'); cloudPath.setAttribute('aria-label', 'Library cloud folder'); cloudPath.placeholder = 'Folder path (blank is root)';
@@ -608,8 +775,11 @@ class BookshelfView {
     auto.onchange = () => run(async () => { await bookshelfStore.setAutoSync(auto.checked); });
     panel.listeners.push(listen(bookshelfStore,'statuschange',() => { auto.checked = bookshelfStore.autoSettings?.enabled !== false; }));
     const sync = document.createElement('button'); sync.textContent = 'Sync library now';
-    transfers.append(cloud, cloudPath, cloudInfo, autoLabel, sync);
-    const backupInfo = document.createElement('div'); backupInfo.textContent = 'A complete ZIP backup downloads any missing score files first.'; transfers.append(backupInfo);
+    syncSettings.append(cloud, cloudPath, cloudInfo, autoLabel);
+    this.elm.insertBefore(sync, transfers);
+    const applySync = document.createElement('button'); applySync.textContent = 'Apply and sync';
+    applySync.onclick = () => sync.click(); syncSettings.append(applySync);
+    const backupInfo = document.createElement('div'); backupInfo.textContent = 'A complete ZIP backup downloads any missing score files first.'; backupSettings.append(backupInfo);
     let cloudTouched = false;
     cloud.onchange = cloudPath.oninput = () => { cloudTouched = true; };
     window.RostrumLibraryHost.loadCloudSelection().then(saved => {
@@ -748,8 +918,10 @@ class BookshelfView {
       for (const row of rows) nextRevisions.set((row.document_id ? 'entries' : 'documents') + ':' + row.id,row.revision_id);
       for (const row of rows) if (row.membership) nextRevisions.set((row.document_id ? 'playlist_items' : 'bookshelf_documents') + ':' + row.membership.id,row.membership.revision_id);
       revisions = nextRevisions;
-      const expanded = new Set([...results.querySelectorAll('details[open][data-record]')].map(elm => elm.dataset.record));
+      const expanded = new Set([...this.elm.querySelectorAll('details[open][data-record]')].map(elm => elm.dataset.record));
       results.replaceChildren();
+      this.rowViews = new Map();
+      this.updateNavigation(mode.value, collection, rows.length, selectedTags.length);
       if (grouped && collection.value) {
         const group = groups.find(g => g.id === collection.value);
         const edit = document.createElement('input'); edit.value = label(group); edit.setAttribute('aria-label', 'Collection name'); results.append(edit);
@@ -761,25 +933,34 @@ class BookshelfView {
         });
       }
       for (const row of rows) {
-        let card = document.createElement('div'); card.style.cssText = 'border-top:1px solid #888;padding:.5em 0'; results.append(card);
+        let card = document.createElement('div'); card.className = 'Bookshelf__row'; results.append(card);
+        const rowCard = card;
+        const kind = document.createElement('div'); kind.className = 'Bookshelf__type'; kind.setAttribute('aria-hidden','true');
+        kind.textContent = /\.pdf$/i.test(JSON.parse(row.metadata_json).originalFilename || JSON.parse(row.metadata_json).displayName || '') ? 'PDF' : row.document_id ? 'SONG' : 'SCORE';
+        card.append(kind);
         const openButton = document.createElement('button');
         const metadata = JSON.parse(row.metadata_json);
         openButton.textContent = metadata.title || metadata.displayName;
-        openButton.style.cssText = 'display:block;margin:.5em 0';
+        openButton.className = 'Bookshelf__open';
         openButton.disabled = !!row.unavailable || bookshelfStore.opening?.id === (row.document_id || row.id);
         if (row.deleted_at) openButton.disabled = true;
-        openButton.onclick = () => run(async () => {
+        const openRecord = () => run(async () => {
           if (!await checkUnsaved()) return;
           await bookshelfStore.openDocument(row.document_id || row.id, row.anchor_json && JSON.parse(row.anchor_json));
           panel.hide();
         });
+        const recordKey = (row.document_id ? 'entries:' : 'documents:') + row.id;
+        openButton.onclick = () => panel.fullView ? this.showRecord(recordKey, false) : openRecord();
         card.append(openButton);
+        rowCard.addEventListener('click', event => {
+          if (!event.target.closest('button,summary,details,input,select')) openButton.click();
+        });
         const local = availability.get(row.document_id || row.id);
         if (local) {
           const state = document.createElement('div');
           state.textContent = [bookshelfStore.downloads.has(row.document_id || row.id) ? 'Downloading' : local.present ? 'On this device' : local.remote ? 'Cloud only' : 'Not on this device',
             local.pinned && (local.present ? 'Kept offline' : 'Offline download requested'),
-            local.remote ? local.pending ? 'Cloud changes pending' : 'File uploaded' : 'File upload pending', bookshelfStore.fileErrors.get(row.document_id || row.id)].filter(Boolean).join(' · ');
+            bookshelfStore.hasSyncDestination() ? local.remote ? local.pending ? 'Cloud changes pending' : 'File uploaded' : 'File upload pending' : '', bookshelfStore.fileErrors.get(row.document_id || row.id)].filter(Boolean).join(' · ');
           card.append(state);
         }
         if (mode.value === 'history') {
@@ -793,6 +974,9 @@ class BookshelfView {
           continue;
         }
         const isEntry = !!row.document_id;
+        if (metadata.composer && !isEntry) {
+          const composer = document.createElement('div'); composer.textContent = metadata.composer; card.append(composer);
+        }
         if (isEntry) {
           const description = document.createElement('div');
           description.textContent = [metadata.composer, row.document_metadata && JSON.parse(row.document_metadata).displayName,
@@ -801,10 +985,23 @@ class BookshelfView {
         }
         const details = document.createElement('details');
         details.dataset.record = (isEntry ? 'entries:' : 'documents:') + row.id; details.open = expanded.has(details.dataset.record);
-        const summary = document.createElement('summary'); summary.textContent = 'Edit and organize';
+        const summary = document.createElement('summary'); summary.textContent = '⋯'; summary.setAttribute('aria-label', 'Edit and organize');
         details.append(summary); card.append(details);
+        this.rowViews.set(recordKey, { row:rowCard, details, summary, title:openButton.textContent,
+          description:metadata.composer || row.document_metadata && JSON.parse(row.document_metadata).displayName || metadata.originalFilename || '',
+          open:openRecord });
+        summary.addEventListener('click', event => {
+          if (details.parentElement === this.inspector) return;
+          event.preventDefault(); this.showRecord(recordKey, true);
+        });
         const controls = document.createElement('div'); controls.style.cssText = 'display:flex;flex-wrap:wrap;gap:.4em;padding:.5em 0';
         details.append(controls); card = controls;
+        const recordSection = title => {
+          const section = document.createElement('section'); section.className = 'Bookshelf__record-section';
+          const heading = document.createElement('h4'); heading.textContent = title; section.append(heading);
+          controls.append(section); card = section; return section;
+        };
+        recordSection('Name and song details');
         const table = isEntry ? 'entries' : 'documents';
         const title = document.createElement('input'); title.value = label(row); title.setAttribute('aria-label', isEntry ? 'Song title' : 'Score name'); card.append(title);
         button(card, 'Rename', () => update(table, { id: row.id, metadata_json: JSON.stringify({ ...metadata, [isEntry ? 'title' : 'displayName']: title.value, userEditedFields: [...new Set([...(metadata.userEditedFields || []), isEntry ? 'title' : 'displayName'])] }) }));
@@ -812,6 +1009,8 @@ class BookshelfView {
           if (!isEntry && Score.activeScore?.libraryDocumentId === row.id) throw new Error('Close this score before deleting it');
           return update(table, { id: row.id, deleted_at: new Date().toISOString() });
         });
+        const deleteButton = card.lastElementChild;
+        recordSection('Tags and collections');
         choose(card, 'tags', 'Add tag', tag_id => bookshelfStore.call('link', { table: isEntry ? 'entry_tags' : 'document_tags', values: { [isEntry ? 'entry_id' : 'document_id']: row.id, tag_id } }));
         const tagLinks = references[isEntry ? 'entry_tags' : 'document_tags'].filter(link => link[isEntry ? 'entry_id' : 'document_id'] === row.id);
         const tags = references.tags;
@@ -835,6 +1034,7 @@ class BookshelfView {
           button(card, 'Move down', () => bookshelfStore.call('moveItem', { table: membershipTable, id: row.membership.id, direction: 1 }));
         }
         if (isEntry) {
+          card = controls.firstElementChild;
           const composer = document.createElement('input'); composer.value = metadata.composer || ''; composer.setAttribute('aria-label', 'Composer');
           const aliases = document.createElement('input'); aliases.value = (metadata.aliases || []).join('; '); aliases.setAttribute('aria-label', 'Aliases');
           const page = document.createElement('input'); page.type = 'number'; page.min = '1'; page.value = JSON.parse(row.anchor_json).pageIndex + 1; page.setAttribute('aria-label', 'Start page');
@@ -847,10 +1047,12 @@ class BookshelfView {
                 userEditedFields: [...new Set([...(metadata.userEditedFields || []), 'composer', 'aliases', 'anchor'])] }) });
           });
         } else {
+          recordSection('Offline storage');
           if (local && !local.present) button(card,'Download to this device',() => bookshelfStore.ensureFile(row.id));
           if (local?.pinned) button(card,'Stop keeping offline',() => bookshelfStore.call('pinFile',{ id:row.id,pinned:false }));
           else button(card,'Keep offline',() => bookshelfStore.keepOffline([row.id]));
           if (local?.present) button(card,'Release download',() => bookshelfStore.releaseDownload(row.id)).disabled = !!local.pinned;
+          recordSection('Songs');
           button(card, 'Edit songs', () => bookshelfStore.editSongs(row.id));
           button(card, 'Rebuild song index', () => bookshelfStore.reindex(row.id));
           const songTitle = document.createElement('input'); songTitle.placeholder = 'New song title'; songTitle.setAttribute('aria-label', 'New song title');
@@ -862,6 +1064,7 @@ class BookshelfView {
             return update('entries', { id: crypto.randomUUID(), document_id: row.id, anchor_json: JSON.stringify({ type: /\.pdf$/i.test(metadata.originalFilename) ? 'pdf' : 'music', pageIndex }),
               metadata_json: JSON.stringify({ title: songTitle.value.trim(), source: { type: 'manual' }, userEditedFields: ['title', 'anchor'] }) });
           });
+          recordSection('Replace file');
           const replacement = document.createElement('input'); replacement.type = 'file'; replacement.accept = input.accept; replacement.setAttribute('aria-label', 'Replace score file');
           replacement.onchange = () => run(async () => {
             if (!replacement.files[0]) return;
@@ -874,13 +1077,19 @@ class BookshelfView {
           });
           card.append(replacement);
         }
+        recordSection('Delete').append(deleteButton);
       }
       if (!rows.length) {
-        const empty = document.createElement('div');
+        const empty = document.createElement('div'); empty.className = 'Bookshelf__empty';
         empty.textContent = ['bookshelves', 'playlists'].includes(mode.value) && !collection.value ? 'Choose or create a collection' : 'No scores found';
-        results.append(empty);
+        const mark = document.createElement('div'); mark.className = 'Bookshelf__empty-mark'; mark.textContent = '▥'; mark.setAttribute('aria-hidden','true');
+        const message = document.createElement('h3'); message.textContent = empty.textContent;
+        const hint = document.createElement('p'); hint.textContent = search.value ? 'Try a different title or filter.' : 'Add a score to start building your library.';
+        empty.replaceChildren(mark, message, hint); results.append(empty);
       }
-    });
+      if (this.selectedRecord && this.rowViews.has(this.selectedRecord)) this.showRecord(this.selectedRecord, expanded.has(this.selectedRecord));
+      else this.closeRecord();
+    }, false);
     input.onchange = () => run(async () => {
       input.disabled = true;
       let imported = 0, skipped = 0, cancelled = 0;
@@ -905,6 +1114,9 @@ class BookshelfView {
       await update(mode.value, { id: crypto.randomUUID(), ...(mode.value === 'tags' ? { name } : { metadata_json: JSON.stringify({ name }) }) });
       createName.value = ''; await this.refresh();
     });
+    const updateCurrent = () => { importCurrent.disabled = !window._score_; };
+    panel.listeners.push(listen(document, 'scoreOpened', updateCurrent), listen(document, 'scoreClosed', updateCurrent));
+    updateCurrent();
     importCurrent.onclick = () => run(async () => {
       if (!_score_) throw new Error('Open a score first');
       importCurrent.disabled = true;
@@ -916,7 +1128,138 @@ class BookshelfView {
         if (imported?.alreadyImported) status.textContent = 'Score already imported; skipped. Previous or deleted scores remain in history.';
       } finally { importCurrent.disabled = false; }
     });
+    this.buildWorkspace({ input, search, status, deviceStatus, cloudStatus, permission, results, importCurrent,
+      tagFilter, tagMatch, mode, collection, createName, create, transfers, sync });
   }
+  buildWorkspace(controls) {
+    Object.assign(this, controls);
+    this.rowViews = new Map();
+    const element = (tag, className, text) => {
+      const elm = document.createElement(tag); if (className) elm.className = className;
+      if (text) elm.textContent = text; return elm;
+    };
+    this.workspace = element('div','Bookshelf__workspace');
+    const sidebar = element('nav','Bookshelf__sidebar'); sidebar.setAttribute('aria-label','Library categories');
+    sidebar.append(element('div','Bookshelf__nav-title','Browse'));
+    const navigation = element('div','Bookshelf__nav'); this.navigationButtons = new Map();
+    const categories = [['documents','All scores','▥'],['entries','Songs','♪'],['bookshelves','Bookshelves','▤'],['playlists','Playlists','≡'],['tags','Tags','#']];
+    for (const [value,title,icon] of categories) {
+      const button = element('button',''); button.type = 'button'; button.setAttribute('aria-label',title);
+      const glyph = element('span','',icon); glyph.setAttribute('aria-hidden','true'); button.append(glyph,document.createTextNode(title));
+      button.onclick = () => { this.closeRecord(); this.mode.value = value; this.collection.value = ''; this.refresh(); };
+      this.navigationButtons.set(value,button); navigation.append(button);
+    }
+    sidebar.append(navigation);
+    const main = element('main','Bookshelf__main');
+    const toolbar = element('div','Bookshelf__toolbar');
+    this.search.className = 'Bookshelf__search';
+    const filters = this.filters = element('details','Bookshelf__popover Bookshelf__filters');
+    this.filterSummary = element('summary','','Filters'); this.filterSummary.setAttribute('aria-label','Filter library');
+    const filterContent = element('div','Bookshelf__filter-content');
+    filterContent.append(element('strong','','Filter by tags'),this.tagFilter,this.tagMatch);
+    const clear = element('button','','Clear filters'); clear.type = 'button';
+    clear.onclick = () => { for (const option of this.tagFilter.options) option.selected = false; this.refresh(); };
+    filterContent.append(clear); filters.append(this.filterSummary,filterContent); toolbar.append(this.search,filters);
+    const heading = element('div','Bookshelf__heading');
+    this.viewTitle = element('h2','','All scores'); this.count = element('span','Bookshelf__count');
+    heading.append(this.viewTitle,this.count);
+    this.mode.classList.add('Bookshelf__compact-mode');
+    const compact = element('div','Bookshelf__context Bookshelf__compact-mode'); compact.append(this.mode);
+    const context = element('div','Bookshelf__context'); context.append(this.collection,this.createName,this.create);
+    this.results.className = 'Bookshelf__results'; this.results.setAttribute('aria-label','Library results');
+    main.append(toolbar,compact,heading,context,this.results);
+    this.inspector = element('aside','Bookshelf__inspector'); this.inspector.hidden = true;
+    this.inspector.setAttribute('aria-label','Score details');
+    this.workspace.append(sidebar,main,this.inspector);
+    const footer = element('footer','Bookshelf__footer');
+    const saveState = element('div','Bookshelf__save-state'); saveState.append(this.deviceStatus,this.cloudStatus);
+    this.sync.className = 'Bookshelf__sync'; this.sync.setAttribute('aria-label','Sync library now'); this.sync.textContent = '↻ Sync';
+    footer.append(saveState,this.sync);
+    this.status.className = 'Bookshelf__message'; this.permission.className = 'Bookshelf__permission';
+    this.elm.replaceChildren(this.permission,this.workspace,this.status,footer);
+
+    const add = this.addMenu = element('details','Bookshelf__popover Bookshelf__add');
+    const addSummary = element('summary'); addSummary.innerHTML = iconSvg('Add', {size:'18px'}) + '<span>Add</span>'; addSummary.setAttribute('aria-label','Add scores');
+    const addContent = element('div','Bookshelf__add-content');
+    this.input.className = 'Bookshelf__file-input'; this.input.tabIndex = -1;
+    const chooseFiles = element('button','','Choose files…'); chooseFiles.type = 'button'; chooseFiles.onclick = () => { add.open = false; this.input.click(); };
+    const importCurrent = this.importCurrent.onclick;
+    this.importCurrent.onclick = event => { add.open = false; return importCurrent(event); };
+    addContent.append(chooseFiles,this.input,this.importCurrent); add.append(addSummary,addContent);
+    this.panel.addSlot.append(add);
+    const settings = this.transfers; settings.className = 'Bookshelf__popover Bookshelf__settings';
+    const settingsSummary = settings.querySelector('summary'); settingsSummary.setAttribute('aria-label','Library settings');
+    settingsSummary.innerHTML = iconSvg('Options', {size:'20px'}) + '<span>Library settings</span>';
+    const settingsContent = element('section','Bookshelf__settings-content'); settingsContent.setAttribute('aria-label','Library settings content');
+    const back = element('button','','← Back to library'); back.type = 'button'; back.onclick = () => { settings.open = false; };
+    settingsContent.append(back,element('h2','','Library settings'));
+    for (const child of [...settings.children]) if (child !== settingsSummary) settingsContent.append(child);
+    settings.append(settingsContent); this.panel.settingsSlot.append(settings);
+    settings.addEventListener('toggle', () => {
+      this.workspace.inert = settings.open;
+      if (settings.open) { add.open = false; back.focus({preventScroll:true}); }
+      else if (this.panel.open) settingsSummary.focus({preventScroll:true});
+    });
+    this.panel.listeners.push(listen(document,'click', event => {
+      if (!add.contains(event.target)) add.open = false;
+      if (!filters.contains(event.target)) filters.open = false;
+    }));
+  }
+
+  updateNavigation(value, collection, count, filterCount) {
+    for (const [key,button] of this.navigationButtons) button.setAttribute('aria-pressed',String(key === value));
+    const title = this.mode.selectedOptions[0]?.textContent || 'Library';
+    this.viewTitle.textContent = collection.value ? collection.selectedOptions[0]?.textContent || title : title;
+    this.count.textContent = `${count} ${count === 1 ? 'item' : 'items'}`;
+    this.filterSummary.textContent = filterCount ? `Filters · ${filterCount}` : 'Filters';
+  }
+
+  updatePresentation() {
+    // CSS handles size changes. The same controls retain query, selection and scroll.
+    if (this.selectedRecord && this.rowViews.has(this.selectedRecord)) {
+      this.elm.dataset.detailOpen = 'true';
+    }
+  }
+
+  showRecord(key, edit = false) {
+    const selected = this.rowViews.get(key);
+    if (!selected) return;
+    const previous = this.selectedRecord && this.rowViews.get(this.selectedRecord);
+    if (previous && previous !== selected) {
+      previous.details.open = false; previous.summary.textContent = '⋯'; previous.row.append(previous.details);
+    }
+    this.selectedRecord = key;
+    for (const [id,view] of this.rowViews) view.row.dataset.selected = String(id === key);
+    const back = document.createElement('button'); back.type = 'button'; back.textContent = '← Back to list';
+    back.onclick = () => this.closeRecord(true);
+    const title = document.createElement('h2'); title.textContent = selected.title;
+    const description = document.createElement('p'); description.textContent = selected.description;
+    const open = document.createElement('button'); open.type = 'button'; open.textContent = 'Open score'; open.className = 'LibraryWindow__primary';
+    open.onclick = selected.open;
+    selected.summary.textContent = 'Edit details'; selected.details.open = edit;
+    this.inspector.replaceChildren(back,title,description,open,selected.details);
+    this.inspector.hidden = false; this.elm.dataset.detailOpen = 'true';
+  }
+
+  closeRecord(focus = false) {
+    const selected = this.selectedRecord && this.rowViews.get(this.selectedRecord);
+    if (selected) {
+      selected.details.open = false; selected.summary.textContent = '⋯'; selected.row.dataset.selected = 'false';
+      selected.row.append(selected.details);
+      if (focus) selected.row.querySelector('button')?.focus({preventScroll:true});
+    }
+    this.selectedRecord = null;
+    this.inspector.hidden = true; this.inspector.replaceChildren(); this.elm.dataset.detailOpen = 'false';
+  }
+
+  dismissLayer() {
+    if (this.transfers.open) { this.transfers.open = false; return true; }
+    if (this.addMenu.open) { this.addMenu.open = false; return true; }
+    if (this.filters.open) { this.filters.open = false; return true; }
+    if (this.selectedRecord) { this.closeRecord(true); return true; }
+    return false;
+  }
+
   select() { this.refresh(); requestAnimationFrame(this.resize); }
 }
 // +skip

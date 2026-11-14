@@ -572,9 +572,9 @@ class Layout {
     // so don't allow the layout code to run:
     if (_menu_.activeRing?.key == "ink" && _menu_.activeRing?.activeCell) return true;
 
-    if (_menu_.activeRing?.key == "page") { // Execute page ring's active cell action
-
-      let pageCell = _menu_.activeRing.activeCell;
+    if (_menu_.activeRing?.key == "page" ||
+        (_menu_.activeRing?.key == "layout" && ['numbers', 'magnify'].includes(_menu_.rings.page.activeCell?.key))) {
+      let pageCell = _menu_.rings.page.activeCell;
       if (!pageCell) return false;
       e.taken = true;
       let pageKey = pageCell.key;

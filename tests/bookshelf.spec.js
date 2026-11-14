@@ -1,3 +1,4 @@
+const { selectLibraryView } = require('./library-ui-helpers');
 const { test, expect } = require('@playwright/test');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -45,14 +46,14 @@ test('imports an owned copy with outline entries, persists across reload, and ex
 test('Library imports through the UI and opens the owned PDF', async ({ page }) => {
   await page.goto('/pod.html');
   await page.waitForFunction(() => !!window._bookshelf_ && !!window._menu_);
-  await page.evaluate(() => _menu_.notify('score/open/up'));
-  await page.getByText('Library', { exact: true }).click();
+  await page.evaluate(() => _menu_.notify('score/library/up'));
   const bytes = await page.evaluate(async () => {
     const pdf = await PDFLib.PDFDocument.create(); pdf.addPage([300, 400]); return [...await pdf.save()];
   });
   await page.getByLabel('Import scores').setInputFiles({ name: 'Owned.pdf', mimeType: 'application/pdf', buffer: Buffer.from(bytes) });
   await page.getByRole('dialog', { name:'Review score import' }).getByRole('button', { name:'Import into library', exact:true }).click();
   await page.getByRole('button', { name: 'Owned.pdf', exact: true }).click();
+  await page.getByRole('button', { name:'Open score', exact:true }).click();
   await expect.poll(() => page.evaluate(() => _score_?.name)).toBe('Owned.pdf');
   expect(await page.evaluate(() => !!_score_.libraryDocumentId)).toBe(true);
 });
@@ -65,8 +66,7 @@ test('single-song PDF without outlines and MSCZ imports appear in Songs', async 
     file.setTitle('PDF internal title'); return [...await file.save()];
   });
   const mscz = zipSync({ 'score.mscx': fs.readFileSync(path.join(__dirname, 'fixtures/font-score.mscx')) });
-  await page.evaluate(() => _menu_.notify('score/open/up'));
-  await page.getByText('Library', { exact: true }).click();
+  await page.evaluate(() => _menu_.notify('score/library/up'));
   await page.getByLabel('Import scores').setInputFiles([
     { name: 'Single.pdf', mimeType: 'application/pdf', buffer: Buffer.from(pdf) },
     { name: 'Single.mscz', mimeType: 'application/octet-stream', buffer: Buffer.from(mscz) },
@@ -75,7 +75,7 @@ test('single-song PDF without outlines and MSCZ imports appear in Songs', async 
   await expect(page.getByRole('dialog', { name:'Review score import' }).getByText('Single.mscz', { exact:true })).toBeVisible();
   await page.getByRole('dialog', { name:'Review score import' }).getByRole('button', { name:'Import into library', exact:true }).click();
   await expect(page.getByRole('button', { name: 'Single.mscz', exact: true })).toBeVisible();
-  await page.getByLabel('Library view').selectOption('entries');
+  await selectLibraryView(page, 'entries');
   await expect(page.getByRole('button', { name: 'PDF internal title', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Shared fonts', exact: true })).toBeVisible();
   expect(await page.evaluate(async () => (await _bookshelf_.call('search')).length)).toBe(2);
@@ -114,8 +114,9 @@ for (const url of ['/pod.html', '/rostrum.html']) test(`remembered folder prompt
     const pdf = await PDFLib.PDFDocument.create(); pdf.addPage([300, 400]);
     return (await _bookshelf_.import(new File([await pdf.save()], 'Remembered.pdf'))).id;
   });
-  await page.reload(); await page.waitForFunction(() => !!window._bookshelf_ && !!window._menu_);
-  await page.evaluate(() => {
+  // Startup opens the library immediately, so permissions must be mocked
+  // before the remembered backend is first queried.
+  await page.addInitScript(() => {
     window.permissionState = 'prompt'; window.permissionRequests = [];
     FileSystemHandle.prototype.queryPermission = async options => {
       if (options.mode !== 'readwrite') throw new Error('Wrong permission mode');
@@ -126,9 +127,8 @@ for (const url of ['/pod.html', '/rostrum.html']) test(`remembered folder prompt
       return permissionState;
     };
     window.showDirectoryPicker = () => { throw new Error('Must use the remembered handle'); };
-    _menu_.notify('score/open/up');
   });
-  await page.getByText('Library', { exact: true }).click();
+  await page.reload(); await page.waitForFunction(() => !!window._bookshelf_ && !!window._menu_);
   const allow = page.getByRole('button', { name: 'Allow library folder access', exact: true });
   await expect(allow).toBeVisible();
   await expect(page.getByText('Access is required for library folder: Remembered scores', { exact: true })).toBeVisible();
@@ -359,23 +359,22 @@ test('collection and song editing UI works on a narrow screen', async ({ page })
     const doc = await _bookshelf_.import(new File([await pdf.save()], 'UI.pdf'));
     return { doc: doc.id, entry: (await _bookshelf_.call('search', {}))[0].id };
   });
-  await page.evaluate(() => _menu_.notify('score/open/up'));
-  await page.getByText('Library', { exact: true }).click();
-  await page.getByLabel('Library view').selectOption('bookshelves');
+  await page.evaluate(() => _menu_.notify('score/library/up'));
+  await selectLibraryView(page, 'bookshelves');
   await expect(page.getByText('Choose or create a collection', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'UI.pdf', exact: true })).toHaveCount(0);
   await page.getByLabel('New collection name').fill('My shelf');
   await page.getByRole('button', { name: 'Create', exact: true }).click();
   await expect(page.getByLabel('Collection', { exact: true }).locator('option', { hasText: 'My shelf' })).toHaveCount(1);
-  await page.getByLabel('Library view').selectOption('documents');
-  await page.getByText('Edit and organize', { exact: true }).click();
+  await selectLibraryView(page, 'documents');
+  await page.getByLabel('Edit and organize', { exact: true }).click();
   const shelf = await page.getByLabel('Add to bookshelf').locator('option', { hasText: 'My shelf' }).getAttribute('value');
   await page.getByLabel('Add to bookshelf').selectOption(shelf);
-  await page.getByLabel('Library view').selectOption('bookshelves');
+  await selectLibraryView(page, 'bookshelves');
   await page.getByLabel('Collection', { exact: true }).selectOption(shelf);
   await expect(page.getByRole('button', { name: 'UI.pdf', exact: true })).toBeVisible();
-  await page.getByLabel('Library view').selectOption('entries');
-  await page.getByText('Edit and organize', { exact: true }).click();
+  await selectLibraryView(page, 'entries');
+  await page.getByLabel('Edit and organize', { exact: true }).click();
   await page.getByLabel('Song title', { exact: true }).fill('Renamed song');
   await page.getByRole('button', { name: 'Rename', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Renamed song', exact: true })).toBeVisible();
@@ -595,10 +594,10 @@ test('backup controls download a complete archive and import it into another lib
   await page.evaluate(async () => {
     const pdf = await PDFLib.PDFDocument.create(); pdf.addPage([300,400]);
     await _bookshelf_.import(new File([await pdf.save()], 'Backup UI.pdf'));
-    _menu_.notify('score/open/up');
+    _menu_.notify('score/library/up');
   });
-  await page.getByText('Library', { exact: true }).click();
-  await page.getByText('Backups and conflicting edits', { exact: true }).click();
+  await page.locator('summary[aria-label="Library settings"]').click();
+  await page.getByText('Backup and restore', { exact: true }).click();
   const downloading = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export library', exact: true }).click();
   const download = await downloading;

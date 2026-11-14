@@ -179,8 +179,12 @@ class Menu {
   busy = false;
   autoOff = new Schedule(4000, () => {
     if(this.busy) this.autoOff.run();
-    else if (["ink","page"].includes(this.activeRing?.key) && !this.activeRing?.activeCell?.locked)
-      this.activateCell(null);
+    else {
+      for (const key of ['ink', 'page']) {
+        const ring = this.rings[key];
+        if (ring.activeCell && !ring.activeCell.locked) this.activateCell(null, ring);
+      }
+    }
   });
 
   toggleLock(cell) {
@@ -243,8 +247,8 @@ class Menu {
       gripRadius: 1.75,
       cellGap: 0.045,
       ringGap: 0.045, // i.e. inner ring cell gap
-      cellIcon: 1.85,
-      fontSize: 0.7,
+      cellIcon: 1.7,
+      fontSize: 0.78,
     };
   }
 
@@ -291,8 +295,6 @@ class Menu {
     // load initial ring(s) and enable first ring
     this.buildRings();
 
-    this.buildMenu();
-
     // Add a "key" key to every cell so that, given a cell,
     // we know immediately what its key is
     for (let [ringKey, ringCell] of Object.entries(this.rings)) {
@@ -303,6 +305,9 @@ class Menu {
         if (cell.stash) cell.stash["name"] = cell.name;
       }
     }
+
+    this.configureNavigation();
+    this.buildMenu();
 
     // set initial cell state
     this.enableCells(["layout", "ink", "ink/paste", "page", "score/close", "score/save", "score/details", "score/print", "page/import"], false);
@@ -399,6 +404,7 @@ class Menu {
 
     // initialize user interaction operation object
     this.op = {
+      active: false,
       state: null,
       ring: this.rings[0],
       turn: 0,
@@ -408,10 +414,19 @@ class Menu {
     this.disk.turn = 0;
 
     listen(elm, "pointerdown", (e) => this.opDown(e));
+    listen(elm, ["pointercancel", "lostpointercapture"], e => {
+      if (e.pointerId === this.op.pointerId &&
+          (e.type === "pointercancel" || !elm.hasPointerCapture(e.pointerId))) this.cancelOperation();
+    });
+    listen(window, "blur", () => this.cancelOperation());
+    listen(document, "visibilitychange", () => { if (document.hidden) this.cancelOperation(); });
 
     // ensure grip remains at least partially on-screen after any window resize
     listen(window, "resize", () => {
-      delay(100, () => { // must delay until after any screen.orientation change, see main.js
+      delayMs(100, () => { // must delay until after any screen.orientation change, see main.js
+        const width = this.menuHolder.offsetWidth;
+        const limit = Math.min(innerWidth, innerHeight) * .9;
+        if (width > limit) this.elm.style.fontSize = parseFloat(getComputedStyle(this.elm).fontSize) / _pxPerEm_ * limit / width + 'em';
         this.elm.style.left = clamp(parseFloat(this.elm.style.left), 0, innerWidth) + "px";
         this.elm.style.top = clamp(parseFloat(this.elm.style.top), 0, innerHeight) + "px";
       });
@@ -423,6 +438,8 @@ class Menu {
     // that compose the menu's rings.
     let rings = this.rings;
 
+    // Logical tool keys are retained for saved score/local settings.
+    // configureNavigation defines their visible navigation independently.
     // Score ring
     rings.score = {
       name: "Score",
@@ -486,7 +503,8 @@ class Menu {
 
     this.listen("score/open/up", async (cell) => {
        this.activateCell(cell);
-       await FileSrc.openActiveScore(cell);
+       panels.library?.close();
+       this.showPanel(cell);
        this.activateCell(null, rings.score);
     });
 
@@ -767,15 +785,7 @@ class Menu {
       }
     });
 
-    this.listen("app/theme/up", (cell) => {
-      let themes = ["Light", "Glass", "Dark"];
-      let theme = cell.stash.theme || "Light";
-      theme = themes[(themes.indexOf(theme) + 1) % themes.length];
-      document.documentElement.setAttribute("data-theme", theme);
-      dataIndex("tag", cell.elm).cellIcon.innerHTML = iconPaths[theme];
-      cell.stash.theme = theme;
-      this.applyGaps(theme);
-    });
+    this.listen("app/theme/up", () => this.showPanel(rings.app.cells.theme));
 
     this.listen("app/wakeLock/up", async (cell) => {
       let cellIcon = dataIndex("tag", rings.app.cells.wakeLock.elm).cellIcon;
@@ -870,13 +880,113 @@ class Menu {
    for (let [ringKey, ring] of Object.entries(this.rings)) {
      for (let [cellKey, cell] of Object.entries(ring.cells)) {
        let path = `${ringKey}/${cellKey}/up`;
-       let panelClass = panels[cell.name + "Panel"];
+       let panelClass = panels[cell.panel || cell.name + "Panel"];
        if (panelClass && !this.listeners[path]) {
          this.listen(path, (cell) => panelClass.get(cell).show().setPosition(this.grip));
        }
      }
    }
 
+  }
+
+  configureNavigation() {
+    // Keep state ownership separate from presentation: page tools must still
+    // participate in page undo, and per-score settings keep their existing keys.
+    const rings = this.rings;
+    const add = (ring, key, name, icon, panel) => {
+      const cell = { key, ring: rings[ring], name, svgPath: iconPaths[icon], panel, stash: {} };
+      rings[ring].cells[key] = cell;
+      return cell;
+    };
+    add('score', 'library', 'Library', 'Score', 'LibraryPanel');
+    add('layout', 'display', 'Display settings', 'Details', 'DisplaySettingsPanel');
+    add('page', 'transfer', 'Between scores', 'Import Page', 'TransferPanel');
+    add('page', 'advanced', 'Advanced', 'Flatten', 'PageAdvancedPanel');
+    add('app', 'navigation', 'Page turning', 'Numbers', 'NavigationPanel');
+    add('app', 'position', 'Position and zoom', 'Full Screen', 'ScreenPanel');
+    // Screen has a fullscreen tap action; position opens only the adjustment panel.
+    rings.more.svgPath = iconPaths['Metronome'];
+    rings.app.svgPath = iconPaths['Options'];
+    rings.app.cells.theme.panel = 'ThemePanel';
+    const labels = {
+      'score/new': 'Blank score', 'score/details': 'Score info',
+      'ink/edit': 'Select / edit', 'ink/rastrum': 'Staff',
+      'page/numbers': 'Go to page', 'page/add': 'Add blank page',
+      'page/cut': 'Cut page', 'page/copy': 'Copy page', 'page/paste': 'Paste page',
+      'page/undo': 'Undo pages', 'page/merge': 'Insert PDF',
+      'page/export': 'Send page to buffer', 'page/import': 'Insert from buffer',
+      'page/flatten': 'Flatten page annotations', 'app/screen': 'Fullscreen',
+      'app/wakeLock': 'Keep screen awake', 'app/storage': 'Data management',
+      'more/review': 'Record audio / video', 'more/keyboard': 'Text keyboard',
+      'more/piano': 'Piano / tuning', 'ink/undo': 'Undo annotations',
+    };
+    for (const [path, label] of Object.entries(labels)) this.getCell(path).label = label;
+    const navigation = {
+      score: ['File', ['score/library', 'score/open', 'score/save', 'score/new', 'score/print', 'score/details', 'score/close']],
+      layout: ['View', ['layout/book', 'layout/horizontal', 'layout/vertical', 'layout/table', 'page/numbers', 'page/magnify', 'app/screen', 'layout/display']],
+      ink: ['Annotate', ['ink/pencil', 'ink/pen', 'ink/rastrum', 'ink/text', 'ink/symbols', 'ink/edit', 'ink/undo']],
+      page: ['Pages', ['page/add', 'page/cut', 'page/copy', 'page/paste', 'page/undo', 'page/merge', 'page/transfer', 'page/advanced']],
+      more: ['Practice', ['score/playback', 'score/transpose', 'more/metronome', 'more/piano', 'more/review', 'more/stopwatch', 'more/clock', 'more/volume']],
+      app: ['Settings', ['app/theme', 'app/navigation', 'more/keyboard', 'app/storage', 'app/guide', 'app/about']],
+    };
+    // Preserve the six disk sectors in the documented order.
+    this.rings = Object.fromEntries(Object.keys(navigation).map(key => [key, rings[key]]));
+    for (const [key, [name, paths]] of Object.entries(navigation)) {
+      const ring = rings[key];
+      ring.name = name;
+      ring.displayCells = paths.map(path => this.getCell(path));
+      for (const cell of ring.displayCells) cell.displayRing = ring;
+    }
+    const show = cell => cell.key === 'library' ? this.showLibrary()
+      : cell.key === 'position' ? this.showPanel(rings.app.cells.screen) : this.showPanel(cell);
+    for (const path of ['score/library', 'layout/display', 'page/transfer', 'page/advanced', 'app/navigation', 'app/position', 'app/theme']) {
+      this.listen(path + '/up', show);
+      this.listen(path + '/out', cell => cell.key === 'position' ? this.openPanel(rings.app.cells.screen) : this.openPanel(cell));
+    }
+    this.listen('ink/edit/up', cell => {
+      this.activateCell(cell.ring.activeCell === cell ? null : cell, cell.ring);
+      this.showPanel(cell);
+    });
+    for (const path of ['page/numbers', 'page/magnify']) {
+      this.listen(path + '/up', cell => {
+        this.activateCell(cell.ring.activeCell === cell ? null : cell, cell.ring);
+        this.showPanel(cell);
+      });
+    }
+  }
+
+  applyTheme(theme) {
+    const cell = this.rings.app.cells.theme;
+    document.documentElement.setAttribute('data-theme', theme);
+    dataIndex('tag', cell.elm).cellIcon.innerHTML = iconPaths[theme];
+    cell.stash.theme = theme;
+    this.applyGaps(theme);
+  }
+
+  getCell(path) {
+    const [ring, key] = path.split('/');
+    return this.rings[ring].cells[key];
+  }
+
+  showPanel(cell) {
+    const panel = panels[cell.panel || cell.name + 'Panel']?.get(cell);
+    if (!panel) return;
+    panel.show();
+    if (cell.key === 'library') return panel;
+    panel.setPosition(this.grip);
+    // The draggable root is zero-sized. Bound the actual panel, independently
+    // of its opening scale animation, when the menu is parked at a screen edge.
+    const halfWidth = panel.panel.offsetWidth / 2;
+    const halfHeight = panel.panel.offsetHeight / 2;
+    panel.elm.style.left = clamp(parseFloat(panel.elm.style.left), halfWidth + 8, innerWidth - halfWidth - 8) + 'px';
+    panel.elm.style.top = clamp(parseFloat(panel.elm.style.top), halfHeight + 8, innerHeight - halfHeight - 8) + 'px';
+    return panel;
+  }
+
+  showLibrary() {
+    // Opening the library must never replace or discard the current score.
+    panels.open?.close();
+    return this.showPanel(this.rings.score.cells.library);
   }
 
   buildMenu() {
@@ -916,7 +1026,7 @@ class Menu {
       // add ringCells for this ring to ring.elm
       {
         let clipPath = "circle(50%)"; // with 0 or 1 cells, nothing to clip
-        let cellEntries = Object.entries(ring.cells);
+        let cellEntries = ring.displayCells.map(cell => [cell.key, cell]);
         let cellKnt = cellEntries.length;
         if (cellKnt >= 2) {
           // Build clipPath for cells..triangular centered on vertical axis
@@ -930,21 +1040,34 @@ class Menu {
         cellEntries.forEach(([cellKey, cell], index) => {
           let rotation = ring.elm.childElementCount / cellKnt;
           cell.elm = helm(`<div data-tag="ringCell" style="width:${ringDiameter}em;height:${ringDiameter}em;clip-path:${clipPath};transform:rotate(${rotation}turn);" class="Menu__cell"
-             data-key="${diskKey + "/" + cellKey}">
+             data-key="${cell.ring.key + "/" + cellKey}">
            <div data-tag="cellContents" class="Menu__cell-contents" style="transform:rotate(${-rotation}turn);">
-             <div data-tag="cellName" style="font-size:${fontSize}em;"><br>${cell.name}</div>
+             <div data-tag="cellName" style="font-size:${fontSize}em;"><br>${cell.label || cell.name}</div>
              ${svgWrap(cell.svgPath, { tag: "cellIcon", class: "cellIcon", size: cellIcon + "em", style: `width:${cellIcon}em;height:${cellIcon}em;` })}
           </div>
         </div>`);
           ring.elm.append(cell.elm);
-          cell.ring = ring;
           // iff the cell is associated with a panel, it will have an "out" listener: add the Menu__cell-panel 
           // class to visually distinguish it.
-          if(this.listeners[`${diskKey}/${cellKey}/out`])
+          if(this.listeners[`${cell.ring.key}/${cellKey}/out`])
             cell.elm.classList.add("Menu__cell-panel");
         }); // forEach((cell)
       }
-    }); // forEach(([key, ring
+    });
+    this.nestedTools = helm('<div hidden></div>');
+    this.elm.append(this.nestedTools);
+    for (const ring of Object.values(this.rings)) for (const cell of Object.values(ring.cells)) {
+      if (cell.elm) continue;
+      cell.elm = helm(`<button type="button" class="Menu__action" data-action="${ring.key}/${cell.key}">
+        ${svgWrap(cell.svgPath, { tag: 'cellIcon', size: '1.5em' })}
+        <span>${cell.label || cell.name}</span></button>`);
+      cell.elm.addEventListener('click', () => {
+        if (cell.key === 'grid') return this.showPanel(cell);
+        if (['ink', 'page'].includes(ring.key)) this.activateRing(ring);
+        this.notify(`${ring.key}/${cell.key}/up`);
+      });
+      this.nestedTools.append(cell.elm);
+    }
   }
 
   applyGaps(theme) {
@@ -966,7 +1089,7 @@ class Menu {
 
     diskEntries.forEach(([, ring]) => {
       ring.cellElm.style.clipPath = diskClipPath;
-      let cellEntries = Object.entries(ring.cells);
+      let cellEntries = ring.displayCells.map(cell => [cell.key, cell]);
       let cellKnt = cellEntries.length;
       let ringClipPath = "circle(50%)";
       if (cellKnt >= 2) {
@@ -993,7 +1116,9 @@ class Menu {
 
   opDown(e) {
     e.taken = true; 
-    if (e.ctrlKey || e.shiftKey) return;
+    if (e.ctrlKey || e.shiftKey || e.button !== 0 || e.isPrimary === false) return;
+    // A second start must not overwrite the only references to old listeners.
+    this.cancelOperation();
     this.elm.style.zIndex = ++_zTop_;
     this.clearSpinFling();
     let op = this.op;
@@ -1007,6 +1132,8 @@ class Menu {
     // Allow user interaction to spin the disk or ring only when pointer is within 20% of edge of disk or ring
 
     Object.assign(op, {
+      active: true,
+      pointerId: e.pointerId,
       cellKey: cellKey,
       completed: false,
       e: e, // initial event
@@ -1080,11 +1207,15 @@ class Menu {
       }
     }
     op.moveListener = listen(this.elm, "pointermove", this.opMove.bind(this));
-    op.upListener = listen(this.elm, "pointerup", this.opUp.bind(this));
+    // Capture at the window so a child swallowing release cannot strand us.
+    op.upListener = listen(window, "pointerup", this.opUp.bind(this), { capture:true });
   }
 
   opMove(emv) {
     let op = this.op;
+    if (!op.active || emv.pointerId !== op.pointerId) return;
+    // A release can be swallowed or lost outside the browser. Hover is never a drag.
+    if (emv.buttons === 0) return this.cancelOperation();
     if (op.completed) return;
     op.emv = emv;
     op.drag.mv(emv);
@@ -1211,20 +1342,34 @@ class Menu {
     this.spinElm = null;
   }
 
-  opUp(eup) {
-    let op = this.op;
-    op.drag.up(eup);
+  cancelOperation() {
+    const op = this.op;
+    if (!op) return;
     op.schedule.cancel();
     unlisten(op.moveListener, op.upListener);
-    op.cell && op.cell.elm.classList.remove("Menu__cell-selected");
-    op.ring && op.ring.cellElm.classList.remove("Menu__diskCell-selected");
+    op.cell?.elm.classList.remove("Menu__cell-selected");
+    op.ring?.cellElm.classList.remove("Menu__diskCell-selected");
     this.grip.classList.remove("Menu__grip-selected");
+    const pointerId = op.pointerId;
+    Object.assign(op, { active:false, completed:true, out:false, spun:false,
+      state:null, cell:null, cellKey:null, ringKey:null, pointerId:null,
+      e:null, emv:null, drag:null, moveListener:null, upListener:null });
+    if (pointerId != null && this.elm.hasPointerCapture(pointerId)) this.elm.releasePointerCapture(pointerId);
+  }
+
+  opUp(eup) {
+    if (!this.op.active || eup.pointerId !== this.op.pointerId) return;
+    // Keep only this release's action data; clear live state before callbacks
+    // open/close panels or dispatch another pointer event.
+    const op = { ...this.op };
+    op.drag.up(eup);
+    this.cancelOperation();
     if (op.spun) { this.spinFling(op, eup); return; }
     if(op.out) {
       // hide with quick fling...but only after at least 500 msecs to a quick drag out
       // gesture won't immediately hide the panel
       if(op.drag.vXY && op.drag.vXY > 0.75 && eup.timeStamp - op.e.timeStamp > 500) {
-        let panel = panels[op.cell.name + "Panel"]?.get(op.cell);
+        let panel = panels[op.cell.panel || op.cell.name + "Panel"]?.get(op.cell);
         if (panel) hide(panel.elm, dataIndex("tag", op.cell.elm).cellIcon);
       }
       return;
@@ -1277,7 +1422,7 @@ class Menu {
     // But: - a disabled ring cell will not be activated.
     //      - only 1 ring cell can be active at a time, so
     //        any previous active ring cell will be deactivated.
-    if (ring.cellElm.classList.contains("Menu__cell-disabled")) return; // ring cell disabled -> ignore
+    if (ring.key !== "layout" && ring.cellElm.classList.contains("Menu__cell-disabled")) return; // ring cell disabled -> ignore
     if (this.activeRing == ring) return; // no change
     // special case: if currently editing a fabric text object, exit text editing
     this.checkEditing();
@@ -1359,15 +1504,26 @@ class Menu {
   }
 
   enableCells(cellPath, enable = true) {
-    // enable/disable a cell or ring cell, as determined by
-    // cellPath string, ex. "score/close".  cellPath can be an array,
-    // ex. ["ink", "score/close"], allowing multiple cells to be disabled/enabled.
-    if (Array.isArray(cellPath)) return cellPath.forEach((path) => this.enableCells(path, enable));
-    let [ringKey, cellKey] = cellPath.split("/");
-    let cell = cellKey ? this.rings[ringKey].cells[cellKey] : this.rings[ringKey];
-    let classList = cellKey ? cell.elm.classList : cell.cellElm.classList;
-    enable ? classList.remove("Menu__cell-disabled") : classList.add("Menu__cell-disabled");
-    cell.enabled = enable;
+    if (Array.isArray(cellPath)) return cellPath.forEach(path => this.enableCells(path, enable));
+    const [ringKey, cellKey] = cellPath.split('/');
+    const ring = this.rings[ringKey];
+    if (cellKey) {
+      const cell = ring.cells[cellKey];
+      cell.enabled = enable;
+      this.syncCellState(cell);
+    } else {
+      ring.enabled = enable;
+      // View remains usable without a document (fullscreen and screen settings).
+      ring.cellElm.classList.toggle('Menu__cell-disabled', !enable && ringKey !== 'layout');
+      for (const cell of Object.values(ring.cells)) this.syncCellState(cell);
+    }
+  }
+
+  syncCellState(cell) {
+    const requiresScore = ['ink', 'page', 'layout'].includes(cell.ring.key) && cell.key !== 'display';
+    const enabled = cell.enabled !== false && (!requiresScore || cell.ring.enabled !== false);
+    cell.elm.classList.toggle('Menu__cell-disabled', !enabled);
+    if (cell.elm.tagName === 'BUTTON') cell.elm.disabled = !enabled;
   }
 
   closePanels(except = ["app", "more"]) {
@@ -1400,16 +1556,19 @@ class Menu {
       if (cellKey) cell = cell.cells[cellKey];
       let elm = cell?.elm || cell?.cellElm;
       // ignore if disabled
+      if (cellKey && ['ink', 'page'].includes(ringKey) && this.rings[ringKey].enabled === false) return;
       if (elm?.classList.contains("Menu__cell-disabled")) return;
-      this.listeners[path](cell);
+      return this.listeners[path](cell);
     }
   }
 
   openPanel(cell) {
+    if (!this.op.active) return this.showPanel(cell);
+    if (cell.key === 'library') return this.showLibrary();
     // Called continuously from opMove when user is dragging out from a cell.
     // Opens (if not on-screen) the panel associated with @cell, iff it has one...,
     // then moves ths panel's header to pointer location (this.op.e)
-    let panel = panels[cell.name + "Panel"]?.get(cell);
+    let panel = panels[cell.panel || cell.name + "Panel"]?.get(cell);
     if (!panel) return;
     if (!panel.elm.isConnected) {
       panel.elm.style.visibility = "hidden"; // prevent flash at default top:0 before positioning
@@ -1570,7 +1729,7 @@ class Menu {
         let rotation = index / ringKnt;
         ring.cellElm.style.transform = `rotate(${rotation}turn)`;
         ring.cellElm.firstElementChild.style.transform = `rotate(${1 - rotation}turn)`;
-        let cellEntries = Object.entries(ring.cells);
+        let cellEntries = ring.displayCells.map(cell => [cell.key, cell]);
         let cellKnt = cellEntries.length;
         animate(ring.elm, null, { transform: "rotate(0turn)" }, `${_gs_}ms`);
         cellEntries.forEach(([cellKey, cell], index) => {

@@ -1,3 +1,4 @@
+const { selectLibraryView } = require('./library-ui-helpers');
 const { test, expect } = require('@playwright/test');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -19,8 +20,7 @@ const review = page => page.getByRole('dialog', { name:'Review score import' });
 async function start(page, url = '/pod.html') {
   await page.goto(url); await page.waitForFunction(() => !!window._bookshelf_ && !!window._menu_);
   if (url.startsWith('file:')) await page.evaluate(() => _bookshelf_.configure({ kind:'indexeddb' }));
-  await page.evaluate(() => _menu_.notify('score/open/up'));
-  await page.getByText('Library', { exact:true }).click();
+  await page.evaluate(() => _menu_.notify('score/library/up'));
 }
 async function pdfBytes(page, outline = false) {
   return Buffer.from(await page.evaluate(async outline => {
@@ -73,8 +73,9 @@ for (const url of ['/pod.html', '/rostrum.html', pathToFileURL(path.resolve('bui
   await dlg.getByRole('button', { name:'Import into library', exact:true }).click();
   await expect(dlg).toHaveCount(0);
   await expect(page.getByRole('button', { name:'My edited score', exact:true })).toBeVisible();
-  await page.getByLabel('Library view').selectOption('entries');
+  await selectLibraryView(page, 'entries');
   await page.getByRole('button', { name:'Single', exact:true }).click();
+  await page.getByRole('button', { name:'Open score', exact:true }).click();
   await expect.poll(() => page.evaluate(() => Number(window._score_?.numbers.pn))).toBe(2);
   const result = await page.evaluate(async () => {
     const row = (await _bookshelf_.call('search'))[0];
@@ -114,8 +115,7 @@ test('outline choices, hierarchy and added songs survive reindex without modifyi
 test('MSCZ review previews, cancels safely, and can edit the single song using its filename', async ({ page }) => {
   await page.goto('/pod.html'); await page.waitForFunction(() => !!window._Score_ && !!window._menu_);
   await page.evaluate(async () => { await _Score_.newScore(1,300,400,'#ffffff'); window.originalScore = _score_; });
-  await page.evaluate(() => _menu_.notify('score/open/up'));
-  await page.getByText('Library', { exact:true }).click();
+  await page.evaluate(() => _menu_.notify('score/library/up'));
   const bytes = Buffer.from(zipSync({ 'score.mscx':fs.readFileSync(path.join(__dirname,'fixtures/font-score.mscx')) }));
   await choose(page,bytes,'My music.mscz');
   await expect(review(page).getByLabel('Song title', { exact:true })).toHaveValue('Shared fonts');
@@ -172,25 +172,26 @@ test('a failed commit preserves the draft for retry and Escape cancels the next 
 test('current-score imports and replacements both require confirmation', async ({ page }) => {
   await page.goto('/pod.html'); await page.waitForFunction(() => !!window._Score_ && !!window._menu_);
   await page.evaluate(async () => { await _Score_.newScore(1,300,400,'#ffffff'); });
-  await page.evaluate(() => _menu_.notify('score/open/up'));
-  await page.getByText('Library', { exact:true }).click();
+  await page.evaluate(() => _menu_.notify('score/library/up'));
+  await page.getByLabel('Add scores', { exact:true }).click();
   await page.getByRole('button', { name:'Import current score', exact:true }).click();
   await expect(review(page)).toBeVisible();
   await review(page).getByRole('button', { name:'Cancel import' }).click(); await expect(review(page)).toHaveCount(0);
   expect(await page.evaluate(async () => (await _bookshelf_.call('list')).length)).toBe(0);
+  await page.getByLabel('Add scores', { exact:true }).click();
   await page.getByRole('button', { name:'Import current score', exact:true }).click();
   await review(page).getByLabel('Library score name').fill('Imported current');
   await review(page).getByRole('button', { name:'Import into library', exact:true }).click(); await expect(review(page)).toHaveCount(0);
   await expect(page.getByRole('button', { name:'Imported current', exact:true })).toBeVisible();
   const oldId = await page.evaluate(async () => (await _bookshelf_.call('list'))[0].id);
-  await page.getByText('Edit and organize', { exact:true }).click();
+  await page.getByLabel('Edit and organize', { exact:true }).click();
   const replacement = { name:'Replacement.pdf', mimeType:'application/pdf', buffer:await pdfBytes(page) };
   await page.getByLabel('Replace score file').setInputFiles(replacement);
   await expect(review(page)).toBeVisible();
   await review(page).getByRole('button', { name:'Cancel import' }).click(); await expect(review(page)).toHaveCount(0);
   expect(await page.evaluate(async id => (await _bookshelf_.call('read', { id })).document.replaced_by_id,oldId)).toBeNull();
   // The same file can be chosen again after cancel, using a freshly rendered row.
-  await page.getByText('Edit and organize', { exact:true }).click();
+  await page.getByLabel('Edit and organize', { exact:true }).click();
   await page.getByLabel('Replace score file').setInputFiles(replacement);
   await review(page).getByLabel('Song title', { exact:true }).fill('Replacement song');
   await review(page).getByRole('button', { name:'Import into library', exact:true }).click(); await expect(review(page)).toHaveCount(0);

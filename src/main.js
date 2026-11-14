@@ -37,6 +37,7 @@ import "./music.js";
 import { ScreenPanel } from "./panel.js";
 import { initFabric } from "./canvas.js";
 import { SharedBuffer } from "./sharedBuffer.js";
+import "./appearance.js";
 
 window.pdfjsLib.GlobalWorkerOptions.workerPort = new Worker("pdf.worker.min.mjs", { type: "module" });
 // -skip
@@ -70,6 +71,7 @@ window.pdfjsLib.GlobalWorkerOptions.workerPort = new Worker("pdf.worker.min.mjs"
 // #include src/yin.js minified
 // #include src/tool.js minified
 // #include src/sharedBuffer.js minified
+// #include src/appearance.js minified
 
 /**
     class Gestures implements global pan/zoom (pz) operations:
@@ -113,6 +115,7 @@ class Gestures {
   }
 
   onWheel(e) {
+    if (e.target.closest?.('.LibraryWindow')) return;
     e.preventDefault();
     if (!e.ctrlKey) return;
     let dXY = -Math.sign(e.deltaY) / 100;
@@ -124,6 +127,7 @@ class Gestures {
   }
 
   onDown(e) {
+    if (e.target.closest?.('.LibraryWindow')) return;
     // Swallow a touch on anything flying (see numb() in common.js). This listener is
     // capture-phase on _body_, so it runs ahead of every other pointerdown handler.
     if (numbed(e.target)) { e.preventDefault(); e.stopImmediatePropagation(); return; }
@@ -326,8 +330,9 @@ async function main() {
   schedule(500, async () => {
     window._menu_ = new Menu();
     // on mobile, the menu opens bigger to fill more of the screen
-    let dim = (Math.min(innerWidth, innerHeight) / _menu_.menuHolder.offsetWidth) *
-         (_mobile_ ? _gs_/1000 : _gsgs_/1000) ;
+    const narrow = Math.min(innerWidth, innerHeight);
+    const diameter = Math.min(narrow * .9, Math.max(320, narrow * (_mobile_ ? .72 : .5)));
+    let dim = diameter / _menu_.menuHolder.offsetWidth;
     numb(_menu_.elm, 1000000 / _gs_);
     animate(_menu_.elm, { left: innerWidth/2+"px", top: innerHeight/2+"px", fontSize: 0 },
        { fontSize: dim + "em" }, `font-size ${1000000 / _gs_}ms`);
@@ -340,6 +345,10 @@ async function main() {
         new URLSearchParams(location.search).has("url")) {
       let { loadPdfFromUrl } = await import("./ext.js");
       await loadPdfFromUrl();
+    }
+    if (!_score_) {
+      _menu_.showLibrary();
+      _menu_.park();
     }
   }) ;
 
