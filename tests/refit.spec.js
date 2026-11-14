@@ -20,9 +20,20 @@ const GS = 618;
 test.use({ hasTouch: true });
 
 test.beforeEach(async ({ page }) => {
+  page.external = [];
+  await page.route('**/*', route => {
+    const url = new URL(route.request().url());
+    if (url.origin === 'http://127.0.0.1:9876' || ['data:','blob:'].includes(url.protocol)) return route.continue();
+    page.external.push(url.href); return route.abort();
+  });
   await page.goto("/rostrum.html");
   await page.waitForFunction(() => !!window._menu_?.rings?.layout?.cells?.vertical);
+  // Wait for startup storage restoration and its library workspace before
+  // mounting a gesture fixture; the workspace would otherwise cover the fixture.
+  await expect(page.locator('.LibraryWindow')).toBeVisible();
+  await page.evaluate(() => _panels_.library.close());
 });
+test.afterEach(async ({ page }) => expect(page.external).toEqual([]));
 
 // Stand a .pz element where a layout's would be and let Layout.activeLayout
 // point at it, so the gesture code sees what it would see with a score open.

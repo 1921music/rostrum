@@ -25,6 +25,7 @@ import { Grid } from "./canvas.js";
 import { Layout } from "./layout.js";
 import { MusicDocument, isMusicScore, ROSTRUM_SVG_NS } from "./music.js";
 import { Panel, panels, EditPanel } from "./panel.js";
+import { sharedViewSettings } from "./view-state.js";
 export { Grid, Pg, Score };
 
 // -skip
@@ -1364,11 +1365,16 @@ class Score {
   }
 
   async init(source, path, name, pdfData=null, activate=true, libraryState=null) {
+    const view = activate ? window._viewState_ : null;
+    await view?.beginLoad();
     try {
       return await this.initAux(source, path, name, pdfData, activate, libraryState);
     } catch(error) {
       await this.dispose();
+      view?.apply();
       throw error;
+    } finally {
+      view?.endLoad();
     }
   }
 
@@ -1801,41 +1807,48 @@ class Score {
   }
 
   async activate() {
-    // There can be only 1 "active" score at a time...call activate to make this
-    // instance the active score
-    if(this.disposePromise) throw new Error("Cannot activate a disposed score");
-    if(Score.activeScore && Score.activeScore !== this)
-      await Score.activeScore.dispose();
-    Score.activeScore = this;
-    _score_ = this;
-    this.numbers = _menu_.rings.page.cells.numbers.stash;
-    this.details = _menu_.rings.score.cells.details.stash;
-    this.setTitle();
-    // update the _menu_ state for this Score instance:
-    _menu_.enableCells(["ink", "page", "layout", "score/save", "score/close", "score/details", "score/print"]);
-    _menu_.enableCells("ink/undo", false); // nothing to undo yet
-    _menu_.closePanels();
-    document.dispatchEvent(new CustomEvent("scoreOpened"));
-    _menu_.enableCells("page/undo", this.undoStack.length > 0);
-    // clear any pg from paste cell...could be left over from previous score, if any
-    _menu_.rings.page.cells.paste.pg = null ;
-    _menu_.enableCells("page/paste", false);
-    this.updateMusicMenu();
-    this.pgRefresh();
-    // Sync quality to stash so InfoPanel slider shows correct value
-    _menu_.rings.score.cells.details.stash.quality = this.quality;
-    panels.DetailsPanel.get(_menu_.rings.score.cells.details).refresh();
-    // layout the score using current active layout, defaulting to book layout
-    _menu_.reset();
-    // temporarily activate the layout ring
-    _menu_.activateRing(_menu_.rings.layout);
-    let layoutKey = _menu_.rings.layout.stash.active || "book" ;
-    let cell = _menu_.rings.layout.cells[layoutKey];
-    _menu_.activateCell(cell);
-    // restore the score ring
-    _menu_.activateRing(_menu_.rings.score) ;
-    await Layout.open(cell);
-    return this;
+    const view = window._viewState_;
+    await view?.ready;
+    if (view) view.loading++;
+    try {
+      // There can be only 1 "active" score at a time...call activate to make this
+      // instance the active score
+      if(this.disposePromise) throw new Error("Cannot activate a disposed score");
+      if(Score.activeScore && Score.activeScore !== this)
+        await Score.activeScore.dispose();
+      Score.activeScore = this;
+      _score_ = this;
+      view?.apply(this);
+      this.numbers = _menu_.rings.page.cells.numbers.stash;
+      this.details = _menu_.rings.score.cells.details.stash;
+      this.setTitle();
+      // update the _menu_ state for this Score instance:
+      _menu_.enableCells(["ink", "page", "layout", "score/save", "score/close", "score/details", "score/print"]);
+      _menu_.enableCells("ink/undo", false); // nothing to undo yet
+      _menu_.closePanels();
+      document.dispatchEvent(new CustomEvent("scoreOpened"));
+      _menu_.enableCells("page/undo", this.undoStack.length > 0);
+      // clear any pg from paste cell...could be left over from previous score, if any
+      _menu_.rings.page.cells.paste.pg = null ;
+      _menu_.enableCells("page/paste", false);
+      this.updateMusicMenu();
+      this.pgRefresh();
+      // Sync quality to stash so InfoPanel slider shows correct value
+      _menu_.rings.score.cells.details.stash.quality = this.quality;
+      panels.DetailsPanel.get(_menu_.rings.score.cells.details).refresh();
+      // layout the score using current active layout, defaulting to book layout
+      _menu_.reset();
+      // temporarily activate the layout ring
+      _menu_.activateRing(_menu_.rings.layout);
+      let layoutKey = _menu_.rings.layout.stash.active || "book" ;
+      let cell = _menu_.rings.layout.cells[layoutKey];
+      _menu_.activateCell(cell);
+      // restore the score ring
+      _menu_.activateRing(_menu_.rings.score) ;
+      await Layout.open(cell);
+      view?.restoreMenu();
+      return this;
+    } finally { view?.endLoad(); }
   }
 
   updateMusicMenu() {
@@ -2130,8 +2143,8 @@ class Score {
       const hex = [...bytes.slice(0,16)].map(byte => byte.toString(16).padStart(2,'0')).join('');
       return identities[key] = `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
     };
-    const settings = { version: 1, quality: this.quality,
-      menu: JSON.parse(JSON.stringify(_menu_.stashToJsonObj('score'))) };
+    const settings = { version: 1,
+      menu: sharedViewSettings(_menu_.stashToJsonObj('score')) };
     if (this.music) {
       const records = await this.musicRecords({ preserveSelection: true });
       settings.music = { version: 1, transpose: this.music.transpose,

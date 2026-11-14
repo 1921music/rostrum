@@ -108,7 +108,7 @@ class Select {
     .Select__sash {
       color:black;
       text-align:left;
-      background:white;
+      background:var(--panel-bg);
       font-family:Bravura;
       position:absolute;
     }
@@ -208,7 +208,7 @@ class Select {
           if(!target) return closeFrame() ;
           if(this.target) this.target.style.background = "none" ;
           this.target = target ;
-          this.target.style.background = "#aaa" ;
+          this.target.style.background = "var(--ui-selected)" ;
           closeFrame();
           return selectOption(target.dataset.option) ;
         }
@@ -255,7 +255,7 @@ class Select {
             sashTop = frame.offsetHeight/2 - sash.offsetHeight * (lineNumber / options.length) ;
             if(this.target) this.target.style.background = "none" ;
             this.target = sash.children[lineNumber-1] ;
-            this.target.style.background = "#aaa" ;
+            this.target.style.background = "var(--ui-selected)" ;
           }
           else if (e.key != "Backspace" && e.key != "Delete") keyBuf = keyBuf.slice(0,-1) ;
       }
@@ -280,7 +280,7 @@ class Select {
         sash.style.top = clamp(frame.offsetHeight/2 - sash.offsetHeight * (lineNumber / options.length), frame.offsetHeight - sash.offsetHeight, 0) + "px" ;
         if(this.target) this.target.style.background = "none" ;
         this.target = sash.children[lineNumber-1] ;
-        this.target.style.background = "#aaa" ;
+        this.target.style.background = "var(--ui-selected)" ;
       }
     }
 
@@ -296,7 +296,7 @@ class Select {
     this.toggle.translate = this.translatable(option);
     if (this.target) this.target.style.background = "none";
     this.target = elm;
-    elm.style.background = "#aaa";
+    elm.style.background = "var(--ui-selected)";
   }
 }
 
@@ -313,7 +313,9 @@ class Panel
 
 class Panel {
   static get(cell) {
-    return panels[cell.key] || (panels[cell.key] = new this(cell));
+    const panel = panels[cell.key];
+    if (panel?.closing) panel.finishClose();
+    return panel && !panel.closing ? panel : (panels[cell.key] = new this(cell));
   }
 
   // The ink tools whose objects carry the settings they were made with, as
@@ -453,12 +455,9 @@ class Panel {
           ${iconSvg("Close", { tag: "icon", class: "Panel__icon" })}
           <div class="Panel__title" data-tag="title">
           </div>
-          ${iconSvg("Close Panel", {
-            tag: "closer",
-            class: "Panel__closer",
-            viewBox: "-16 -12 48 48",
-            style: "width:3em;height:3em;",
-          })}
+          <button type="button" data-tag="closer" class="Panel__closer">
+            ${iconSvg("Close Panel", { size:"1.35em" })}
+          </button>
         </div>
         <div data-tag="body" class="Panel__body">
         </div>
@@ -471,12 +470,14 @@ class Panel {
 
   constructor(cell) {
     Object.assign(this, dataIndex("tag", this.elm));
-    this.elm.style.fontSize = _menu_.elm.style.fontSize; // open at same zoom level as menu
+    this.elm.style.fontSize = 15 / _pxPerEm_ + "em"; // readable UI size, independent of the circular menu
     this.cell = cell;
     this.elm.dataset.tag = this.constructor.name;
     this.elm.panel = this;
     this.setIcon(cell.svgPath);
-    this.setTitle(cell.name);
+    this.setTitle(cell.label || cell.name);
+    this.closer.setAttribute("aria-label", "Close " + (cell.label || cell.name));
+    this.listeners.push(listen(this.closer, "click", e => { if (e.detail === 0) this.close(); }));
     // All panel content owns its presses, including plain text and empty space.
     // Gestures.watch checks this flag after the hold delay. Do not stop event
     // propagation: controls, header dragging and detached surfaces still need it.
@@ -549,16 +550,26 @@ class Panel {
   close() {
     // When a panel is closed, its first hidden, then, removed from
     // the dom, and its singleton is deleted.
+    _menu_.cancelOperation();
+    if (this.closing) return;
+    this.closing = true;
     this.hide();
     if (this.elm.dataset.tag != "ScreenPanel" && ScreenPanel.pzTarget == this.elm) ScreenPanel.update(null) ;
-    schedule(510, () => {
-      this.elm.remove();
-      this.destructor();
-      delete panels[this.cell.key];
-    });
+    schedule(510, () => this.finishClose());
+  }
+
+  finishClose() {
+    if (this.closed) return;
+    this.closed = true;
+    this.elm.remove();
+    this.destructor();
+    if (panels[this.cell.key] === this) delete panels[this.cell.key];
   }
 
   destructor() {
+    for (const action of this.elm.querySelectorAll('.Menu__action[data-action]')) {
+      _menu_.nestedTools.append(action);
+    }
     // Called just before singleton is deleted: close/clean up any "resources"
     // the panel may be holding on to.
     unlisten(...this.listeners);
@@ -604,7 +615,7 @@ class Panel {
     ScreenPanel.update(this.elm) ;
     let elm = this.elm;
     this.setIcon(this.cell.svgPath);
-    this.setTitle(this.cell.name);
+    this.setTitle(this.cell.label || this.cell.name);
     elm.style.visibility = "visible";
     if (!elm.isConnected) _body_.append(elm);
     let dy = this.header.offsetHeight / 2 - this.panel.offsetHeight / 2;
@@ -619,7 +630,7 @@ class Panel {
     let clazz = this.constructor.name ;
     if (this != _panels_.screen && clazz != "ScreenPanel") {
       _lastTarget_ = elm;
-      _panels_.screen?.surface.update();
+      _panels_.screen?.refreshTargets();
     }
     if(clazz != "CurtainPanel") elm.style.zIndex = ++_zTop_;
     return this;
@@ -912,63 +923,6 @@ class DetailsPanel extends Panel {
 
     this.body.replaceWith(this.content);
 
-    this.fitGroup = new ButtonGroup(
-      this.cell.stash, {
-        Expand: { svg: "Expand", radio: "pgFit" },
-        Center: { svg: "Center", radio: "pgFit" }, 
-      },
-      async (e,tag,value) => {
-         let score = _score_;
-         if (!score) return; // (the panel can stay open after its score was closed)
-         score.details.pgFit = value;
-         // Re-open the current layout to apply the new fit. Use the canonical
-         // stash.active key (always valid, kept current by Layout.open) — the
-         // layout ring's activeCell object is not reliably maintained and can
-         // be null/stale (cf. score.js score-load path).
-         let layout = _menu_.rings.layout;
-         await Layout.open(layout.cells[layout.stash.active || "book"]);
-      }
-    );
-    
-    this.qualityGroup = new SliderGroup(
-      this.cell.stash,
-      {
-        quality: {
-          min: 0.5,
-          max: 6,
-          step: 0.1,
-          value: 2,
-          throttle: 750,
-          msg: () => {
-            let q = cell.stash.quality;
-            let desc =
-              q < 1.1
-                ? "Low"
-                : q < 2.1
-                ? "Medium"
-                : q < 3.1
-                ? "High"
-                : q < 4.1
-                ? "Very High"
-                : "Extreme";
-            return "Display Quality: " + desc + ` (${parseInt(q * 100)}%)`;
-          },
-        },
-      },
-      async (e, tag, value) => {
-        let score = _score_;
-        if (score) {
-          score.quality = value;
-          for (let pg of score.pgs)
-            // rerender un-rendered pg's iff they are backed by pdf:
-            if (pg.inflated && pg.mozPn) await pg.renderPdf().catch(err => {
-              // AbortError: pg was deflated meanwhile (e.g. the layout was rebuilt)
-              if (err.name != "AbortError") console.warn(`Failed to render page ${pg.mozPn}:`, err);
-            });
-        }
-      }
-    );
-
     this.refresh();
   }
 
@@ -993,13 +947,12 @@ class DetailsPanel extends Panel {
   }
 
   refresh() {
-    this.qualityGroup.refresh();
     clearChildren(this.content);
     if (_score_) {
       let score = _score_;
 
       let nameInput = helm(
-        `<input type="text" style="font-size:1.5em;text-align:center;margin-bottom:.5em;width:100%;box-sizing:border-box;border:none;border-radius:var(--borderRadius);background:white;">`
+        `<input type="text" style="font-size:1.5em;text-align:center;margin-bottom:.5em;width:100%;box-sizing:border-box;border:none;border-radius:var(--borderRadius);background:var(--panel-bg);">`
       );
       nameInput.value = score.name.replace(/\.(pdf|mscz|mxl|musicxml|xml)$/i, "");
       listen(nameInput, "change", () => {
@@ -1058,9 +1011,6 @@ class DetailsPanel extends Panel {
           </div>`)
       );
 
-      this.content.append(helm(`<div style="text-align:center;"><br>Page Fit</div>`));
-      this.content.append(this.fitGroup.elm);
-      this.content.append(this.qualityGroup.elm);
 
       if (score.pdfInfo) {
         this.content.append(
@@ -1109,7 +1059,7 @@ class FilePanel extends Panel {
       width: "90vw",
       maxWidth: "30em",
       height: "90vh",
-      maxHeight: "30em",
+      maxHeight: "min(30em, calc(100dvh - 4em))",
     });
     // overflow:hidden doesn't prevent programmatic scrollTop changes — browser extensions
     // (e.g. password managers) can cause Panel__elm to scroll by injecting/removing elements
@@ -1137,7 +1087,7 @@ class OpenPanel extends FilePanel {
     let fileSources = Object.entries(Score.sources)
       .filter(([key]) => key !== "url")
       .map(([, value]) => value);
-    this.tabView = new TabView(this, "Recent", ...(this.constructor === OpenPanel ? ['Library'] : []), ...fileSources);
+    this.tabView = new TabView(this, "Recent", ...fileSources);
     this.body.append(this.tabView.elm);
     for (let title in this.tabView.tabs) {
       let tab = this.tabView.tabs[title];
@@ -1145,7 +1095,6 @@ class OpenPanel extends FilePanel {
         if (!tab.view) {
           try {
             if (title == "Recent") tab.view = new FileListView(this);
-            else if (title == "Library") tab.view = new BookshelfView(this);
             else if (title == "Local") tab.view = new LocalFileView(this);
             else
               tab.view = new FileSystemView(
@@ -1876,11 +1825,11 @@ class StoragePanel extends Panel {
     let content = helm(`
       <div style="text-align:center;">
         <div style="margin-bottom:1.5em;">
-          <div style="font-size:1.2em;margin-bottom:0.5em;">Factory Reset</div>
+          <div style="font-size:1.2em;margin-bottom:0.5em;">Reset and clear</div>
           <div data-tag="buttons"></div>
         </div>
         <div>
-          <div style="font-size:1.2em;margin-bottom:0.5em;">Storage</div>
+          <div style="font-size:1.2em;margin-bottom:0.5em;">Storage usage</div>
           <div data-tag="stats" style="display:grid;grid-template-columns:auto auto;font-size:.8em;text-align:left;width:fit-content;margin:0 auto;"></div>
           <div data-tag="refresh" style="margin-top:0.5em;"></div>
         </div>
@@ -1893,8 +1842,11 @@ class StoragePanel extends Panel {
     buttons.replaceWith(
       new ButtonGroup(
         cell,
-        { Menu: { svg: "Menu" }, Recent: { svg: "Score" }, Import: { svg: "Import Page" }, Reload: { svg: "Reload" } },
+        { 'Reset menu settings': { svg:'Menu' }, 'Clear recent files': { svg:'Score' },
+          'Clear shared page buffer': { svg:'Import Page' }, 'Reload app': { svg:'Reload' } },
         async (e, prop, tag) => {
+          tag = { 'Reset menu settings':'Menu', 'Clear recent files':'Recent',
+            'Clear shared page buffer':'Import', 'Reload app':'Reload' }[tag];
           if (tag == "Menu") {
             dialog("Reset all menu settings to defaults? Open panels will be closed.",
               { Reset: { svg: "Menu" }, Cancel: { svg: "Cancel" } },
@@ -1917,7 +1869,7 @@ class StoragePanel extends Panel {
             toast("Import buffer cleared");
           } else if (tag == "Reload") {
             let url = `${location.origin}${location.pathname}`;
-            dialog(`Confirm: restart Rostrum?<br><span style="font-size:0.8em;color:#333">(${escapeHtml(url)})</span><br>Any unsaved changes will be lost`,
+            dialog(`Confirm: restart Rostrum?<br><span style="font-size:0.8em;color:var(--color-text-secondary)">(${escapeHtml(url)})</span><br>Any unsaved changes will be lost`,
               { Restart: { svg: "Reload" }, Cancel: { svg: "Cancel" } },
               (e, prop, tag, args) => {
                 args.close();
@@ -1946,6 +1898,14 @@ class StoragePanel extends Panel {
     this.listeners.push(listen(document, "scoreOpened", () => this.updateStats()));
     this.listeners.push(listen(document, "scoreClosed", () => this.updateStats()));
 
+    // Keep storage information first, with explicit maintenance actions below.
+    content.append(content.firstElementChild);
+    for (const group of content.querySelectorAll('.ButtonGroup')) {
+      group.style.cssText = 'flex-wrap:wrap;gap:.5em;';
+    }
+    for (const action of content.querySelectorAll('.ButtonGroup__button')) {
+      action.style.cssText = 'width:auto;height:auto;min-height:3em;padding:.5em;white-space:normal;';
+    }
     this.statsElm = stats;
     this.body.append(content);
   }
@@ -2122,18 +2082,7 @@ class NumbersPanel extends Panel {
   content = helm(`
      <div data-tag="body" style="width:15em;" class="Panel__body">
        <div data-tag="sliders"></div>
-       <div style="font-size: var(--font-size-sm); margin-top: calc(var(--spacing-md) + 1em); margin-bottom: 0.1em">Foot Pedal Keys</div>
-       <div style="margin: 0 var(--spacing-md)">
-         <div style="display: flex; align-items: center; gap: 0.5em; margin-bottom: 0.5em">
-           <div style="min-width: 4em; text-align: left; font-size: 0.9em">Next (\u21e8/\u21e9):</div>
-           <div data-tag="forward" style="flex: 1"></div>
-         </div>
-         <div style="display: flex; align-items: center; gap: 0.5em">
-           <div style="min-width: 4em; text-align: left; font-size: 0.9em">Prev (\u21e6/\u21e7):</div>
-           <div data-tag="reverse" style="flex: 1"></div>
-         </div>
-       </div>
-     </div>
+      </div>
    `);
 
   constructor(cell) {
@@ -2165,24 +2114,6 @@ class NumbersPanel extends Panel {
     );
 
     this.sliders.replaceWith(this.pnSliderGroup.elm);
-
-    this.forwardGroup = new ButtonGroup(
-      score.numbers,
-      { Pages: { svg: "Page", radio: "forward" },
-        Marks: { svg: "Mark", radio: "forward" },
-      },
-      () => {},
-    );
-    this.forward.replaceWith(this.forwardGroup.elm);
-
-    this.reverseGroup = new ButtonGroup(
-      score.numbers,
-      { Pages: { svg: "Page", radio: "reverse" },
-        Marks: { svg: "Mark", radio: "reverse" },
-      },
-      () => {},
-    );
-    this.reverse.replaceWith(this.reverseGroup.elm);
 
     this.listeners.push(listen(_body_, "NUMBERS", (e) => {
       if (e.detail.sender === this) return;
@@ -2786,8 +2717,7 @@ class Pzr extends Surface {
   }
 
   getTargets() 
-  { // For class Pzr, always 0 or 1 targets, but for subclass Pz there can be
-    // many, so for "regularity", this.targets is always an array.
+  { // Object editing has at most one target (possibly an active selection).
     let obj = EditPanel.pzrTarget ;
     if (obj) {
       this.targets[0] = [obj, {
@@ -2805,112 +2735,6 @@ class Pzr extends Surface {
     return false ;
   }
 }
-
-class Pz extends Pzr {
-
-  slots = [2,10,11,13,14,16,18,22] ;
-
-  constructor(panel) {
-    super(panel, ScreenPanel);
-    // modify the grid, replacing the central icon and removing clockwise and counter-clockwise svg's
-    this.cw.remove() ;
-    this.ccw.remove() ;
-    this.cutBtn.remove() ;
-    this.update();
-  }
-
-  update() {
-    let getIconPath = () => {
-      let tag = ScreenPanel.pzTarget?.dataset?.tag ;
-      switch(tag) {
-        case "BookLayout":
-        case "ScrollLayout":
-        case "TableLayout": return iconPaths["Layout"] ;
-        case "Menu": return iconPaths["Menu"] ;
-        case "Body": return iconPaths["Void"] ;
-        default: {
-          let key = tag[0].toLowerCase() + tag.slice(1).replace("Panel", "");
-          return _panels_[key]?.cell?.svgPath ?? null ;
-        }
-      }
-    }
-    let tmp = helm(`<svg viewBox="0 0 24 24" width="1.6em" height="1.6em"
-      style="grid-column:3;grid-row:3;pointer-events:none;stroke:none;fill:currentColor;">
-      ${getIconPath()}</svg>`) ;
-    this.iconSvg.replaceWith(tmp) ;
-    this.iconSvg = tmp ;
-  }
-
-
-  doStep(pos) {
-    let elapsed = performance.now() - this.opStartTime;
-    let targets = this.targets;
-
-
-    // prev/next
-    let step = 1 ;
-    switch(pos) {
-      case(16): step = -1 ;
-      case(18):
-        let target = targets.find(([elm, size, box]) => elm === ScreenPanel.pzTarget);
-        let idx = targets.indexOf(target) + step;
-        if(idx == -2) ScreenPanel.pzTarget = targets[targets.length - 1][0] ;
-        else if(idx == -1 || idx == targets.length) ScreenPanel.pzTarget = _body_ ;
-        else ScreenPanel.pzTarget = targets[idx][0]; 
-        this.update() ;
-        break ;
-
-    default: { // scale
-      let a = Object.assign({}, 
-      (elapsed > 2000) ? { scale:0.10, translate:50} :
-      (elapsed > 1200) ? { scale:0.05, translate:20} :
-      (elapsed >  600) ? { scale:0.02, translate: 5} :
-                         { scale:0.01, translate: 1});
-    let scale = 1 - a.scale ;
-    if(ScreenPanel.pzTarget != _body_) 
-      targets = [targets.find(([pzElm, size, box]) => pzElm === ScreenPanel.pzTarget)] ;
-    switch(pos) { // scale
-      case(11): scale = 1 + a.scale ;
-      case(13): targets.forEach((item) => { 
-        let [target] = item;
-        let currentSize = parseFloat(target.style.fontSize) || 1;
-        let newSize = Math.max(0.1, currentSize * scale);
-        target.style.fontSize = newSize + "em";
-        item[1] = newSize; 
-      });
-      break ;
-
-    default: { // translate
-      if(ScreenPanel.pzTarget == _body_) return ; // disallow on body
-      let dx = 0, dy = 0 ;
-    switch(pos) {
-      case 2:  dy = -a.translate; break; // up
-      case 10: dx = -a.translate; break; // left
-      case 14: dx =  a.translate; break; // right
-      case 22: dy =  a.translate; break; // down
-    }
-    for (let [target, size, box] of targets) {
-      target.style.top = target.offsetTop + dy + "px";
-      target.style.left = target.offsetLeft + dx + "px";
-      target.owner?.constrain();
-    } }
-  }}}} /* bracket hell, sigh: that's what happens with this coding pattern! */
-
-
-  getTargets() {
-    let pzTargets = [...document.getElementsByClassName("pz")].filter((elm) =>
-       elm.isConnected && elm.style.visibility != "hidden") ;
-    this.targets.length = 0 ;
-    for(let target of pzTargets) {
-      let fs = target.style.fontSize;
-      let emSize = (fs && fs.includes("em")) ? parseFloat(fs) : parseFloat(getComputedStyle(target).fontSize) / _pxPerEm_;
-      this.targets.push([target, emSize, getBox(target)]) ;
-    }
-    return true ;
-  }
-
-}
-
 
 class SurfacePanel extends Panel {
 
@@ -2958,6 +2782,11 @@ class EditPanel extends SurfacePanel {
   }
 
   surface = new Pzr(this);
+
+  constructor(cell) {
+    super(cell);
+    this.body.append(menuActionList(this, ['ink/cut', 'ink/copy', 'ink/paste', 'ink/grid']));
+  }
 }
 
 
@@ -3208,17 +3037,168 @@ class KeyboardPanel extends SurfacePanel {
 }
 
 
-class ScreenPanel extends SurfacePanel {
-
+class ScreenPanel extends Panel {
   static pzTarget = null;
+  static css = css('PositionPanel', `
+    .PositionPanel .Panel__body { width:21em; min-width:0; max-width:calc(100vw - 32px); padding:1em; box-sizing:border-box; text-align:left; }
+    .PositionPanel label, .PositionPanel h3 { display:block; font-size:1em; font-weight:600; margin:0 0 .6em; }
+    .PositionPanel select { width:100%; margin:0; }
+    .PositionPanel p { color:var(--color-text-secondary); font-size:.85em; line-height:1.5; margin:.6em 0 0; }
+    .PositionPanel section { border-top:1px solid var(--color-border); margin-top:1.2em; padding-top:1.2em; }
+    .PositionPanel__zoom { display:grid; grid-template-columns:1fr 1fr; gap:.6em; }
+    .PositionPanel .PositionPanel__zoom button { display:flex; gap:.4em; align-items:center; justify-content:center; }
+    .PositionPanel__move { display:grid; grid-template-columns:repeat(3,1fr); gap:.5em; }
+    .PositionPanel__move [data-adjust=up] { grid-column:2; }
+    .PositionPanel__move [data-adjust=left] { grid-column:1; grid-row:2; }
+    .PositionPanel__move [data-adjust=right] { grid-column:3; grid-row:2; }
+    .PositionPanel__move [data-adjust=down] { grid-column:2; grid-row:3; }
+    .PositionPanel .PositionPanel__move button { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:.5em .2em; gap:.2em; min-height:3.5em; }
+    .PositionPanel [data-adjust=restore] { width:100%; }
+    .PositionPanel svg { flex:none; pointer-events:none; }
+  `);
 
   static update(target) {
-    // This sets the (static) target for ScreenPanel pan/zoom operations.
-    ScreenPanel.pzTarget = target || _body_;
-    _panels_.screen?.surface.update();
+    const panel = _panels_.screen;
+    // Operating the controls must not change their target to the controls themselves.
+    if (target === panel?.elm || target && panel?.elm.contains(target)) return;
+    ScreenPanel.pzTarget = target || Layout.activeLayout?.elm || _menu_.elm;
+    panel?.refreshTargets();
   }
 
-  surface = new Pz(this);
+  constructor(cell) {
+    super(cell);
+    this.elm.classList.add('PositionPanel');
+    this.closer.setAttribute('aria-label', 'Close Position and zoom');
+    this.initial = new Map();
+    this.repeater = new Schedule();
+    this.body.innerHTML = `
+      <label for="position-target">Adjust</label>
+      <select id="position-target" data-tag="targetSelect" aria-label="Adjust item"></select>
+      <section aria-label="Size"><h3>Size</h3><div class="PositionPanel__zoom">
+        <button type="button" data-adjust="smaller"><span aria-hidden="true">−</span> Smaller</button>
+        <button type="button" data-adjust="larger"><span aria-hidden="true">＋</span> Larger</button>
+      </div></section>
+      <section aria-label="Position"><h3>Position</h3><div class="PositionPanel__move">
+        <button type="button" data-adjust="up"><span aria-hidden="true">↑</span> Up</button>
+        <button type="button" data-adjust="left"><span aria-hidden="true">←</span> Left</button>
+        <button type="button" data-adjust="right"><span aria-hidden="true">→</span> Right</button>
+        <button type="button" data-adjust="down"><span aria-hidden="true">↓</span> Down</button>
+      </div><p data-tag="moveHint">Hold a button to adjust continuously.</p></section>
+      <section><button type="button" data-adjust="restore">Restore size and position</button>
+        <p>Restore the settings from when this panel was opened.</p></section>`;
+    this.targetSelect = this.body.querySelector('[data-tag=targetSelect]');
+    this.moveHint = this.body.querySelector('[data-tag=moveHint]');
+    this.listeners.push(listen(this.targetSelect, 'focus', () => this.refreshTargets()));
+    this.listeners.push(listen(this.targetSelect, 'change', () => {
+      this.stopRepeat?.();
+      ScreenPanel.pzTarget = this.items[Number(this.targetSelect.value)];
+      this.refreshTargets();
+    }));
+    for (const button of this.body.querySelectorAll('[data-adjust]')) {
+      const action = button.dataset.adjust;
+      this.listeners.push(listen(button, 'click', e => {
+        if (e.detail === 0) this.adjust(action);
+      }));
+      this.listeners.push(listen(button, 'pointerdown', e => {
+        if (e.button !== 0 || !e.isPrimary) return;
+        e.taken = true; e.preventDefault(); e.stopPropagation();
+        this.stopRepeat?.(); button.focus({preventScroll:true});
+        if (!this.adjust(action) || action === 'restore') return;
+        button.setPointerCapture(e.pointerId);
+        const listeners = [];
+        const stop = () => {
+          this.repeater.cancel(); unlisten(listeners);
+          if (this.stopRepeat === stop) this.stopRepeat = null;
+          if (button.hasPointerCapture(e.pointerId)) button.releasePointerCapture(e.pointerId);
+        };
+        this.stopRepeat = stop;
+        const end = ev => { if (ev.pointerId === e.pointerId) stop(); };
+        listeners.push(...listen(window, 'pointerup', end, {capture:true}),
+          ...listen(button, ['pointercancel','lostpointercapture'], end),
+          ...listen(button, 'pointermove', ev => { if (ev.pointerId === e.pointerId && !ev.buttons) stop(); }),
+          ...listen(window, 'blur', stop));
+        const repeat = () => {
+          if (!this.adjust(action)) return stop();
+          this.repeater.run(100, repeat);
+        };
+        this.repeater.run(400, repeat);
+      }));
+    }
+  }
+
+  targetName(target) {
+    if (target === _body_) return 'All visible items';
+    if (target === _menu_.elm) return 'Circular menu';
+    if (target === Layout.activeLayout?.elm) return 'Score';
+    const owner = target.panel || target.owner?.panel || target.owner;
+    return owner?.cell?.label || owner?.cell?.name ||
+      (target.dataset.tag || 'Panel').replace(/Panel$/, '').replace(/([a-z])([A-Z])/g, '$1 $2');
+  }
+
+  refreshTargets() {
+    const targets = [...document.querySelectorAll('.pz')].filter(target =>
+      target !== this.elm && target !== _body_ && target.isConnected &&
+      getComputedStyle(target).visibility !== 'hidden' && getComputedStyle(target).display !== 'none' &&
+      !target.hiding && !target.panel?.closing && !target.owner?.closing);
+    // Put the most useful choices first; the controller never resizes itself.
+    this.items = [...new Set([Layout.activeLayout?.elm, _menu_.elm, ...targets].filter(target => targets.includes(target))), _body_];
+    if (!this.items.includes(ScreenPanel.pzTarget)) ScreenPanel.pzTarget = this.items[0];
+    for (const target of targets) if (!this.initial.has(target)) {
+      this.initial.set(target, {left:target.style.left, top:target.style.top, fontSize:target.style.fontSize,
+        adjusted:target.classList.contains('pz-set'),
+        pz:target === Layout.activeLayout?.elm ? JSON.parse(JSON.stringify(Layout.activeLayout.cell.stash.pz ?? null)) : null});
+    }
+    this.targetSelect.replaceChildren(...this.items.map((target, index) => {
+      const option = document.createElement('option'); option.value = index;
+      option.textContent = this.targetName(target); return option;
+    }));
+    this.targetSelect.value = this.items.indexOf(ScreenPanel.pzTarget);
+    const all = ScreenPanel.pzTarget === _body_;
+    for (const button of this.body.querySelectorAll('.PositionPanel__move button')) button.disabled = all;
+    this.moveHint.textContent = all ? 'Choose a single item to move it.' : 'Hold a button to adjust continuously.';
+    return ScreenPanel.pzTarget;
+  }
+
+  adjust(action) {
+    if (this.closing || this.closed) return false;
+    const selected = this.refreshTargets();
+    const targets = selected === _body_ ? this.items.filter(target => target !== _body_) : [selected];
+    if (!targets.length || selected === _body_ && ['up','down','left','right'].includes(action)) return false;
+    for (const target of targets) {
+      if (action === 'restore') {
+        const initial = this.initial.get(target);
+        if (!initial) continue;
+        Object.assign(target.style, {left:initial.left, top:initial.top, fontSize:initial.fontSize});
+        if (target === Layout.activeLayout?.elm) Layout.activeLayout.cell.stash.pz = initial.pz ? {...initial.pz} : null;
+        target.classList.toggle('pz-set', initial.adjusted);
+      } else if (action === 'larger' || action === 'smaller') {
+        const size = target.style.fontSize.endsWith('em') ? parseFloat(target.style.fontSize)
+          : parseFloat(getComputedStyle(target).fontSize) / _pxPerEm_;
+        target.style.fontSize = Math.max(.1, size * (action === 'larger' ? 1.1 : 1/1.1)) + 'em';
+        target.classList.add('pz-set');
+      } else {
+        const dx = action === 'left' ? -5 : action === 'right' ? 5 : 0;
+        const dy = action === 'up' ? -5 : action === 'down' ? 5 : 0;
+        target.style.left = target.offsetLeft + dx + 'px';
+        target.style.top = target.offsetTop + dy + 'px';
+        target.classList.add('pz-set');
+      }
+      target.owner?.constrain?.();
+    }
+    return true;
+  }
+
+  show() {
+    const alreadyOpen = this.elm.isConnected && this.elm.style.visibility === 'visible' && !this.elm.hiding;
+    if (!alreadyOpen) {
+      this.initial.clear();
+      ScreenPanel.pzTarget = Layout.activeLayout?.elm || _menu_.elm;
+    }
+    super.show(); this.setTitle('Position and zoom'); this.refreshTargets();
+    return this;
+  }
+  hide() { this.stopRepeat?.(); super.hide(); }
+  destructor() { this.stopRepeat?.(); this.repeater.cancel(); super.destructor(); }
 }
 
 
@@ -3698,6 +3678,7 @@ class MagnifyPanel extends Panel {
         <canvas data-tag="magCanvas" width="300" height="300"
           style="width:100%; height:100%; display:block;"></canvas>
       </div>
+      <p style="font-size:.85em; color:var(--color-text-secondary); margin:.6em 0;">Click or touch the score to magnify. Drag to move.</p>
       <div data-tag="slidersContainer" style="margin-top:0.5em;"></div>
     </div>`);
 
@@ -3719,10 +3700,12 @@ class MagnifyPanel extends Panel {
 
     // Store reference for magnifier updates
     _menu_.magnifier.panel = this;
+    _menu_.magnifier.zoom = Number(cell.stash.zoom) || 2;
   }
 
   show() {
     super.show();
+    _menu_.activateCell(this.cell);
     this.cell.stash.zoom = _menu_.magnifier.zoom;
     this.sliderGroup.refresh();
     return this;
@@ -3811,11 +3794,19 @@ class MagnifyPanel extends Panel {
     ctx.stroke();
   }
 
+  hide() {
+    this.magRequest = (this.magRequest || 0) + 1;
+    _menu_.magnifier.cancelTracking?.();
+    if (this.cell.ring.activeCell === this.cell) _menu_.activateCell(null, this.cell.ring);
+    if (this.lastPg) this.lastPg.magnifierHold = false;
+    this.lastPg = null;
+    super.hide();
+  }
+
   destructor() {
     super.destructor();
-    // Release magnifier hold on the page
     if (this.lastPg) this.lastPg.magnifierHold = false;
-    _menu_.magnifier.panel = null;
+    if (_menu_.magnifier.panel === this) _menu_.magnifier.panel = null;
   }
 }
 
@@ -4096,7 +4087,281 @@ class PlaybackPanel extends MusicPanel {
   }
 }
 
+// Nested actions reuse the canonical tool element: enabled/active/locked states
+// stay in sync with the circular menu and existing score operations.
+function menuActionList(panel, paths) {
+  const list = helm('<div class="MenuActions"></div>');
+  for (const path of paths) {
+    const cell = _menu_.getCell(path);
+    list.append(cell.elm);
+  }
+  return list;
+}
+
+class MenuGroupPanel extends Panel {
+  static css = css('MenuActions', `
+    .MenuActions { display:flex; flex-wrap:wrap; gap:.5em; padding:.5em; }
+    .Menu__action { display:flex; align-items:center; justify-content:center;
+      gap:.4em; min-height:2.75em; padding:.5em .75em; font:inherit;
+      color:var(--color-text); background:var(--menu-cell-bg);
+      border:1px solid var(--menu-panel-indicator); border-radius:var(--borderRadius); }
+    .Menu__action svg { flex-shrink:0; width:1.5em; height:1.5em; }
+    .Menu__action.Menu__cell-active { background:var(--menu-cell-active-bg); }
+    .Menu__action:disabled, .Menu__action.Menu__cell-disabled { opacity:.45; }
+    .MenuGroup__body { width:25em; max-width:85vw; max-height:65dvh; overflow:auto; padding:.5em; }
+    .MenuGroup__section { border-top:1px solid var(--menu-panel-indicator); margin-top:.6em; padding-top:.6em; }
+    .MenuGroup__section h3 { margin:.25em 0; font-size:1em; }
+  `);
+  constructor(cell) {
+    super(cell);
+    this.body.classList.add('MenuGroup__body');
+  }
+  section(title) {
+    const section = helm('<section class="MenuGroup__section"></section>');
+    const heading = document.createElement('h3'); heading.textContent = title;
+    section.append(heading); this.body.append(section); return section;
+  }
+  action(container, label, callback) {
+    const button = document.createElement('button'); button.type = 'button';
+    button.className = 'Menu__action'; button.textContent = label;
+    this.listeners.push(listen(button, 'click', callback)); container.append(button); return button;
+  }
+}
+
+class LibraryPanel extends Panel {
+  constructor(cell) {
+    super(cell);
+    // This workspace deliberately has no .pz root or legacy panel header: its
+    // typography, layout and focus behavior are independent of the circular menu.
+    this.elm = helm(`<div class="LibraryWindow" data-tag="LibraryPanel" hidden>
+      <section class="Panel__elm LibraryWindow__panel" data-tag="panel" role="dialog" aria-label="Library" tabindex="-1">
+        <header class="LibraryWindow__header" data-tag="header">
+          <div class="LibraryWindow__brand"><span class="LibraryWindow__mark" aria-hidden="true">${iconSvg('Score', {size:'28px'})}</span><h1>Library</h1></div>
+          <div class="LibraryWindow__actions"><div data-tag="addSlot"></div><div data-tag="settingsSlot"></div>
+            <button type="button" data-tag="expand" class="LibraryWindow__icon" aria-label="Expand library" title="Expand library">${iconSvg('Full Screen', {size:'20px'})}</button>
+            <button type="button" data-tag="closer" class="LibraryWindow__icon" aria-label="Close library" title="Close library">${iconSvg('Close', {size:'20px'})}</button>
+          </div>
+        </header>
+        <div class="LibraryWindow__body" data-tag="body"></div>
+      </section>
+    </div>`);
+    Object.assign(this, dataIndex('tag', this.elm));
+    this.view = new BookshelfView(this);
+    this.body.append(this.view.elm);
+    this.listeners.push(listen(this.panel, 'pointerdown', event => { event.taken = true; }, { capture:true }));
+    this.listeners.push(listen(this.closer, 'click', () => this.hide()));
+    this.listeners.push(listen(this.expand, 'click', () => this.setMode(this.mode === 'full' ? 'side' : 'full')));
+    this.listeners.push(listen(window, 'resize', () => this.updateMode()));
+    this.listeners.push(listen(document, 'keydown', event => {
+      if (!this.open || document.querySelector('dialog[open]')) return;
+      if (event.key === 'Escape') {
+        event.preventDefault(); event.stopImmediatePropagation();
+        if (!this.view.dismissLayer()) this.hide();
+      } else if (event.key === 'Tab' && this.fullView) {
+        const focusable = [...this.panel.querySelectorAll('button,input,select,summary,[tabindex="0"]')]
+          .filter(elm => elm.tabIndex >= 0 && !elm.disabled && !elm.closest('[inert]') && elm.getClientRects().length && getComputedStyle(elm).visibility !== 'hidden');
+        const first = focusable[0], last = focusable.at(-1);
+        if (event.shiftKey && (document.activeElement === first || document.activeElement === this.panel)) { event.preventDefault(); last?.focus(); }
+        else if (!event.shiftKey && (document.activeElement === last || document.activeElement === this.panel)) { event.preventDefault(); first?.focus(); }
+      }
+    }, { capture:true }));
+  }
+  get fullView() { return this.mode === 'full' || innerWidth <= 720; }
+  setMode(mode) {
+    this.mode = mode;
+    this.updateMode();
+  }
+  updateMode() {
+    this.elm.dataset.mode = this.mode;
+    this.elm.dataset.full = String(this.fullView);
+    this.panel.setAttribute('aria-modal', String(this.fullView));
+    this.expand.hidden = !_score_ || innerWidth <= 720;
+    const label = this.mode === 'full' ? 'Use library side panel' : 'Expand library';
+    this.expand.setAttribute('aria-label', label); this.expand.title = label;
+    this.view?.updatePresentation();
+  }
+  show() {
+    if (!this.open) {
+      this.returnFocus = document.activeElement;
+      this.setMode(_score_ ? 'side' : 'full');
+    }
+    this.open = true;
+    this.elm.hidden = false;
+    this.elm.style.zIndex = ++_zTop_;
+    if (!this.elm.isConnected) _body_.append(this.elm);
+    this.view.select();
+    requestAnimationFrame(() => { if (this.open) this.panel.focus({ preventScroll:true }); });
+    return this;
+  }
+  hide() {
+    this.open = false;
+    this.elm.hidden = true;
+    if (this.returnFocus?.isConnected) this.returnFocus.focus?.({ preventScroll:true });
+    return this;
+  }
+  close() {
+    if (this.closing) return;
+    this.closing = true;
+    this.hide();
+    this.finishClose();
+  }
+  setPosition() {}
+  constrain() {}
+  destructor() {
+    this.view.resizeObserver.disconnect();
+    super.destructor();
+  }
+}
+
+class ScoreDisplayControls {
+  constructor(cell) {
+    this.cell = cell;
+    this.fitGroup = new ButtonGroup(
+      this.cell.stash, {
+        Expand: { svg: "Expand", radio: "pgFit" },
+        Center: { svg: "Center", radio: "pgFit" },
+      },
+      async (e,tag,value) => {
+         let score = _score_;
+         if (!score) return; // (the panel can stay open after its score was closed)
+         score.details.pgFit = value;
+         // Re-open the current layout to apply the new fit. Use the canonical
+         // stash.active key (always valid, kept current by Layout.open) — the
+         // layout ring's activeCell object is not reliably maintained and can
+         // be null/stale (cf. score.js score-load path).
+         let layout = _menu_.rings.layout;
+         await Layout.open(layout.cells[layout.stash.active || "book"]);
+      }
+    );
+
+    this.qualityGroup = new SliderGroup(
+      this.cell.stash,
+      {
+        quality: {
+          min: 0.5,
+          max: 6,
+          step: 0.1,
+          value: 2,
+          throttle: 750,
+          msg: () => {
+            let q = cell.stash.quality;
+            let desc =
+              q < 1.1
+                ? "Low"
+                : q < 2.1
+                ? "Medium"
+                : q < 3.1
+                ? "High"
+                : q < 4.1
+                ? "Very High"
+                : "Extreme";
+            return "Display Quality: " + desc + ` (${parseInt(q * 100)}%)`;
+          },
+        },
+      },
+      async (e, tag, value) => {
+        let score = _score_;
+        if (score) {
+          score.quality = value;
+          for (let pg of score.pgs)
+            // rerender un-rendered pg's iff they are backed by pdf:
+            if (pg.inflated && pg.mozPn) await pg.renderPdf().catch(err => {
+              // AbortError: pg was deflated meanwhile (e.g. the layout was rebuilt)
+              if (err.name != "AbortError") console.warn(`Failed to render page ${pg.mozPn}:`, err);
+            });
+        }
+      }
+    );
+
+
+  }
+}
+
+class DisplaySettingsPanel extends MenuGroupPanel {
+  constructor(cell) {
+    super(cell);
+    const score = this.section('Score display');
+    if (_score_) {
+      this.controls = new ScoreDisplayControls(_menu_.rings.score.cells.details);
+      score.append(helm('<div>Page Fit</div>'), this.controls.fitGroup.elm, this.controls.qualityGroup.elm);
+      this.action(score, 'Layout, margins and page-number bands', () => {
+        const ring = _menu_.rings.layout;
+        _menu_.showPanel(ring.cells[ring.stash.active || 'book']);
+      });
+    } else score.append(document.createTextNode('Open a score to adjust its display.'));
+    const screen = this.section('Screen');
+    screen.append(menuActionList(this, ['app/position', 'app/wakeLock']));
+    const curtain = this.section('Curtain');
+    curtain.append(menuActionList(this, ['app/curtain']));
+    this.action(curtain, 'Curtain color and opacity', () => _menu_.showPanel(_menu_.rings.app.cells.curtain));
+    this.listeners.push(listen(document, 'scoreOpened', () => this.close()));
+    this.listeners.push(listen(document, 'scoreClosed', () => this.close()));
+  }
+  show() {
+    this.controls?.qualityGroup.refresh();
+    return super.show();
+  }
+}
+
+class TransferPanel extends MenuGroupPanel {
+  constructor(cell) {
+    super(cell);
+    this.body.append(helm('<p>Copy pages between scores using the shared page buffer. Select an action, then tap the page.</p>'));
+    this.body.append(menuActionList(this, ['page/export', 'page/import']));
+    this.action(this.body, 'Review and organize buffer', () => _menu_.showPanel(_menu_.rings.page.cells.import));
+  }
+}
+
+class PageAdvancedPanel extends MenuGroupPanel {
+  constructor(cell) {
+    super(cell);
+    this.body.append(helm('<p>Flatten makes the annotations on a page read-only. Select the action, then tap a page. Confirmation is required.</p>'));
+    this.body.append(menuActionList(this, ['page/flatten']));
+  }
+}
+
+class ThemePanel extends MenuGroupPanel {
+  constructor(cell) {
+    super(cell);
+    this.choices = new ButtonGroup(cell.stash, {
+      Light: { svg:'Light', radio:'theme' },
+      Glass: { svg:'Glass', radio:'theme' },
+      Dark: { svg:'Dark', radio:'theme' },
+    }, (_e, _tag, value) => _menu_.applyTheme(value));
+    this.body.append(this.choices.elm);
+  }
+  show() {
+    this.choices.refresh();
+    return super.show();
+  }
+}
+
+class NavigationPanel extends MenuGroupPanel {
+  constructor(cell) {
+    super(cell);
+    this.listeners.push(listen(document, 'scoreOpened', () => this.close()));
+    this.listeners.push(listen(document, 'scoreClosed', () => this.close()));
+    if (!_score_) {
+      this.body.append(helm('<p>Open a score to configure its page-turning controls.</p>'));
+      return;
+    }
+    const stash = _menu_.rings.page.cells.numbers.stash;
+    for (const [key, label] of [['forward', 'Next page / mark'], ['reverse', 'Previous page / mark']]) {
+      const section = this.section(label);
+      section.append(new ButtonGroup(stash, {
+        Pages: { svg:'Page', radio:key }, Marks: { svg:'Mark', radio:key },
+      }, () => {}).elm);
+    }
+  }
+}
+
 let panels = window._panels_ = {
+  LibraryPanel,
+  DisplaySettingsPanel,
+  TransferPanel,
+  PageAdvancedPanel,
+  NavigationPanel,
+  ThemePanel,
   // This structure maps every Panel to its class.
   // Panels are instantiated on demand, and the
   // singletons are stored here as well, keyed by

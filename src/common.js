@@ -670,10 +670,12 @@ class ButtonGroup {
       let { svg, radio, toggle, disabled } = def;
       let property = [radio, toggle].find((key) => key);
       let elm = helm(`
-          <div data-button="${tag}" data-property="${property}" class="ButtonGroup__button">
+          <button type="button" data-button="${tag}" data-property="${property}" class="ButtonGroup__button">
             ${tag}<br>
             ${iconSvg(svg, { class: "ButtonGroup__icon" })}          
-          </div>`);
+          </button>`);
+      elm.setAttribute('aria-label', tag);
+      listen(elm, 'click', e => { if (e.detail === 0) this.fire(tag, e); });
       if (toggle) elm.classList.add("ButtonGroup__button-toggle");
       let iconElm = dataIndex("tag", elm)["iconSvg"];
       if (disabled) {
@@ -698,6 +700,9 @@ class ButtonGroup {
       let { onOff, radio, toggle, disabled } = this.defs[tag];
       let elm = this.elms[tag];
       let iconElm = this.iconElms[tag];
+      elm.disabled = !!disabled;
+      const stateKey = this.defs[tag].radio || this.defs[tag].toggle;
+      if (onOff !== undefined || stateKey) elm.setAttribute('aria-pressed', String(onOff !== undefined ? !!this.props[tag] : this.props[stateKey] === tag));
       if (onOff != undefined) {
         if (this.props[tag]) elm.classList.add("ButtonGroup__button-active");
         else elm.classList.remove("ButtonGroup__button-active");
@@ -774,10 +779,14 @@ class ButtonGroup {
   }
 
   fire(tag, e) {
-    let { radio, toggle, redo } = this.defs[tag];
+    if (this.defs[tag]?.disabled) return;
+    let { radio, toggle, redo, onOff } = this.defs[tag];
     let property = [radio, toggle].find((key) => key);
     let prevTag = property ? this.props[property] : null;
-    if (radio) {
+    if (onOff !== undefined) {
+      this.props[tag] = !this.props[tag];
+      this.refresh();
+    } else if (radio) {
       if (!redo && tag == prevTag) return; // ignore click on active radio button
       this.props[property] = tag;
       this.refresh();
@@ -1346,6 +1355,7 @@ class RostrumSlider extends HTMLElement {
     // Position knob as % of track width minus half the knob's fixed 2.8em width.
     // Using calc() avoids pxToEm, which breaks during font-size transitions.
     this.knob.style.left = `calc(${(pos * 100).toFixed(4)}% - 1.4em)`;
+    this.track.style.setProperty("--slider-progress", (pos * 100).toFixed(4) + "%");
   }
 }
 
@@ -2200,6 +2210,8 @@ function dialog(
       buttonsElm.self.fire("Cancel", e);
     }
   });
+  const primary = Object.keys(buttonsDef).find(tag => !['Cancel','Close','Dismiss','Back'].includes(tag));
+  if (primary) buttonsElm.self.elms[primary].classList.add('UiAction--primary');
   buttonsElm.style.marginTop = "1em";
   elm.append(buttonsElm);
   _body_.append(elm);
@@ -2208,6 +2220,7 @@ function dialog(
   elm.buttonsElm = buttonsElm;
   elm.msg = elm.firstElementChild;
   elm.showModal();
+  if (!elm.querySelector("input,textarea,[autofocus]")) buttonsElm.self.elms.Cancel?.focus();
   return elm;
 }
 

@@ -242,6 +242,7 @@ class Layout {
     }
     if (Layout.activeLayout) ScreenPanel.update(Layout.activeLayout.elm);
     _score_?.music?.view.resetFollow();
+    window._viewState_?.schedule();
   }
 
   constructor(score, cell) {
@@ -327,6 +328,7 @@ class Layout {
     // after a cut or a paste must leave the reader's view alone, so place it.
     await this.build(false);
     this.place();
+    window._viewState_?.schedule();
   }
 
   place() {
@@ -550,7 +552,17 @@ class Layout {
       let pg = e.target.pg || e.target.closest(".canvas-container")?.pg;
       if (pg) {
         e.taken = true ;
+        const magnifier = _menu_.magnifier;
+        magnifier.cancelTracking?.();
+        const target = this.elm, listeners = [];
+        const finish = () => {
+          unlisten(listeners);
+          if (magnifier.cancelTracking === finish) magnifier.cancelTracking = null;
+          if (target.hasPointerCapture(e.pointerId)) target.releasePointerCapture(e.pointerId);
+        };
         let updateMag = (ev) => {
+          if (ev.pointerId !== e.pointerId) return;
+          if (!magnifier.active || ev.buttons === 0) return finish();
           if (!pg.elm) return; // pg can be released/recycled mid-gesture
           let box = pg.elm.getBoundingClientRect();
           // Calculate position as fraction of displayed size (0 to 1)
@@ -558,13 +570,16 @@ class Layout {
           let fracY = (ev.clientY - box.top) / box.height;
           _menu_.magnifier.panel?.updateMagnifier(fracX, fracY, pg);
         };
+        magnifier.cancelTracking = finish;
+        target.setPointerCapture(e.pointerId);
         updateMag(e);
-        // Track pointer movement for drag
-        let moveListener = listen(this.elm, "pointermove", updateMag);
-        listen(this.elm, "pointerup", () => {
-          unlisten(moveListener);
-          _menu_.autoOff.run();
-        }, { once: true });
+        // Keep drag tracking bounded to this pointer, including release outside
+        // the page, cancellation and closing the magnifier mid-gesture.
+        const endPointer = ev => { if (ev.pointerId === e.pointerId) finish(); };
+        listeners.push(...listen(target, "pointermove", updateMag),
+          ...listen(window, "pointerup", endPointer, {capture:true}),
+          ...listen(target, ["pointercancel", "lostpointercapture"], endPointer),
+          ...listen(window, "blur", finish));
       }
       return true;
     }
@@ -572,9 +587,9 @@ class Layout {
     // so don't allow the layout code to run:
     if (_menu_.activeRing?.key == "ink" && _menu_.activeRing?.activeCell) return true;
 
-    if (_menu_.activeRing?.key == "page") { // Execute page ring's active cell action
-
-      let pageCell = _menu_.activeRing.activeCell;
+    if (_menu_.activeRing?.key == "page" ||
+        (_menu_.activeRing?.key == "layout" && ['numbers', 'magnify'].includes(_menu_.rings.page.activeCell?.key))) {
+      let pageCell = _menu_.rings.page.activeCell;
       if (!pageCell) return false;
       e.taken = true;
       let pageKey = pageCell.key;

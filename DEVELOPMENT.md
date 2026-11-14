@@ -1,8 +1,90 @@
 # Development
 
+### Menu navigation
+
+The circular menu has six sectors: **File**, **View**, **Annotate**, **Pages**,
+**Practice**, and **Settings**. File starts with **Library**, separate from
+**Open** (Recent, Local and cloud file browsers). Opening the library never
+replaces the active score. Extension URL launches open the requested score
+before considering the startup library.
+
+View groups layouts, page navigation/numbering, magnification, fullscreen and
+**Display settings**. The latter owns fit/quality controls, layout margins and
+page-number bands, screen position/zoom, curtain and wake lock. **Score info**
+contains file information only. Settings owns **Page turning** and the text
+keyboard; Practice owns score playback/transposition and the practice tools.
+**Position and zoom** uses a named target selector (Score by default), labeled
+size/direction buttons and hold-to-repeat. Its own controls are excluded from
+the targets. All visible items supports scaling only. Restore uses each target's
+position/size when the controller was opened; opening it again starts a new
+restore point. `tests/position-panel.spec.js` covers targeting, keyboard input,
+restoring, repeat cleanup and narrow viewports in both builds.
+Annotate's **Select / edit** panel contains cut/copy/paste and grid controls.
+Pages groups shared-buffer operations under **Between scores** and Flatten
+under **Advanced**. These page tools still act on the page tapped afterward.
+
+Magnify stays active while its panel is open, including when opened by dragging
+from View; it is excluded from temporary tool auto-off. Click/touch the score
+to sample PDF/music and ink, and drag to move the sample. Closing the panel or
+selecting Magnify again exits the tool and releases page holds/pointer tracking.
+`tests/magnify.spec.js` checks pixels, idle use and mouse/touch across all layouts
+in the source and standalone builds.
+
+### Device View preferences
+
+`src/view-state.js` stores device-wide View preferences in the host page's
+`rostrum-device-view` IndexedDB database. It restores the layout choice and each
+layout's fit, gaps, page bands and pace, display fit/quality, magnifier zoom,
+score pan/zoom and explicitly adjusted circular-menu geometry. Reading position,
+open dialogs and fullscreen are not part of this preference record; startup
+continues to show the library. Absolute geometry applies only at the same viewport
+size; other screen sizes refit while retaining the layout/display preferences.
+
+Preferences load before URL/score activation, then override embedded/imported
+View settings when a score is activated. Score loading is guarded so temporary
+defaults cannot overwrite preferences. User interactions commit to IndexedDB;
+`rostrum-device-view-pending` in localStorage is a synchronous recovery journal
+for a write interrupted by immediate navigation and is removed after commit.
+Both stores are specific to this browser/origin and remain outside library sync
+and backup. Library settings snapshots strip View fields; explicit PDF/MSCZ
+exports retain their existing embedded settings for backwards compatibility.
+`tests/view-state.spec.js` covers reloads, import precedence, viewport changes,
+device isolation, sync exclusion, invalid data and unavailable storage.
+
+`Menu.configureNavigation()` maps stable logical tool paths to visible sectors.
+These keys remain unchanged for score metadata, local settings, undo and tool
+state; `displayCells` controls only presentation. Panel-only actions reuse their
+tool elements so enabled states are shared, including PDF/music restrictions.
+Do not use a visible sector's cells as the source of per-score tool settings.
+
+Library settings separates **Storage location**, **Cloud sync**, **Backup and
+restore**, and **History and conflicts**. **Sync library now** stays beside the
+save/sync status. Record **⋯** menus group metadata, tags/collections, offline
+storage, songs, replacement and deletion.
+
+### Library workspace design
+
+The library uses native HTML/CSS; no UI component framework is required.
+`LibraryPanel` is a fixed workspace independent of the menu's `.pz` sizing and
+legacy panel header/texture. Startup without a score uses the full viewport;
+opening it while reading uses a 460px side panel. The expand control switches
+presentation on the same view, keeping search, selection and scroll. Screens
+at or below 720px always use the full viewport.
+
+The full view provides category navigation, a scrolling results list and a
+selected-record inspector. Selecting a title shows details; **Open score**
+opens it. The side view opens titles immediately. The row's **⋯** opens editing
+in the inspector; narrow/side inspectors cover the list and provide **Back to
+list**. **Add** contains file selection and importing the current score. Library
+settings is a separate surface; tag filters open from the search toolbar.
+Save/sync state stays in the footer. Standard scrolling and pointer input in
+this workspace bypass the legacy global pan/zoom gestures. Esc dismisses the
+current layer before closing the workspace; fullscreen keyboard focus is kept
+inside the workspace, except while a native import/editor dialog is open.
+
 ### Bookshelf development
 
-The Open panel's **Library** tab imports owned copies, lists scores and songs,
+**File → Library** opens the library directly; it also opens automatically at startup when no score is loaded. The library imports owned copies, lists scores and songs,
 and manages tags, bookshelves and playlists. PDF outlines produce song entries;
 MusicXML/MSCZ metadata provides an initial title. Song details and start pages
 can be edited. **Import current score** imports an exported copy of the score
@@ -16,7 +98,7 @@ Escape skips that file; a failed commit keeps the editable draft for retry.
 Unselected extracted entries are kept as tombstones so rebuilding the index
 does not bring them back. Included children can outlive an excluded heading;
 the adjusted parent and edited fields survive reindex. Original files stay intact.
-For an existing score, use **All scores → Edit and organize → Edit songs**.
+For an existing score, use **All scores → ⋯ → Edit songs**.
 The same dialog opens with saved song records, **Delete song**, **Save changes**
 and **Cancel changes**. It also supports files with no songs. Saving applies the
 whole draft in one transaction, retaining existing song IDs, metadata, tags,
@@ -60,7 +142,7 @@ SQLite Worker as bytes/Blobs. This avoids giving an opaque data-URL Worker
 filesystem handles. Browser support and Safari/iPhone still require device
 validation; the environment-to-default-backend mapping remains undecided.
 
-**Backups and conflicting edits** exports a ZIP containing `library.sqlite`,
+**Library settings → Backup and restore** exports a ZIP containing `library.sqlite`,
 portable `library.json` records/change history, and the owned `scores/` files.
 Import validates paths, file hashes, schema fields, change ancestry and
 references before merging. It does not execute the supplied SQLite image and
@@ -352,6 +434,20 @@ mise exec -- python -m unittest discover -s tests -p test_deploy_pages.py
 ```
 
 The browser tests mock cloud APIs. Real provider sign-in is checked manually.
+Shared menu, panel and dialog styling lives in `src/appearance.js`, loaded after
+widget styles in both development and standalone builds. Its `--ui-*` tokens
+also supply the library palette. Keep radial-menu geometry and gesture handling
+in the existing widgets; panel text uses a separate readable base size.
+UI icons in `src/icon.js` use self-contained 24 × 24 SVG fragments with rounded
+1.6-unit strokes and `currentColor`; menus, panels and the library share this
+set. Provider logos and the product logo retain their original branding.
+`tests/appearance.spec.js` checks keyboard/pointer controls, sliders, confirmation
+dialogs and viewport resizing against both builds.
+`tests/menu-gestures.spec.js` also covers interrupted menu-to-panel drags:
+missing releases, lost capture, cancellation, blur, button-free hover and closing
+while dragging. Use `Menu.cancelOperation()` to discard a gesture without firing
+a cell action; closing a panel invokes it as a recovery path.
+
 For the bookshelf release, use a dedicated test account and folder to check
 each intended provider and target device:
 
