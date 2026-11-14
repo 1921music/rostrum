@@ -13,9 +13,22 @@ View groups layouts, page navigation/numbering, magnification, fullscreen and
 page-number bands, screen position/zoom, curtain and wake lock. **Score info**
 contains file information only. Settings owns **Page turning** and the text
 keyboard; Practice owns score playback/transposition and the practice tools.
+**Position and zoom** uses a named target selector (Score by default), labeled
+size/direction buttons and hold-to-repeat. Its own controls are excluded from
+the targets. All visible items supports scaling only. Restore uses each target's
+position/size when the controller was opened; opening it again starts a new
+restore point. `tests/position-panel.spec.js` covers targeting, keyboard input,
+restoring, repeat cleanup and narrow viewports in both builds.
 Annotate's **Select / edit** panel contains cut/copy/paste and grid controls.
 Pages groups shared-buffer operations under **Between scores** and Flatten
 under **Advanced**. These page tools still act on the page tapped afterward.
+
+Magnify stays active while its panel is open, including when opened by dragging
+from View; it is excluded from temporary tool auto-off. Click/touch the score
+to sample PDF/music and ink, and drag to move the sample. Closing the panel or
+selecting Magnify again exits the tool and releases page holds/pointer tracking.
+`tests/magnify.spec.js` checks pixels, idle use and mouse/touch across all layouts
+in the source and standalone builds.
 
 `Menu.configureNavigation()` maps stable logical tool paths to visible sectors.
 These keys remain unchanged for score metadata, local settings, undo and tool

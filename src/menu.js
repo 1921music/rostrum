@@ -182,6 +182,8 @@ class Menu {
     else {
       for (const key of ['ink', 'page']) {
         const ring = this.rings[key];
+        // Magnify is a workspace tool: keep it usable while its panel is open.
+        if (key === 'page' && this.magnifier.active) continue;
         if (ring.activeCell && !ring.activeCell.locked) this.activateCell(null, ring);
       }
     }
@@ -476,7 +478,11 @@ class Menu {
     this.magnifier = {
       zoom: 1,
       panel: null, // set by MagnifyPanel constructor
-      get active() { return rings.page.activeCell?.key === 'magnify'; }
+      get active() {
+        return rings.page.activeCell?.key === 'magnify' && !!this.panel &&
+          this.panel.elm.isConnected && this.panel.elm.style.visibility === 'visible' &&
+          !this.panel.closing && !this.panel.elm.hiding;
+      }
     };
 
     this.listen("score/up", () => this.activateRing(rings.score));
@@ -947,12 +953,14 @@ class Menu {
       this.activateCell(cell.ring.activeCell === cell ? null : cell, cell.ring);
       this.showPanel(cell);
     });
-    for (const path of ['page/numbers', 'page/magnify']) {
-      this.listen(path + '/up', cell => {
-        this.activateCell(cell.ring.activeCell === cell ? null : cell, cell.ring);
-        this.showPanel(cell);
-      });
-    }
+    this.listen('page/numbers/up', cell => {
+      this.activateCell(cell.ring.activeCell === cell ? null : cell, cell.ring);
+      this.showPanel(cell);
+    });
+    this.listen('page/magnify/up', cell => {
+      if (this.magnifier.active) panels.magnify.close();
+      else this.showPanel(cell);
+    });
   }
 
   applyTheme(theme) {

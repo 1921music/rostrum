@@ -630,7 +630,7 @@ class Panel {
     let clazz = this.constructor.name ;
     if (this != _panels_.screen && clazz != "ScreenPanel") {
       _lastTarget_ = elm;
-      _panels_.screen?.surface.update();
+      _panels_.screen?.refreshTargets();
     }
     if(clazz != "CurtainPanel") elm.style.zIndex = ++_zTop_;
     return this;
@@ -2717,8 +2717,7 @@ class Pzr extends Surface {
   }
 
   getTargets() 
-  { // For class Pzr, always 0 or 1 targets, but for subclass Pz there can be
-    // many, so for "regularity", this.targets is always an array.
+  { // Object editing has at most one target (possibly an active selection).
     let obj = EditPanel.pzrTarget ;
     if (obj) {
       this.targets[0] = [obj, {
@@ -2736,112 +2735,6 @@ class Pzr extends Surface {
     return false ;
   }
 }
-
-class Pz extends Pzr {
-
-  slots = [2,10,11,13,14,16,18,22] ;
-
-  constructor(panel) {
-    super(panel, ScreenPanel);
-    // modify the grid, replacing the central icon and removing clockwise and counter-clockwise svg's
-    this.cw.remove() ;
-    this.ccw.remove() ;
-    this.cutBtn.remove() ;
-    this.update();
-  }
-
-  update() {
-    let getIconPath = () => {
-      let tag = ScreenPanel.pzTarget?.dataset?.tag ;
-      switch(tag) {
-        case "BookLayout":
-        case "ScrollLayout":
-        case "TableLayout": return iconPaths["Layout"] ;
-        case "Menu": return iconPaths["Menu"] ;
-        case "Body": return iconPaths["Void"] ;
-        default: {
-          let key = tag[0].toLowerCase() + tag.slice(1).replace("Panel", "");
-          return _panels_[key]?.cell?.svgPath ?? null ;
-        }
-      }
-    }
-    let tmp = helm(`<svg viewBox="0 0 24 24" width="1.6em" height="1.6em"
-      style="grid-column:3;grid-row:3;pointer-events:none;stroke:none;fill:currentColor;">
-      ${getIconPath()}</svg>`) ;
-    this.iconSvg.replaceWith(tmp) ;
-    this.iconSvg = tmp ;
-  }
-
-
-  doStep(pos) {
-    let elapsed = performance.now() - this.opStartTime;
-    let targets = this.targets;
-
-
-    // prev/next
-    let step = 1 ;
-    switch(pos) {
-      case(16): step = -1 ;
-      case(18):
-        let target = targets.find(([elm, size, box]) => elm === ScreenPanel.pzTarget);
-        let idx = targets.indexOf(target) + step;
-        if(idx == -2) ScreenPanel.pzTarget = targets[targets.length - 1][0] ;
-        else if(idx == -1 || idx == targets.length) ScreenPanel.pzTarget = _body_ ;
-        else ScreenPanel.pzTarget = targets[idx][0]; 
-        this.update() ;
-        break ;
-
-    default: { // scale
-      let a = Object.assign({}, 
-      (elapsed > 2000) ? { scale:0.10, translate:50} :
-      (elapsed > 1200) ? { scale:0.05, translate:20} :
-      (elapsed >  600) ? { scale:0.02, translate: 5} :
-                         { scale:0.01, translate: 1});
-    let scale = 1 - a.scale ;
-    if(ScreenPanel.pzTarget != _body_) 
-      targets = [targets.find(([pzElm, size, box]) => pzElm === ScreenPanel.pzTarget)] ;
-    switch(pos) { // scale
-      case(11): scale = 1 + a.scale ;
-      case(13): targets.forEach((item) => { 
-        let [target] = item;
-        let currentSize = parseFloat(target.style.fontSize) || 1;
-        let newSize = Math.max(0.1, currentSize * scale);
-        target.style.fontSize = newSize + "em";
-        item[1] = newSize; 
-      });
-      break ;
-
-    default: { // translate
-      if(ScreenPanel.pzTarget == _body_) return ; // disallow on body
-      let dx = 0, dy = 0 ;
-    switch(pos) {
-      case 2:  dy = -a.translate; break; // up
-      case 10: dx = -a.translate; break; // left
-      case 14: dx =  a.translate; break; // right
-      case 22: dy =  a.translate; break; // down
-    }
-    for (let [target, size, box] of targets) {
-      target.style.top = target.offsetTop + dy + "px";
-      target.style.left = target.offsetLeft + dx + "px";
-      target.owner?.constrain();
-    } }
-  }}}} /* bracket hell, sigh: that's what happens with this coding pattern! */
-
-
-  getTargets() {
-    let pzTargets = [...document.getElementsByClassName("pz")].filter((elm) =>
-       elm.isConnected && elm.style.visibility != "hidden") ;
-    this.targets.length = 0 ;
-    for(let target of pzTargets) {
-      let fs = target.style.fontSize;
-      let emSize = (fs && fs.includes("em")) ? parseFloat(fs) : parseFloat(getComputedStyle(target).fontSize) / _pxPerEm_;
-      this.targets.push([target, emSize, getBox(target)]) ;
-    }
-    return true ;
-  }
-
-}
-
 
 class SurfacePanel extends Panel {
 
@@ -3144,23 +3037,165 @@ class KeyboardPanel extends SurfacePanel {
 }
 
 
-class ScreenPanel extends SurfacePanel {
-
+class ScreenPanel extends Panel {
   static pzTarget = null;
+  static css = css('PositionPanel', `
+    .PositionPanel .Panel__body { width:21em; min-width:0; max-width:calc(100vw - 32px); padding:1em; box-sizing:border-box; text-align:left; }
+    .PositionPanel label, .PositionPanel h3 { display:block; font-size:1em; font-weight:600; margin:0 0 .6em; }
+    .PositionPanel select { width:100%; margin:0; }
+    .PositionPanel p { color:var(--color-text-secondary); font-size:.85em; line-height:1.5; margin:.6em 0 0; }
+    .PositionPanel section { border-top:1px solid var(--color-border); margin-top:1.2em; padding-top:1.2em; }
+    .PositionPanel__zoom { display:grid; grid-template-columns:1fr 1fr; gap:.6em; }
+    .PositionPanel .PositionPanel__zoom button { display:flex; gap:.4em; align-items:center; justify-content:center; }
+    .PositionPanel__move { display:grid; grid-template-columns:repeat(3,1fr); gap:.5em; }
+    .PositionPanel__move [data-adjust=up] { grid-column:2; }
+    .PositionPanel__move [data-adjust=left] { grid-column:1; grid-row:2; }
+    .PositionPanel__move [data-adjust=right] { grid-column:3; grid-row:2; }
+    .PositionPanel__move [data-adjust=down] { grid-column:2; grid-row:3; }
+    .PositionPanel .PositionPanel__move button { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:.5em .2em; gap:.2em; min-height:3.5em; }
+    .PositionPanel [data-adjust=restore] { width:100%; }
+    .PositionPanel svg { flex:none; pointer-events:none; }
+  `);
 
   static update(target) {
-    // This sets the (static) target for ScreenPanel pan/zoom operations.
-    ScreenPanel.pzTarget = target || _body_;
-    _panels_.screen?.surface.update();
+    const panel = _panels_.screen;
+    // Operating the controls must not change their target to the controls themselves.
+    if (target === panel?.elm || target && panel?.elm.contains(target)) return;
+    ScreenPanel.pzTarget = target || Layout.activeLayout?.elm || _menu_.elm;
+    panel?.refreshTargets();
   }
 
-  surface = new Pz(this);
+  constructor(cell) {
+    super(cell);
+    this.elm.classList.add('PositionPanel');
+    this.closer.setAttribute('aria-label', 'Close Position and zoom');
+    this.initial = new Map();
+    this.repeater = new Schedule();
+    this.body.innerHTML = `
+      <label for="position-target">Adjust</label>
+      <select id="position-target" data-tag="targetSelect" aria-label="Adjust item"></select>
+      <section aria-label="Size"><h3>Size</h3><div class="PositionPanel__zoom">
+        <button type="button" data-adjust="smaller"><span aria-hidden="true">−</span> Smaller</button>
+        <button type="button" data-adjust="larger"><span aria-hidden="true">＋</span> Larger</button>
+      </div></section>
+      <section aria-label="Position"><h3>Position</h3><div class="PositionPanel__move">
+        <button type="button" data-adjust="up"><span aria-hidden="true">↑</span> Up</button>
+        <button type="button" data-adjust="left"><span aria-hidden="true">←</span> Left</button>
+        <button type="button" data-adjust="right"><span aria-hidden="true">→</span> Right</button>
+        <button type="button" data-adjust="down"><span aria-hidden="true">↓</span> Down</button>
+      </div><p data-tag="moveHint">Hold a button to adjust continuously.</p></section>
+      <section><button type="button" data-adjust="restore">Restore size and position</button>
+        <p>Restore the settings from when this panel was opened.</p></section>`;
+    this.targetSelect = this.body.querySelector('[data-tag=targetSelect]');
+    this.moveHint = this.body.querySelector('[data-tag=moveHint]');
+    this.listeners.push(listen(this.targetSelect, 'focus', () => this.refreshTargets()));
+    this.listeners.push(listen(this.targetSelect, 'change', () => {
+      this.stopRepeat?.();
+      ScreenPanel.pzTarget = this.items[Number(this.targetSelect.value)];
+      this.refreshTargets();
+    }));
+    for (const button of this.body.querySelectorAll('[data-adjust]')) {
+      const action = button.dataset.adjust;
+      this.listeners.push(listen(button, 'click', e => {
+        if (e.detail === 0) this.adjust(action);
+      }));
+      this.listeners.push(listen(button, 'pointerdown', e => {
+        if (e.button !== 0 || !e.isPrimary) return;
+        e.taken = true; e.preventDefault(); e.stopPropagation();
+        this.stopRepeat?.(); button.focus({preventScroll:true});
+        if (!this.adjust(action) || action === 'restore') return;
+        button.setPointerCapture(e.pointerId);
+        const listeners = [];
+        const stop = () => {
+          this.repeater.cancel(); unlisten(listeners);
+          if (this.stopRepeat === stop) this.stopRepeat = null;
+          if (button.hasPointerCapture(e.pointerId)) button.releasePointerCapture(e.pointerId);
+        };
+        this.stopRepeat = stop;
+        const end = ev => { if (ev.pointerId === e.pointerId) stop(); };
+        listeners.push(...listen(window, 'pointerup', end, {capture:true}),
+          ...listen(button, ['pointercancel','lostpointercapture'], end),
+          ...listen(button, 'pointermove', ev => { if (ev.pointerId === e.pointerId && !ev.buttons) stop(); }),
+          ...listen(window, 'blur', stop));
+        const repeat = () => {
+          if (!this.adjust(action)) return stop();
+          this.repeater.run(100, repeat);
+        };
+        this.repeater.run(400, repeat);
+      }));
+    }
+  }
+
+  targetName(target) {
+    if (target === _body_) return 'All visible items';
+    if (target === _menu_.elm) return 'Circular menu';
+    if (target === Layout.activeLayout?.elm) return 'Score';
+    const owner = target.panel || target.owner?.panel || target.owner;
+    return owner?.cell?.label || owner?.cell?.name ||
+      (target.dataset.tag || 'Panel').replace(/Panel$/, '').replace(/([a-z])([A-Z])/g, '$1 $2');
+  }
+
+  refreshTargets() {
+    const targets = [...document.querySelectorAll('.pz')].filter(target =>
+      target !== this.elm && target !== _body_ && target.isConnected &&
+      getComputedStyle(target).visibility !== 'hidden' && getComputedStyle(target).display !== 'none' &&
+      !target.hiding && !target.panel?.closing && !target.owner?.closing);
+    // Put the most useful choices first; the controller never resizes itself.
+    this.items = [...new Set([Layout.activeLayout?.elm, _menu_.elm, ...targets].filter(target => targets.includes(target))), _body_];
+    if (!this.items.includes(ScreenPanel.pzTarget)) ScreenPanel.pzTarget = this.items[0];
+    for (const target of targets) if (!this.initial.has(target)) {
+      this.initial.set(target, {left:target.style.left, top:target.style.top, fontSize:target.style.fontSize,
+        adjusted:target.classList.contains('pz-set')});
+    }
+    this.targetSelect.replaceChildren(...this.items.map((target, index) => {
+      const option = document.createElement('option'); option.value = index;
+      option.textContent = this.targetName(target); return option;
+    }));
+    this.targetSelect.value = this.items.indexOf(ScreenPanel.pzTarget);
+    const all = ScreenPanel.pzTarget === _body_;
+    for (const button of this.body.querySelectorAll('.PositionPanel__move button')) button.disabled = all;
+    this.moveHint.textContent = all ? 'Choose a single item to move it.' : 'Hold a button to adjust continuously.';
+    return ScreenPanel.pzTarget;
+  }
+
+  adjust(action) {
+    if (this.closing || this.closed) return false;
+    const selected = this.refreshTargets();
+    const targets = selected === _body_ ? this.items.filter(target => target !== _body_) : [selected];
+    if (!targets.length || selected === _body_ && ['up','down','left','right'].includes(action)) return false;
+    for (const target of targets) {
+      if (action === 'restore') {
+        const initial = this.initial.get(target);
+        if (!initial) continue;
+        Object.assign(target.style, {left:initial.left, top:initial.top, fontSize:initial.fontSize});
+        target.classList.toggle('pz-set', initial.adjusted);
+      } else if (action === 'larger' || action === 'smaller') {
+        const size = parseFloat(getComputedStyle(target).fontSize) / _pxPerEm_;
+        target.style.fontSize = Math.max(.1, size * (action === 'larger' ? 1.1 : 1/1.1)) + 'em';
+        target.classList.add('pz-set');
+      } else {
+        const dx = action === 'left' ? -5 : action === 'right' ? 5 : 0;
+        const dy = action === 'up' ? -5 : action === 'down' ? 5 : 0;
+        target.style.left = target.offsetLeft + dx + 'px';
+        target.style.top = target.offsetTop + dy + 'px';
+        target.classList.add('pz-set');
+      }
+      target.owner?.constrain?.();
+    }
+    return true;
+  }
 
   show() {
-    super.show();
-    this.setTitle('Position and zoom');
+    const alreadyOpen = this.elm.isConnected && this.elm.style.visibility === 'visible' && !this.elm.hiding;
+    if (!alreadyOpen) {
+      this.initial.clear();
+      ScreenPanel.pzTarget = Layout.activeLayout?.elm || _menu_.elm;
+    }
+    super.show(); this.setTitle('Position and zoom'); this.refreshTargets();
     return this;
   }
+  hide() { this.stopRepeat?.(); super.hide(); }
+  destructor() { this.stopRepeat?.(); this.repeater.cancel(); super.destructor(); }
 }
 
 
@@ -3640,6 +3675,7 @@ class MagnifyPanel extends Panel {
         <canvas data-tag="magCanvas" width="300" height="300"
           style="width:100%; height:100%; display:block;"></canvas>
       </div>
+      <p style="font-size:.85em; color:var(--color-text-secondary); margin:.6em 0;">Click or touch the score to magnify. Drag to move.</p>
       <div data-tag="slidersContainer" style="margin-top:0.5em;"></div>
     </div>`);
 
@@ -3661,10 +3697,12 @@ class MagnifyPanel extends Panel {
 
     // Store reference for magnifier updates
     _menu_.magnifier.panel = this;
+    _menu_.magnifier.zoom = Number(cell.stash.zoom) || 2;
   }
 
   show() {
     super.show();
+    _menu_.activateCell(this.cell);
     this.cell.stash.zoom = _menu_.magnifier.zoom;
     this.sliderGroup.refresh();
     return this;
@@ -3753,11 +3791,19 @@ class MagnifyPanel extends Panel {
     ctx.stroke();
   }
 
+  hide() {
+    this.magRequest = (this.magRequest || 0) + 1;
+    _menu_.magnifier.cancelTracking?.();
+    if (this.cell.ring.activeCell === this.cell) _menu_.activateCell(null, this.cell.ring);
+    if (this.lastPg) this.lastPg.magnifierHold = false;
+    this.lastPg = null;
+    super.hide();
+  }
+
   destructor() {
     super.destructor();
-    // Release magnifier hold on the page
     if (this.lastPg) this.lastPg.magnifierHold = false;
-    _menu_.magnifier.panel = null;
+    if (_menu_.magnifier.panel === this) _menu_.magnifier.panel = null;
   }
 }
 
