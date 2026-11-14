@@ -4,6 +4,7 @@ const path = require("node:path");
 
 const roots = ["build", "src", "lib", "doc", "tests/manual"].map(root => path.resolve(root));
 const mimeTypes = {
+  ".wasm": "application/wasm",
   ".html": "text/html; charset=utf-8",
   ".js": "application/javascript; charset=utf-8",
   ".mjs": "application/javascript; charset=utf-8",

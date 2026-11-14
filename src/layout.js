@@ -3,20 +3,20 @@
 /**
   Copyright 2025 Glendon Diener
  
-  This file is part of Podium.
+  This file is part of Rostrum.
  
-  Podium is free software: you can redistribute it and/or modify it
+  Rostrum is free software: you can redistribute it and/or modify it
   under the terms of the GNU Affero General Public License as
   published by the Free Software Foundation, either version 3 of the
   License, or (at your option) any later version.
 
-  Podium is distributed in the hope that it will be useful, but
+  Rostrum is distributed in the hope that it will be useful, but
   WITHOUT ANY WARRANTY; without even the implied warranty of
   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
   Affero General Public License for more details.
 
   You should have received a copy of the GNU Affero General Public
-  License along with Podium. If not, see
+  License along with Rostrum. If not, see
   <https://www.gnu.org/licenses/>.
 **/
 
@@ -147,7 +147,7 @@ class Layout
   events fired whenever ui interaction on a layout subclass causes
   the pn to change.
 
-  Podium only supports 1 layout at a time, and the current layout
+  Rostrum only supports 1 layout at a time, and the current layout
   if accessed throught the static Layout.activeLayout.
 **/
 
@@ -353,9 +353,9 @@ class Layout {
 
   static normalizePn(cell) {
     // pnShow stays the "On"/"Off" it has always been, so a score saved here and
-    // opened in a Podium that knows nothing of movable bands still shows its
-    // page numbers, at that Podium's own edges. The band's own two choices
-    // travel together in pnBand, which such a Podium never reads but does carry
+    // opened in a Rostrum that knows nothing of movable bands still shows its
+    // page numbers, at that Rostrum's own edges. The band's own two choices
+    // travel together in pnBand, which such a Rostrum never reads but does carry
     // through its own save untouched (an unknown key in a cell's stash is
     // copied in and written back; see Menu.stashFromJsonObj). A score older
     // than pnBand -- or one whose stash has been edited into nonsense -- gets

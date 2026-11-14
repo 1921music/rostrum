@@ -220,7 +220,7 @@ function readSinglePart(body, contentType) {
  */
 async function mockWriteApi(page, { folderCreated = true, uploads, deletes } = {}) {
   const probeFolderId = 4242;
-  const folders = new Map([[probeFolderId, { name: "podium-write-probe", parent: 0 }]]);
+  const folders = new Map([[probeFolderId, { name: "rostrum-write-probe", parent: 0 }]]);
   const files = new Map();
   let nextFolderId = 5151;
   let nextFileId = 777;
@@ -318,7 +318,7 @@ test("the probe writes a file back and verifies the round trip byte for byte", a
   await expect(page.locator("#diagnostics li.failure"))
     .toHaveText([/PREFLIGHTED PUT UPLOAD FAIL:/]);
   await expect(page.locator("#diagnostics li.success")).toContainText([
-    /Created \/podium-write-probe/,
+    /Created \/rostrum-write-probe/,
     /multipart uploadfile stored \d+ bytes as fileid 777/,
     /the round trip is byte-exact: \d+ bytes written and read back/,
   ]);
@@ -326,7 +326,7 @@ test("the probe writes a file back and verifies the round trip byte for byte", a
   // The cleanup runs after everything else, so wait for it before looking at
   // what the whole run did. The folder was created here, so it is removed whole.
   await expect(page.locator("#diagnostics li").last())
-    .toHaveText(/Deleted \/podium-write-probe and everything this test put in it\./);
+    .toHaveText(/Deleted \/rostrum-write-probe and everything this test put in it\./);
 
   // The second POST is the metadata test's throwaway file in the subfolder.
   expect(uploads.map(upload => upload.method)).toEqual(["PUT", "POST", "POST"]);
@@ -341,7 +341,7 @@ test("the probe writes a file back and verifies the round trip byte for byte", a
   expect(errors).toEqual([]);
 });
 
-test("the probe exercises every metadata method Podium calls", async ({ page }) => {
+test("the probe exercises every metadata method Rostrum calls", async ({ page }) => {
   const methods = [];
   await mockWriteApi(page);
   page.on("request", request => {
@@ -371,7 +371,7 @@ test("the probe leaves a pre-existing folder in place and deletes only its own f
   await startWriteTest(page);
 
   await expect(page.locator("#diagnostics li.success"))
-    .toContainText([/\/podium-write-probe already existed/]);
+    .toContainText([/\/rostrum-write-probe already existed/]);
   await expect(page.locator("#diagnostics li")).toContainText([/Deleted the probe file \(fileid 777\)/]);
   // The first two are the metadata test's own; only the last is the cleanup,
   // which must not touch the folder it did not create.
@@ -423,8 +423,8 @@ test("the probe reports a corrupted round trip as a failure", async ({ page }) =
   // Answer the read-back with a file of the right length but the wrong bytes.
   await page.route("https://api.pcloud.com/getzip**", route => route.fulfill({
     contentType: "application/zip",
-    body: buildZip("podium-write-probe.pdf", Buffer.concat([
-      Buffer.from("%PDF-1.4\n% Podium pCloud write probe\n"),
+    body: buildZip("rostrum-write-probe.pdf", Buffer.concat([
+      Buffer.from("%PDF-1.4\n% Rostrum pCloud write probe\n"),
       Buffer.alloc(32 << 10),
       Buffer.from("\n%%EOF\n"),
     ])),

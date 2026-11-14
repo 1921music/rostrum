@@ -19,7 +19,7 @@ MIME_MAP = {
 
 logger = logging.getLogger(__name__)
 
-class PodiumHandler(http.server.SimpleHTTPRequestHandler):
+class RostrumHandler(http.server.SimpleHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     timeout = 30  # close idle connections after 30s
 
@@ -197,7 +197,7 @@ class ThreadedSSLServer(http.server.ThreadingHTTPServer):
         sslSock = sslContext.wrap_socket(sock, server_side=True)
         return (sslSock, addr)
 
-handler_class = PodiumHandler
+handler_class = RostrumHandler
 
 logger.info(f"Starting HTTPS server on https://0.0.0.0:{pargs.port}")
 logger.info(f"Document roots: {', '.join(docRoots)}")

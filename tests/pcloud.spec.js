@@ -2,8 +2,27 @@ const { test, expect } = require("@playwright/test");
 const zlib = require("node:zlib");
 
 test.beforeEach(async ({ page }) => {
+  page.external = [];
+  await page.route('**/*', route => {
+    const url = route.request().url();
+    if (url.startsWith('http://127.0.0.1:9876/')) return route.continue();
+    if (url === 'https://accounts.google.com/gsi/client') return route.fulfill({ contentType:'application/javascript',body:'window.google = { accounts: { oauth2: {} } };' });
+    page.external.push(url); return route.abort();
+  });
   await page.goto("/pod.html");
   await expect.poll(() => page.evaluate(() => typeof window._PCloudSrc_)).toBe("function");
+});
+test.afterEach(async ({ page }) => expect(page.external).toEqual([]));
+
+test('silent authentication reuses remembered direct credentials when no OAuth session exists', async ({ page }) => {
+  expect(await page.evaluate(async () => {
+    const source = _FileSrc_.get('pCloud'), provider = source.authProvider, calls = [];
+    Object.defineProperty(provider.oauth.constructor,'available',{ configurable:true,value:true });
+    provider.oauth.authenticate = async () => { calls.push(['oauth',provider.oauth.backgroundAuth]); throw Object.assign(new Error('No session'),{ name:'AuthRequiredError' }); };
+    provider.direct.authenticate = async () => { calls.push(['direct',provider.direct.backgroundAuth]); };
+    source.backgroundAuth = true; await source.auth();
+    return { calls,direct:provider.active === provider.direct };
+  })).toEqual({ calls:[['oauth',true],['direct',true]],direct:true });
 });
 
 test("pCloud maps a folder listing and downloads PDF bytes", async ({ page }) => {

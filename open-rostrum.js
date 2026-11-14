@@ -1,6 +1,6 @@
-// Open Podium in a 1920x1200 (chrome-included) Playwright window.
-// Prereq: dev server running -> (in podium/)  python3 serve.py
-// Run:    NODE_PATH=../test/node_modules node open-podium.js
+// Open Rostrum in a 1920x1200 (chrome-included) Playwright window.
+// Prereq: dev server running -> (in rostrum/)  python3 serve.py
+// Run:    NODE_PATH=../test/node_modules node open-rostrum.js
 //   (Playwright lives in studiop5/test/node_modules, not here.)
 
 const { chromium } = require("playwright");

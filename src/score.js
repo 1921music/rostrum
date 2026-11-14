@@ -3,20 +3,20 @@
 /**
   Copyright 2025 Glendon Diener
  
-  This file is part of Podium.
+  This file is part of Rostrum.
  
-  Podium is free software: you can redistribute it and/or modify it
+  Rostrum is free software: you can redistribute it and/or modify it
   under the terms of the GNU Affero General Public License as
   published by the Free Software Foundation, either version 3 of the
   License, or (at your option) any later version.
 
-  Podium is distributed in the hope that it will be useful, but
+  Rostrum is distributed in the hope that it will be useful, but
   WITHOUT ANY WARRANTY; without even the implied warranty of
   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
   Affero General Public License for more details.
 
   You should have received a copy of the GNU Affero General Public
-  License along with Podium. If not, see
+  License along with Rostrum. If not, see
   <https://www.gnu.org/licenses/>.
 **/
 
@@ -161,11 +161,11 @@ class Pg {
   // Rostrum's custom properties on fabric objects. fabric drops unknown
   // properties on serialize unless they're listed, so EVERY serialization
   // (toJson, and the undo snapshots) must pass this list: "flatten" (see
-  // flattenObjects; toPdf relies on it), "podiumType" (the tool that made the
+  // flattenObjects; toPdf relies on it), "rostrumType" (the tool that made the
   // object: pencil/pen/rastrum/...; control rendering keys off it, see
-  // canvas.js) and "podiumStash" (the tool settings it was drawn with, which
+  // canvas.js) and "rostrumStash" (the tool settings it was drawn with, which
   // its panel loads when it is selected).
-  static customProps = ["flatten", "podiumType", "podiumStash", "rostrumAnchor", "rostrumId"];
+  static customProps = ["flatten", "rostrumType", "rostrumStash", "rostrumAnchor", "rostrumId"];
 
   // Default color used to pad pages < maxWidth and/or maxHeight:
   static paddingColor = "#fff";
@@ -471,7 +471,7 @@ class Pg {
       });
   
       canvas.on("mouse:up", opts => {
-        if(stateChanged) pushState();
+        if(stateChanged) { pushState(); this.score.setDirty(true); }
         stateChanged = false;
         if (_menu_.activeRing.key == "ink" && _menu_.activeRing.activeCell) _menu_.pgUpEvent(opts, this); 
       });
@@ -538,6 +538,9 @@ class Pg {
 
       canvas.on("object:modified", (opts) => { 
         if(!this.suppressStateChange)  stateChanged = true;
+      });
+      canvas.on('text:changed', () => {
+        if (!this.suppressStateChange) this.score.setDirty(true);
       });
   
       this.inflated = true;
@@ -1360,16 +1363,16 @@ class Score {
     // @clear if true (default), pasteBuffer is cleared.
   }
 
-  async init(source, path, name, pdfData=null, activate=true) {
+  async init(source, path, name, pdfData=null, activate=true, libraryState=null) {
     try {
-      return await this.initAux(source, path, name, pdfData, activate);
+      return await this.initAux(source, path, name, pdfData, activate, libraryState);
     } catch(error) {
       await this.dispose();
       throw error;
     }
   }
 
-  async initAux(source, path, name, pdfData, activate) {
+  async initAux(source, path, name, pdfData, activate, libraryState) {
     // Initialize a new Score, always called as part of the constructor, ex. await new Score().init(...)
     // @source one of Score.sources, identifies the data source that provides the score's data.
     //  For new scores (no external data sources), this is just null.
@@ -1397,6 +1400,7 @@ class Score {
       this.size = pdfData.byteLength;
       this.music = this.mozDoc = await MusicDocument.open(pdfData, name);
       this.music.owner = this;
+      if (libraryState?.settings?.music) this.music.settings = libraryState.settings.music;
       if (activate) {
         const defaults = JSON.parse(_menu_.stashDefaults);
         Object.assign(_menu_.rings.page.cells.numbers.stash, defaults.page?.cells?.numbers);
@@ -1493,12 +1497,12 @@ class Score {
           dialog("This PDF restricts modifications — saving annotations or other changes may not be possible.", { OK: { svg: "OK" } });
       }
 
-      // Grab podium attachment, if available
+      // Grab rostrum attachment, if available
       let scoreJson = null;
-      let podiumAttachment = (await this.mozDoc.getAttachments())?.podium;
-      if (podiumAttachment) {
+      let rostrumAttachment = (await this.mozDoc.getAttachments())?.rostrum;
+      if (rostrumAttachment) {
         // scoreJson, if it exists
-        scoreJson = JSON.parse(new TextDecoder().decode(podiumAttachment.content));
+        scoreJson = JSON.parse(new TextDecoder().decode(rostrumAttachment.content));
         this.created = scoreJson.created || this.created;
         this.modified = scoreJson.modified || this.modified;
         this.quality = scoreJson.quality ?? this.quality;
@@ -1538,6 +1542,7 @@ class Score {
       this.quality = _menu_.rings.score.cells.details.stash.quality ?? this.quality;
     }
 
+    if (libraryState) await this.restoreLibraryState(libraryState, activate);
     if(activate) await this.activate();
     return this;
   }
@@ -1545,7 +1550,10 @@ class Score {
   dispose() {
     // Idempotent: exports already in progress retain their document until finished.
     if(this.disposePromise) return this.disposePromise;
-    this.disposePromise = this.disposeAux();
+    this.disposePromise = this.disposeAux().catch(error => {
+      this.disposePromise = null; // A failed library save must remain retryable.
+      throw error;
+    });
     return this.disposePromise;
   }
 
@@ -1670,7 +1678,7 @@ class Score {
     this.pgRefresh();
   }
 
-  async musicRecords() {
+  async musicRecords({ preserveSelection = false } = {}) {
     const records = [];
     this.music.bookmarks = this.pgs.flatMap((pg, page) => {
       const a = pg.bookmark && this.music.info.anchors.find(a => a.page === page);
@@ -1682,8 +1690,12 @@ class Score {
       ++pg.tempHolds;
       try {
         await pg.inflate(false, false);
-        pg.canvas.discardActiveObject();
-        for (const obj of pg.canvas.getObjects()) {
+        if (!preserveSelection) pg.canvas.discardActiveObject();
+        for (const obj of pg.canvas.getObjects()) obj.rostrumId ||= crypto.randomUUID();
+        const objects = preserveSelection
+          ? await new Promise(resolve => fabric.util.enlivenObjects(pg.toJson().objects, resolve))
+          : pg.canvas.getObjects();
+        for (const obj of objects) {
           const bounds = obj.getBoundingRect(true, true);
           const previous = obj.rostrumAnchor && this.music.anchor(obj.rostrumAnchor.key, obj.rostrumAnchor.staff);
           const a = previous?.page === page ? previous : this.music.nearest(page, bounds.left, bounds.top);
@@ -1763,6 +1775,7 @@ class Score {
   }
 
   async disposeAux() {
+    if (this.libraryDocumentId && !this.libraryRestoring) await window._bookshelf_.flush(this);
     await Promise.allSettled([...this.pendingExports]);
     this.disposed = true;
     if(Layout.activeLayout?.score === this) {
@@ -1846,7 +1859,7 @@ class Score {
     copiedPages.forEach((page,idx) => docA.insertPage(pn + idx, page));
     let mergedPdfData = await docA.save();
     let mergedScore = await new Score().init(this.source, this.path, this.name, mergedPdfData, false);
-    // Get podium attachment from docB, if any. Note that PDFLib has no "high level" api for this, so
+    // Get rostrum attachment from docB, if any. Note that PDFLib has no "high level" api for this, so
     // its a bit involved. Code adapted from //github.com/Hopding/pdf-lib/issues/534.
     let json = null;
 
@@ -1859,7 +1872,7 @@ class Score {
       let EFNames = EmbeddedFiles.lookup(PDFName.of("Names"), PDFArray);
       for (let idx = 0, len = EFNames.size(); idx < len; idx += 2) {
         let fileName = EFNames.lookup(idx);
-        if (fileName.decodeText() == "podium") {
+        if (fileName.decodeText() == "rostrum") {
           let fileSpec = EFNames.lookup(idx + 1, PDFDict);
           let stream = fileSpec.lookup(PDFName.of("EF"), PDFDict).lookup(PDFName.of("F"), PDFStream);
           json = new TextDecoder().decode(PDFLib.decodePDFRawStream(stream).decode());
@@ -2105,8 +2118,92 @@ class Score {
     }
   }
 
+  async captureLibraryState() {
+    const annotations = [];
+    const identities = this.libraryAnnotationIds ||= Object.create(null);
+    const identity = async key => {
+      if (Object.hasOwn(identities, key)) return identities[key];
+      // A document-scoped UUIDv8 avoids collisions when a source file with
+      // embedded annotation IDs is independently imported into two documents.
+      const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(this.libraryDocumentId + ':' + key)));
+      bytes[6] = (bytes[6] & 15) | 128; bytes[8] = (bytes[8] & 63) | 128;
+      const hex = [...bytes.slice(0,16)].map(byte => byte.toString(16).padStart(2,'0')).join('');
+      return identities[key] = `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+    };
+    const settings = { version: 1, quality: this.quality,
+      menu: JSON.parse(JSON.stringify(_menu_.stashToJsonObj('score'))) };
+    if (this.music) {
+      const records = await this.musicRecords({ preserveSelection: true });
+      settings.music = { version: 1, transpose: this.music.transpose,
+        spelling: this.music.native.viewTransposeSpelling,
+        preserveSystemBreaks: this.music.native.viewPreserveSystemBreaks,
+        volume: this.music.player.volume, mixer: this.music.player.mixer,
+        bookmarks: this.music.bookmarks, menu: settings.menu };
+      for (const record of records) annotations.push({
+        id: await identity(record.id),
+        anchor: { type: 'music', key: record.key, staff: record.staff }, content: record });
+    } else {
+      const seen = new Set();
+      const pageIds = new Set();
+      settings.pages = this.pgs.map(pg => {
+        pg.libraryPageId ||= pg.mozPn ? this.libraryDocumentId + ':page:' + pg.mozPn : crypto.randomUUID();
+        if (pageIds.has(pg.libraryPageId)) pg.libraryPageId = crypto.randomUUID();
+        pageIds.add(pg.libraryPageId);
+        const objects = pg.inflated ? pg.canvas.getObjects() : pg.json?.objects || [];
+        for (const object of objects) {
+          if (!object.rostrumId || seen.has(object.rostrumId)) object.rostrumId = crypto.randomUUID();
+          seen.add(object.rostrumId);
+        }
+        const json = pg.toJson() || pg.json || { objects: [] };
+        for (const object of json.objects || []) {
+          annotations.push({ objectKey: object.rostrumId,
+            anchor: { type: 'pdf', pageId: pg.libraryPageId },
+            content: object });
+        }
+        const { objects: ignored, ...canvas } = json;
+        return { id: pg.libraryPageId, mozPn: pg.mozPn, width: pg.width, height: pg.height,
+          bookmark: pg.bookmark, background: pg.background, canvas };
+      });
+      for (const annotation of annotations) { annotation.id = await identity(annotation.objectKey); delete annotation.objectKey; }
+    }
+    return { settings, annotations };
+  }
+
+  async restoreLibraryState({ document: doc, settings, annotations }, activate) {
+    if (settings.version === 1) {
+      this.libraryRestoring = true;
+      try {
+        this.libraryAnnotationIds = Object.assign(Object.create(null), settings.annotationIds || {});
+        for (const annotation of annotations) {
+          const content = JSON.parse(annotation.content_json);
+          const key = this.music ? content.id : content.rostrumId;
+          if (key) this.libraryAnnotationIds[key] = annotation.id;
+        }
+        if (activate && settings.menu) _menu_.stashFromJsonObj(settings.menu, 'score');
+        this.quality = settings.quality ?? this.quality;
+        if (this.music) {
+          for (const pg of this.pgs) pg.deflate(true);
+          await this.buildMusicPages(annotations.map(a => JSON.parse(a.content_json)));
+        } else if (settings.pages?.length) {
+          for (const pg of this.pgs) pg.deflate(true);
+          this.pgs = settings.pages.map(page => {
+            const objects = annotations.filter(a => JSON.parse(a.anchor_json).pageId === page.id).map(a => JSON.parse(a.content_json));
+            const pg = new Pg(this, page.width, page.height, { ...page.canvas, objects }, page.mozPn, page.background);
+            pg.libraryPageId = page.id; pg.bookmark = page.bookmark;
+            return pg;
+          });
+          this.pgRefresh();
+        }
+      } finally { this.libraryRestoring = false; }
+    }
+    this.libraryDocumentId = doc.id;
+    this.librarySaveGeneration = this.librarySavedGeneration = 0;
+    this.dirty = false;
+  }
+
   setDirty(dirty=true) {
     this.dirty = dirty;
+    if (dirty && this.libraryDocumentId && !this.libraryRestoring) window._bookshelf_.scheduleSave(this);
   }
 
   setEditable(bool) {
@@ -2263,9 +2360,9 @@ class Score {
 
       // Add the pdf attachment
       let jsonString = JSON.stringify(attachment);
-      await dstPLibDoc.attach(new TextEncoder().encode(jsonString), "podium", {
+      await dstPLibDoc.attach(new TextEncoder().encode(jsonString), "rostrum", {
         mimeType: "application/json",
-        description: "podium json metadata",
+        description: "rostrum json metadata",
         creationDate: now,
         modificationDate: now,
       });
@@ -2286,7 +2383,7 @@ class Score {
       } else {
         // New score created from scratch - set Rostrum metadata
         dstPLibDoc.setCreationDate(now);
-        dstPLibDoc.setCreator("Rostrum vers." + _podiumVersion_);
+        dstPLibDoc.setCreator("Rostrum vers." + _rostrumVersion_);
         dstPLibDoc.setProducer("pdf-lib v1.17.1");
       }
       if (doc) return dstPLibDoc;

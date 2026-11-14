@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const { test, expect } = require('@playwright/test');
 
 // Opt-in local benchmark. The score never leaves this machine or enters Git.
-// Build with: mise exec -- python build.py --podium
+// Build with: mise exec -- python build.py --rostrum
 // Set ROSTRUM_BENCH_PDF, then run:
 // mise exec -- npx playwright test tests/large-pdf.spec.js --repeat-each=3
 // ROSTRUM_BENCH_URL optionally selects a separately built baseline HTML.
@@ -27,7 +27,7 @@ test('large PDF: open, turn, bookmark and distant jump', async ({ page, browser 
     }
     return route.continue();
   });
-  await page.goto(process.env.ROSTRUM_BENCH_URL || '/podium.html');
+  await page.goto(process.env.ROSTRUM_BENCH_URL || '/rostrum.html');
   await page.waitForFunction(() => !!window._Score_ && !!window._menu_);
   const pace = process.env.ROSTRUM_BENCH_PACE === undefined ? 350 : Number(process.env.ROSTRUM_BENCH_PACE);
   expect(Number.isFinite(pace) && pace >= 0).toBe(true);

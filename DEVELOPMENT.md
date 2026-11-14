@@ -1,5 +1,139 @@
 # Development
 
+### Bookshelf development
+
+The Open panel's **Library** tab imports owned copies, lists scores and songs,
+and manages tags, bookshelves and playlists. PDF outlines produce song entries;
+MusicXML/MSCZ metadata provides an initial title. Song details and start pages
+can be edited. **Import current score** imports an exported copy of the score
+currently open, including a score opened through the existing cloud tabs.
+File selection, **Import current score** and replacement all open **Review score
+import** before registration. Each file is reviewed separately. Edit the library
+display name, song titles, composers and 1-based start pages; choose songs, use a
+filename as a title, or browse the preview and add a missing song. PDF and music
+scores share the preview. Unchecking all songs imports only the file. Cancel or
+Escape skips that file; a failed commit keeps the editable draft for retry.
+Unselected extracted entries are kept as tombstones so rebuilding the index
+does not bring them back. Included children can outlive an excluded heading;
+the adjusted parent and edited fields survive reindex. Original files stay intact.
+For an existing score, use **All scores → Edit and organize → Edit songs**.
+The same dialog opens with saved song records, **Delete song**, **Save changes**
+and **Cancel changes**. It also supports files with no songs. Saving applies the
+whole draft in one transaction, retaining existing song IDs, metadata, tags,
+playlist links, writing and original bytes. Deletions are tombstones. A revision
+check rejects drafts made stale by another update. Snapshot persistence failures
+keep the draft and committed revisions so retrying can include further edits.
+Imports skip an already registered SHA-256 hash, even under another filename.
+Previous/deleted documents also count as registered; use the history view to
+restore them. Skipping does not create songs, copies, revisions or replacement
+relationships. It does not remove duplicates registered by older app versions.
+
+Library scores autosave annotations and per-score settings to SQLite without
+rewriting their imported PDF/MSCZ. Save As remains the explicit file export path.
+Replacing a file creates a new document and marks the previous document as
+replaced; old song/playlist references are retained. Rebuilding the song index
+preserves identified entries and manual edits/deletions.
+
+Storage access goes through `src/bookshelf-storage.js`. Environment-specific
+selection belongs in `src/bookshelf-storage-policy.js`; its current OPFS wiring
+is for development, not a final support matrix. Only backend adapters may call
+OPFS or filesystem APIs. File backends use logical relative paths, and database
+backends must flush committed changes before an operation reports success.
+The OPFS SQLite VFS uses internal pool files: `database.export()` produces the
+logical `library.sqlite` image; do not back up the physical pool files directly.
+The policy accepts explicit `opfs`, `directory` and `indexeddb` adapters. The
+latter two persist a SQLite image after each operation; OPFS uses its native
+SQLite VFS. Selection is remembered separately from the shared library, and no
+backend silently falls back to temporary storage. A second tab receives a lock
+error rather than opening another writer. Directory locking is conservative
+for folders with the same name; external database changes are detected before
+writing. Use a dedicated folder, not a database shared with another application.
+When the remembered folder needs permission, Library displays its name and an
+**Allow library folder access** button. The read/write permission request runs
+on the host page in that button's user gesture, including for file-URL builds.
+Denial keeps the selection and permits retrying. Runtime permission failures
+also expose the button; granting access retries persistence and any dirty score.
+
+Standalone file-URL builds embed a Worker and WASM runtime. Origin-bound file
+and IndexedDB operations run in the host-page adapter and are bridged to the
+SQLite Worker as bytes/Blobs. This avoids giving an opaque data-URL Worker
+filesystem handles. Browser support and Safari/iPhone still require device
+validation; the environment-to-default-backend mapping remains undecided.
+
+**Backups and conflicting edits** exports a ZIP containing `library.sqlite`,
+portable `library.json` records/change history, and the owned `scores/` files.
+Import validates paths, file hashes, schema fields, change ancestry and
+references before merging. It does not execute the supplied SQLite image and
+does not import credentials, storage selection or per-device sync progress.
+Unchanged old backups do not undo newer deletions; previous/deleted scores can
+be recovered in the history view. Conflicts retain all versions until an
+explicit resolution records all parent revisions. Independent ink additions
+merge by stable document/page/object identities.
+
+ZIP file data streams through Blobs rather than one combined byte array. The
+current parser supports members up to 512 MiB and portable metadata up to
+64 MiB; these are implementation limits, not a permanent format requirement.
+An emergency export remains possible when a committed in-memory snapshot
+cannot be persisted. The app retains the unsaved indication in this case.
+
+Library sync uses the connected Drive/Dropbox/OneDrive/pCloud account and the
+dedicated folder selected in Library. Apply a destination with **Sync library
+now**. Scores are separate immutable `scores/<documentId>__<original name>`
+files; metadata travels in `changes/<deviceId>/<batchId>.json`. No library ZIP
+or SQLite image is sent by sync. Only unpublished change records are uploaded;
+annotations are separate records, so writing does not re-upload a PDF/MSCZ.
+Files finish uploading before their metadata is published. Temporary names are
+ignored, immutable batches retain parallel edits, and retries are idempotent.
+The transport exposes `listChanges/readChanges/writeChanges` and
+`listScores/readScore/writeScore`, with a stable destination ID. Per-destination
+batch inventories are intersected with the current remote listing, so account
+changes and removed batches cannot falsely acknowledge unpublished changes.
+Individual changes are limited to 32 MiB and incoming batches to 64 MiB; normal
+outgoing batches target 4 MiB. History compaction and remote garbage collection
+are deferred; previous ZIP snapshots remain backups and can be imported manually.
+
+Metadata and writing are received for the entire library. Score bytes download
+only on **Open**, **Download to this device**, or **Keep offline**. Bookshelves
+and playlists offer **Keep collection offline**. Offline keeping and file
+presence are device-local `local_state` records, never shared change records.
+Pinned requests survive failed downloads and are retried on the next sync.
+Failed pinned downloads appear as device errors without marking successfully
+exchanged cloud metadata as unsynced; other pinned downloads still proceed.
+**Release download** keeps metadata, writing and cloud files, but requires an
+uploaded, hash-verified cloud copy and an unpinned, closed score. No automatic
+eviction is performed. A complete ZIP backup explicitly downloads missing files.
+
+**Automatic library sync** defaults on once a destination is connected. Local
+SQLite saves retain their 300 ms debounce; shared changes request a send after
+3 seconds. Foreground polling runs every 30 seconds and is retriggered on launch,
+returning to the foreground and reconnection. The checkbox persists per device;
+turning it off stops new automatic runs while any in-flight transfer finishes.
+Background authentication never opens a consent/login window. Existing sessions
+and supported refresh tokens can be reused; otherwise the status asks the user
+to connect with **Sync library now**. Browser suspension cannot guarantee an
+upload on app exit. Device save status and cloud sync status are shown separately,
+and each score shows its local presence, offline keeping and upload status.
+Automatic polling leaves the open score alone unless incoming changes affect
+its document/settings/ink; applying such changes saves, briefly locks and reopens
+that score at its page, or retains conflicts for review. Cloud uploads accept
+Blobs and use bounded chunks where the existing provider supports them.
+Real OAuth/provider checks must use a dedicated test account and the manual
+release checklist. Automated tests mock every provider request.
+
+`mise exec -- node build_browser_fs.mjs` builds the bundled library dependencies,
+including the bookshelf Worker, host adapter and SQLite WASM. The normal packaged, extension
+and Pages builds include those assets; the Pages worker precaches them offline.
+No CDN is required. Run focused checks with:
+
+```powershell
+mise exec -- npm test -- tests/bookshelf.spec.js
+mise exec -- npx playwright test tests/library-delta.spec.js
+```
+
+The tests use real local SQLite/OPFS and block unexpected external requests.
+The schema and product overview remain drafts in `doc/bookshelf-design.md` and
+`doc/bookshelf-spec.md`; sync change-record details may evolve with validation.
+
 
 ### Prerequisites
 
@@ -79,8 +213,8 @@ is run with `emcc` available and the extension is rebuilt/reloaded.
 
 | Command | Description |
 |---------|-------------|
-| `mise exec -- python build.py` | Full build (font, sample, yin, podium, guide) |
-| `mise exec -- python build.py --podium` | Build single-file app (`build/podium.html`) |
+| `mise exec -- python build.py` | Full build (font, sample, yin, rostrum, guide) |
+| `mise exec -- python build.py --rostrum` | Build single-file app (`build/rostrum.html`) |
 | `mise exec -- python build.py --doc` | Recompress the guidebook's media for deployment (`build/doc-assets/`, requires ffmpeg) |
 | `mise exec -- python build.py --pages` | Build a static-host deployment (`build/pages/`) |
 | `mise exec -- python build.py --guide` | Build Guidebook keyword index |
@@ -90,7 +224,7 @@ is run with `emcc` available and the extension is rebuilt/reloaded.
 | `mise exec -- python build.py --cert` | Generate SSL certificate (requires openssl) |
 | `mise exec -- python build.py --clean` | Clean build artifacts |
 
-The build system creates a single-file distribution at `build/podium.html` that includes all dependencies, assets, and source code inline.
+The build system creates a single-file distribution at `build/rostrum.html` that includes all dependencies, assets, and source code inline.
 Packaged builds automatically bundle the pinned browser-fs-access dependency
 with esbuild, including both native and fallback paths and its license. No CDN
 or dynamic module download is needed. `npm test` also builds this adapter before
@@ -100,7 +234,7 @@ running browser tests; direct source development uses the command shown above.
 
 `--pages` writes `build/pages/`: the packaged page as `index.html`, plus
 `manifest.webmanifest`, `sw.js`, `podauth.html` and the two PWA icons. Upload
-the directory anywhere static — GitHub Pages, for instance — and Podium
+the directory anywhere static — GitHub Pages, for instance — and Rostrum
 installs as a PWA from it. Everything is referenced relatively, so it works from
 any subdirectory and the directory may be renamed.
 
@@ -126,7 +260,7 @@ once the translation has caught up.
 branch:
 
 ```bash
-mise exec -- python build.py --podium --pages
+mise exec -- python build.py --rostrum --pages
 mise exec -- python deploy_pages.py
 ```
 
@@ -179,12 +313,12 @@ Build and deploy from the corresponding branch:
 
 ```bash
 # main -> the site root; preserves the experimental subdirectory
-mise exec -- python build.py --podium --pages
+mise exec -- python build.py --rostrum --pages
 mise exec -- python deploy_pages.py
 
 # feature/wink-page-turn -> the experimental subdirectory; preserves the stable app
 mise exec -- sh fetch-wink-assets.sh
-mise exec -- python build.py --podium --pages
+mise exec -- python build.py --rostrum --pages
 mise exec -- python deploy_pages.py --path wink-page-turn
 ```
 
@@ -218,5 +352,26 @@ mise exec -- python -m unittest discover -s tests -p test_deploy_pages.py
 ```
 
 The browser tests mock cloud APIs. Real provider sign-in is checked manually.
+For the bookshelf release, use a dedicated test account and folder to check
+each intended provider and target device:
+
+- Import PDF outlines and MSCZ, add ink, restart, and verify the chosen library
+  reconnects with the same contents. Check browser storage and a chosen folder
+  separately where supported; file-URL picker support must be checked on-device.
+- Export a library, restore it into a fresh library, and verify score hashes,
+  ink, tags, playlists, previous versions and deletions.
+- Sync two devices, edit offline on both, reconnect, resolve a competing edit,
+  and verify convergence. Confirm incomplete uploads stay unpublished and a
+  failed attempt can be retried without replacing another device's change batch.
+  Confirm a metadata edit sends no score body, a fresh device receives searchable
+  metadata without downloading scores, and opening/pinning downloads only the
+  required files. Check offline reopening and local download release separately.
+- Toggle automatic sync off, restart, and verify it stays off. Check silent
+  foreground sync, online/resume retries, and the sign-in-required state after
+  credentials expire without an unsolicited authentication dialog.
+- Check the displayed destination/account, separate device/cloud status,
+  and behavior when permission is revoked or the network/storage is unavailable.
+  Automated tests must continue to mock all of these provider requests.
+
 `tests/variants.spec.js` verifies both apps together when `build/variants/`
 contains the stable deployment with the wink deployment under `wink-page-turn/`.

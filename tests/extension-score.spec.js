@@ -23,7 +23,7 @@ test('extension packages local score modules with WASM-only CSP permission', asy
     expect(packaged.equals(fs.readFileSync(path.join(sourceDir, 'lib/score-engine', name)))).toBe(true);
     expect(packaged.toString()).not.toMatch(/\beval\s*\(|new Function\s*\(/);
   }
-  const html = fs.readFileSync(path.join(extensionDir, 'build/podium.html'), 'utf8');
+  const html = fs.readFileSync(path.join(extensionDir, 'build/rostrum.html'), 'utf8');
   expect(html.slice(0, 1024)).toMatch(/<meta charset="utf-8">/i);
   expect(html).not.toMatch(/<script[^>]*>\s*[^<\s]/);
 });
@@ -53,9 +53,9 @@ for (const packaged of ['source', 'web', 'file', 'extension']) test(`${packaged}
     });
     const page = await context.newPage();
     page.on('pageerror', error => errors.push(error.message));
-    await page.goto(packaged === 'extension' ? `chrome-extension://${id}/build/podium.html`
-      : packaged === 'file' ? pathToFileURL(path.join(sourceDir, 'build/podium.html')).href
-      : `http://127.0.0.1:9876/${packaged === 'source' ? 'pod' : 'podium'}.html`);
+    await page.goto(packaged === 'extension' ? `chrome-extension://${id}/build/rostrum.html`
+      : packaged === 'file' ? pathToFileURL(path.join(sourceDir, 'build/rostrum.html')).href
+      : `http://127.0.0.1:9876/${packaged === 'source' ? 'pod' : 'rostrum'}.html`);
     await page.waitForFunction(() => !!window._Score_ && !!window._menu_ && !!window._localFs_);
     const bytes = await page.evaluate(async () => {
       _menu_.rings.layout.stash.active = 'horizontal';
@@ -137,13 +137,13 @@ for (const packaged of ['file', 'extension']) test(`${packaged}: App → Guide o
     });
     const page = await context.newPage();
     context.on('weberror', event => errors.push(event.error().message));
-    await page.goto(packaged === 'file' ? pathToFileURL(path.join(sourceDir, 'build/podium.html')).href
-      : `chrome-extension://${id}/build/podium.html`);
+    await page.goto(packaged === 'file' ? pathToFileURL(path.join(sourceDir, 'build/rostrum.html')).href
+      : `chrome-extension://${id}/build/rostrum.html`);
     await page.waitForFunction(() => !!window._menu_);
     await context.setOffline(true);
     const popup = packaged === 'extension' ? context.waitForEvent('page') : null;
     await page.evaluate(() => {
-      localStorage.setItem('podium-guide-language', 'en');
+      localStorage.setItem('rostrum-guide-language', 'en');
       _menu_.op.emv = { clientX: 500, clientY: 100 };
       _menu_.notify('app/guide/out');
     });
@@ -196,7 +196,7 @@ test('real MV3 extension renders, transposes, plays and saves scores offline wit
         directive: e.effectiveDirective, blocked: e.blockedURI,
       }));
     });
-    await page.goto(`${origin}/build/podium.html`);
+    await page.goto(`${origin}/build/rostrum.html`);
     await page.waitForFunction(() => !!window._Score_ && !!window._menu_);
     expect(await page.evaluate(() => chrome.runtime.id)).toBe(extensionId);
     expect(await page.evaluate(() => document.characterSet)).toBe('UTF-8');

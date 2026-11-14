@@ -22,9 +22,10 @@ Rostrum is maintained by 1921music. `main` contains the stable fork;
 `feature/wink-page-turn` holds the unfinished wink page-turner. `gh-pages`
 contains generated deployment files and has an independent history.
 
-The upstream copyright and AGPL-3.0 license are retained. Internal `podium`
-identifiers and PDF metadata keys remain compatible with existing scores.
-Build commands such as `--podium` and `build/podium.html` keep their existing names.
+The upstream copyright and AGPL-3.0 license are retained. Build the standalone
+app as `build/rostrum.html` with `mise exec -- python build.py --rostrum`.
+Internal identifiers and new PDF metadata use Rostrum names; this naming change
+does not migrate data written with the old names.
 
 ## Compatibility
 

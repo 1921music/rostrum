@@ -18,7 +18,7 @@ stays in memory only.
 
 pCloud has historically treated localhost differently from deployed web origins.
 Therefore a localhost failure confirms a browser restriction, while a localhost
-success must be followed by the same test from the real HTTPS Podium origin.
+success must be followed by the same test from the real HTTPS Rostrum origin.
 
 ## Result
 
@@ -79,7 +79,7 @@ support.
 ## Writing
 
 Writing was declared not in question too early. `uploadfile` is served by
-`api.pcloud.com`, but Podium's `PCloudSrc.putFileSrc` sends `PUT` with
+`api.pcloud.com`, but Rostrum's `PCloudSrc.putFileSrc` sends `PUT` with
 `Content-Type: application/octet-stream`, which is not a CORS-safelisted value,
 so the request is preflighted. `api.pcloud.com` answers `OPTIONS` like this, for
 any `Access-Control-Request-Headers`:
@@ -101,7 +101,7 @@ than assumed, then reads the file back with `getzip` and compares every byte: a
 write that returns `result 0` is worthless to a score annotator if the
 annotations do not survive the trip.
 
-The test works in `/podium-write-probe`, uploads one file of random bytes, and
+The test works in `/rostrum-write-probe`, uploads one file of random bytes, and
 deletes what it created. The folder is deleted recursively only when the run
 created it; if it already existed it is the user's folder and only that run's
 uploads are removed.
@@ -147,7 +147,7 @@ too.
 It does so in a nested folder with a throwaway file of its own, so the file the
 round trip verified stays untouched and the cleanup still has something to
 remove. `deletefolder` is called after `deletefile` because, unlike
-`deletefolderrecursive`, it refuses a folder with contents — which is why Podium
+`deletefolderrecursive`, it refuses a folder with contents — which is why Rostrum
 uses it: it cannot destroy anything unexpectedly.
 
 All six pass from the deployed origin. The renames are not believed on their

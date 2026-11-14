@@ -16,7 +16,7 @@ test.beforeEach(async ({ page }) => {
 test.afterEach(async ({ page }) => expect(page.__external).toEqual([]));
 
 async function start(page) {
-  await page.goto('/podium.html');
+  await page.goto('/rostrum.html');
   await page.waitForFunction(() => !!window._FileSrc_ && !!window._localFs_ && !!window._menu_);
 }
 

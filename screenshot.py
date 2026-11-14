@@ -9,7 +9,7 @@ def main():
     
     # Resolve absolute paths relative to this script directory
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    js_path = os.path.join(script_dir, "screenshot-podium.js")
+    js_path = os.path.join(script_dir, "screenshot-rostrum.js")
     
     # Setup environment variables
     env = os.environ.copy()

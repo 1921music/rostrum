@@ -10,8 +10,8 @@ const { test, expect } = require("@playwright/test");
 // A score is needed for a real layout, so the layout is stubbed here and what
 // is tested is the gesture plumbing: what counts as a two-finger tap, what one
 // alone must not do, and refit()'s own contract against the real prototype.
-const pageFile = path.join(__dirname, "..", "build", "podium.html");
-test.skip(!fs.existsSync(pageFile), "build/podium.html is missing; run build.py --podium");
+const pageFile = path.join(__dirname, "..", "build", "rostrum.html");
+test.skip(!fs.existsSync(pageFile), "build/rostrum.html is missing; run build.py --rostrum");
 
 // A two-finger tap has to end within _gs_ (618ms) of the second finger landing,
 // and the second tap has to start within _gs_ of the first ending.
@@ -20,7 +20,7 @@ const GS = 618;
 test.use({ hasTouch: true });
 
 test.beforeEach(async ({ page }) => {
-  await page.goto("/podium.html");
+  await page.goto("/rostrum.html");
   await page.waitForFunction(() => !!window._menu_?.rings?.layout?.cells?.vertical);
 });
 

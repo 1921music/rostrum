@@ -3,20 +3,20 @@
 /**
   Copyright 2025 Glendon Diener
  
-  This file is part of Podium.
+  This file is part of Rostrum.
  
-  Podium is free software: you can redistribute it and/or modify it
+  Rostrum is free software: you can redistribute it and/or modify it
   under the terms of the GNU Affero General Public License as
   published by the Free Software Foundation, either version 3 of the
   License, or (at your option) any later version.
 
-  Podium is distributed in the hope that it will be useful, but
+  Rostrum is distributed in the hope that it will be useful, but
   WITHOUT ANY WARRANTY; without even the implied warranty of
   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
   Affero General Public License for more details.
 
   You should have received a copy of the GNU Affero General Public
-  License along with Podium. If not, see
+  License along with Rostrum. If not, see
   <https://www.gnu.org/licenses/>.
 **/
 
@@ -213,7 +213,7 @@ function initFabric() {
         // draw a lock icon with two states for converting multiple selections to/from groups
         let locked = true;
         if (fabricObject.type == "activeSelection" && fabricObject.size() > 1)  locked = false;
-        else if(fabricObject.type != "group" || fabricObject.podiumType == "rastrum") return;
+        else if(fabricObject.type != "group" || fabricObject.rostrumType == "rastrum") return;
         ctx.save();
         ctx.translate(left-24, top-24);
         ctx.lineWidth = 2;
@@ -264,7 +264,7 @@ function initFabric() {
       if(key == "groupToggle") {
         let { type } = fabricObject;
         if(!(type == "activeSelection" && fabricObject.size() > 1) &&
-           !(type == "group" && fabricObject.podiumType != "rastrum")) return false;
+           !(type == "group" && fabricObject.rostrumType != "rastrum")) return false;
       }
       if(["text", "textbox", "image"].includes(fabricObject.type) && ["mt","mb"].includes(key)) return false;
       if("text" == fabricObject.type && ["ml","mr"].includes(key)) return false;
@@ -314,20 +314,20 @@ function initFabric() {
   };
   let isQuickTap = (down) => down && down.travel < down.slop && performance.now() - down.time < tapHold;
 
-  // Podium implements 2 Ink cells: Pencil and Pen. They are both
+  // Rostrum implements 2 Ink cells: Pencil and Pen. They are both
   // PencilBrushes (or LineBrushes, see below). Idea is that user
   // will have 2 differently-configured LineBrushes available at
   // all times. But our EditPanel, when it selects a path, wants
   // to know which cell was used to create the path. For this reason,
-  // we add a podiumType variable (value: ink || pencil) to the created path.
+  // we add a rostrumType variable (value: ink || pencil) to the created path.
   fabric.PodBrush = fabric.util.createClass(fabric.PencilBrush, {
     type: "PodBrush",
-    podiumType: 'ink',
+    rostrumType: 'ink',
 
-    initialize: function(canvas, podiumType, stash) {
+    initialize: function(canvas, rostrumType, stash) {
       this.callSuper('initialize', canvas);
-      this.podiumType = podiumType; 
-      this.podiumStash = fabric.PodBrush.settings(stash);
+      this.rostrumType = rostrumType;
+      this.rostrumStash = fabric.PodBrush.settings(stash);
     },
 
     onMouseDown: function(pointer, options) {
@@ -354,14 +354,14 @@ function initFabric() {
 
     createPath: function(pathData) {
       let path = this.callSuper('createPath', pathData);
-      path.podiumType = this.podiumType; // add PodiumType to path *after* its created                     
-      path.podiumStash = this.podiumStash;
+      path.rostrumType = this.rostrumType; // add RostrumType to path *after* its created
+      path.rostrumStash = this.rostrumStash;
       return path;                      
     }      
   });
 
   // A pencil or pen stroke carries a copy of its cell's stash settings it was
-  // drawn with, as podiumStash: its panel loads them when the stroke is selected.
+  // drawn with, as rostrumStash: its panel loads them when the stroke is selected.
   fabric.PodBrush.settings = ({ alpha, rgb, style, width }) => ({ alpha, rgb, style, width });
 
   fabric.RastrumBrush = fabric.util.createClass(fabric.BaseBrush, {
@@ -424,14 +424,14 @@ function initFabric() {
         Math.min(origin.x, ptr.x), Math.min(origin.y, ptr.y));
       canvas.add(new fabric.Group(paths, {
         hasControls: false,
-        podiumType: "rastrum",
-        podiumStash: fabric.RastrumBrush.settings(this),
+        rostrumType: "rastrum",
+        rostrumStash: fabric.RastrumBrush.settings(this),
       }));
      }
   });
 
   // A rastrum carries a copy of the rastrum cell's stash settings it was drawn
-  // with, as podiumStash: the RastrumPanel loads them when the rastrum is
+  // with, as rostrumStash: the RastrumPanel loads them when the rastrum is
   // selected, and redraw() needs its style ("L-R" or "T-B").
   fabric.RastrumBrush.settings = ({ alpha, rgb, style, gap, lines, width, bars, barWidth }) =>
     ({ alpha, rgb, style, gap, lines, width, bars, barWidth });
@@ -465,15 +465,15 @@ function initFabric() {
   // rotation and length; its top-left corner stays put. The group itself is
   // kept, only its contents are swapped, so the selection is undisturbed.
   fabric.RastrumBrush.redraw = function (group, stash) {
-    // rastrums saved before podiumStash existed: staves are longer than tall
-    let style = group.podiumStash?.style ?? (group.width >= group.height ? "L-R" : "T-B");
+    // rastrums saved before rostrumStash existed: staves are longer than tall
+    let style = group.rostrumStash?.style ?? (group.width >= group.height ? "L-R" : "T-B");
     let length = style == "L-R" ? group.width : group.height;
     let color = fabric.Color.fromHex(stash.rgb);
     color.setAlpha(stash.alpha);
     let fresh = new fabric.Group(fabric.RastrumBrush.paths({ ...stash, color: color.toRgba(), length }));
     for (let obj of fresh._objects) obj.group = group;
     group._objects = fresh._objects;
-    group.set({ width: fresh.width, height: fresh.height, podiumStash: fabric.RastrumBrush.settings(stash), dirty: true });
+    group.set({ width: fresh.width, height: fresh.height, rostrumStash: fabric.RastrumBrush.settings(stash), dirty: true });
     group.setCoords();
     group.canvas?.requestRenderAll();
   };
@@ -481,11 +481,11 @@ function initFabric() {
   // LineBrush's lines are restricted to stright lines
   fabric.LineBrush = fabric.util.createClass(fabric.RastrumBrush, {
     type: "LineBrush",
-    podiumType: "ink",
+    rostrumType: "ink",
   
-    initialize: function (canvas, options, color, podiumType) {
+    initialize: function (canvas, options, color, rostrumType) {
       this.callSuper("initialize", canvas, options, color);
-      this.podiumType = podiumType ;
+      this.rostrumType = rostrumType ;
     },
   
     onMouseMove: function (ptr) {
@@ -532,8 +532,8 @@ function initFabric() {
         strokeLineCap: "round",
         strokeWidth: width,
         hasControls: false,
-        podiumType: this.podiumType, 
-        podiumStash: fabric.PodBrush.settings(this),
+        rostrumType: this.rostrumType,
+        rostrumStash: fabric.PodBrush.settings(this),
       });
       canvas.clearContext(canvas.contextTop);
       canvas.fire("before:path:created", { path: this.path });

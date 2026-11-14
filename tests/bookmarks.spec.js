@@ -6,8 +6,8 @@ const { test, expect } = require("@playwright/test");
 // score, so nothing on it can be aimed at by position alone. Bookmarks
 // therefore have two exact targets: the cursor, which stands for the page being
 // read, and a tab, which stands for the page it marks.
-const pageFile = path.join(__dirname, "..", "build", "podium.html");
-test.skip(!fs.existsSync(pageFile), "build/podium.html is missing; run build.py --podium");
+const pageFile = path.join(__dirname, "..", "build", "rostrum.html");
+test.skip(!fs.existsSync(pageFile), "build/rostrum.html is missing; run build.py --rostrum");
 
 test.use({ viewport: { width: 1280, height: 720 }, hasTouch: true });
 
@@ -16,7 +16,7 @@ const LONG = GS * 1.5; // comfortably past the long-press threshold
 const PAGES = 120; // enough that a page is worth a few pixels of band, no more
 
 test.beforeEach(async ({ page }) => {
-  await page.goto("/podium.html");
+  await page.goto("/rostrum.html");
   await page.waitForFunction(() => !!window._menu_?.rings?.layout?.cells?.vertical);
 });
 

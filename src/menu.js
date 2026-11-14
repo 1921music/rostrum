@@ -3,20 +3,20 @@
 /**
   Copyright 2025 Glendon Diener
  
-  This file is part of Podium.
+  This file is part of Rostrum.
  
-  Podium is free software: you can redistribute it and/or modify it
+  Rostrum is free software: you can redistribute it and/or modify it
   under the terms of the GNU Affero General Public License as
   published by the Free Software Foundation, either version 3 of the
   License, or (at your option) any later version.
 
-  Podium is distributed in the hope that it will be useful, but
+  Rostrum is distributed in the hope that it will be useful, but
   WITHOUT ANY WARRANTY; without even the implied warranty of
   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
   Affero General Public License for more details.
 
   You should have received a copy of the GNU Affero General Public
-  License along with Podium. If not, see
+  License along with Rostrum. If not, see
   <https://www.gnu.org/licenses/>.
 **/
 
@@ -316,7 +316,7 @@ class Menu {
     try {
       let json = localStorage.getItem("menu") ?? this.stashDefaults;
       let parsed = JSON.parse(json);
-      if (parsed.version !== _podiumVersion_) {
+      if (parsed.version !== _rostrumVersion_) {
         this.stashFromJson(this.stashDefaults, "local");
         localStorage.setItem("menu", this.stashToJson("local"));
         // A stored stash from a different version means a returning user has
@@ -324,8 +324,8 @@ class Menu {
         // (First-time users never reach here — stashDefaults carries the
         // current version.)
         delay(2, () => dialog(
-          `Rostrum has been updated to version <strong>${_podiumVersion_}</strong>.<br><br>
-           <a href="https://github.com/1921music/rostrum/blob/v${_podiumVersion_}/CHANGELOG.md" target="_blank" rel="noopener">See what&rsquo;s new</a>`,
+          `Rostrum has been updated to version <strong>${_rostrumVersion_}</strong>.<br><br>
+           <a href="https://github.com/1921music/rostrum/blob/v${_rostrumVersion_}/CHANGELOG.md" target="_blank" rel="noopener">See what&rsquo;s new</a>`,
           { Close: { svg: "Cancel" } }
         ));
       } else {
@@ -742,7 +742,7 @@ class Menu {
         screen: { name: "Screen", stash: {}, svgPath: iconPaths["Full Screen"], storage: "local" },
 
       },
-      svgPath: iconPaths["Podium"],
+      svgPath: iconPaths["Rostrum"],
 
     }
 
@@ -1451,7 +1451,7 @@ class Menu {
     stashJsonObj = sanitize(stashJsonObj);
     let version = stashJsonObj.version;
     if (!version) return;
-    if (version != _podiumVersion_) {
+    if (version != _rostrumVersion_) {
       console.warn("Rostrum version mismatch, ignoring stash");
       return;
     }
@@ -1503,7 +1503,7 @@ class Menu {
         stash[ringKey].stash = ring.stash;
         stash[ringKey].cells = cells;
       }
-      stash.version = _podiumVersion_;
+      stash.version = _rostrumVersion_;
       return stash;
     } catch (error) {
       toast("Stash creation failed, ignoring: " + error);
@@ -1680,7 +1680,7 @@ class Menu {
         let rgba = color.toRgba();
         let brush;
         if (style == "Free") {
-          // PencilBrush subclasses PencilBrush, adding a podiumType=pencil||pen  key to the created path.
+          // PencilBrush subclasses PencilBrush, adding a rostrumType=pencil||pen  key to the created path.
           // This allows us to determine whether a path was created from the Pencil tool or the Pen tool.
           brush = new fabric.PodBrush(canvas, key, activeCell.stash);
           brush.width = width;
@@ -1725,7 +1725,7 @@ class Menu {
           top: opts.absolutePointer.y,
           objectCaching: false, 
           hasControls: false,
-          podiumStash: { alpha, font, size, height, rgb }, // see Panel.load
+          rostrumStash: { alpha, font, size, height, rgb }, // see Panel.load
         };
         Object.assign(config, fontMap[font]);
         let textbox = addObj(new fabric.Textbox("Abc", config));
@@ -1748,8 +1748,8 @@ class Menu {
         color.setAlpha(alpha);
         let rgba = color.toRgba();
         let config = {
-          podiumType: "symbols",
-          podiumStash: { alpha, rgb, size }, // see Panel.load
+          rostrumType: "symbols",
+          rostrumStash: { alpha, rgb, size }, // see Panel.load
           fill: rgba,
           fontSize: size * 5, // Bravura Text: 200 font units per staff space, 1000 per em
           editable: false,
@@ -1869,7 +1869,7 @@ class Menu {
 
     _score_.setDirty(true);
     if (pg) {
-      if (this.newlyCreated && this.newlyCreated.podiumType == "text") {
+      if (this.newlyCreated && this.newlyCreated.rostrumType == "text") {
         // For text objects, immediately enter editing:
         this.newlyCreated.enterEditing();
         this.newlyCreated.selectAll();

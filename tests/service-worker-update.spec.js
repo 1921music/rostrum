@@ -76,7 +76,7 @@ test('a legacy worker upgrades without stale HTTP precaching; the first reload i
     unavailable = true;
     await page.reload();
     await expect(page).toHaveTitle('newest');
-    expect(requests).not.toContain('/app/podium.html');
+    expect(requests).not.toContain('/app/rostrum.html');
     expect(external).toEqual([]);
   } finally {
     await context.setOffline(false);

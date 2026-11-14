@@ -3,20 +3,20 @@
 /**
   Copyright 2025 Glendon Diener
  
-  This file is part of Podium.
+  This file is part of Rostrum.
  
-  Podium is free software: you can redistribute it and/or modify it
+  Rostrum is free software: you can redistribute it and/or modify it
   under the terms of the GNU Affero General Public License as
   published by the Free Software Foundation, either version 3 of the
   License, or (at your option) any later version.
 
-  Podium is distributed in the hope that it will be useful, but
+  Rostrum is distributed in the hope that it will be useful, but
   WITHOUT ANY WARRANTY; without even the implied warranty of
   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
   Affero General Public License for more details.
 
   You should have received a copy of the GNU Affero General Public
-  License along with Podium. If not, see
+  License along with Rostrum. If not, see
   <https://www.gnu.org/licenses/>.
 **/
 
@@ -25,7 +25,7 @@ export { iconPaths };
 
 /**
 iconPaths
-  ...defines the svg paths (rects, ellopses, texts) used for Podium's icons.
+  ...defines the svg paths (rects, ellopses, texts) used for Rostrum's icons.
   These paths are rendered to the dom using the function common::iconSvg(...).
   Many of these paths were created in Inkscape, then "hand copied" from the resulting
   svg files, while others were created by hand-coding the svg.  As a result, there
@@ -511,7 +511,7 @@ Png:
    <text y="14" x="6" font-family="Bravura" font-size="12px">\ueb1b</text>
    <text y="22" x="6" font-size="6px">PNG</text>`,
 
-Podium:
+Rostrum:
   `<g transform="translate(1),scale(0.9,0.9)">
    <path  fill="#aaa" stroke="currentColor" stroke-width=".6" stroke-linejoin="round"
    d="M4 23v-3h16v3h1.5h-19ZM7 20v-14h10v14M7 12h-2l-3-10h20l-3 10h-2"/>
@@ -672,7 +672,7 @@ Webcam:
   `<path fill="none" stroke="currentColor" stroke-width="0.6" d="M8.3,18.8C8.48,19.8 6.55,20.9 3.74,22 8.77,20.9 14,20.7 20.2,22 18,21.1 15.8,20.2 15.1,19.1M20,11.5c0,4.5-3.7,8.2-8.2,8.2-4.29,0-7.96,-3.7-7.96,-8.2 0,-4.62 3.67,-8.29 7.96,-8.29 4.5,0 8.2,3.67 8.2,8.29zm-2.7,0.3a2.95,2.95 0 0 1-3,3 2.95,2.95 0 0 1-2.9,-3 2.95,2.95 0 0 1 2.9,-2.69 2.95,2.95 0 0 1 3,2.69zm1.4,0a4.51,4.63 0 0 1-4.5,4.6 4.51,4.63 0 0 1-4.38,-4.6 4.51,4.63 0 0 1 4.38,-4.4 4.51,4.63 0 0 1 4.5,4.4z"/>`,
 };
 
-// following code generates a data url to create the podium favicon...uncomment it
+// following code generates a data url to create the rostrum favicon...uncomment it
 // to have it written to console...then copy it to the <head> section of the html.
 /*
 import { delay, helm } from "./common.js";
