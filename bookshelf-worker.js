@@ -12901,6 +12901,21 @@ var DirectoryLibraryFiles = class {
   constructor(root) {
     this.root = root;
   }
+  async clearLibrary({ database = true } = {}) {
+    try {
+      const scores = await this.root.getDirectoryHandle("scores");
+      for await (const [name, handle] of scores.entries()) {
+        if (handle.kind === "file" && /^[0-9a-f-]{36}__[^/\\\x00]+$/i.test(name)) await scores.removeEntry(name);
+      }
+    } catch (error) {
+      if (error.name !== "NotFoundError") throw error;
+    }
+    if (database) try {
+      await this.root.removeEntry("library.sqlite");
+    } catch (error) {
+      if (error.name !== "NotFoundError") throw error;
+    }
+  }
   async parent(path, create = false) {
     const parts = path.split("/");
     if (parts.some((part) => !part || part === "." || part === ".." || /[\\\x00]/.test(part))) {
@@ -12940,8 +12955,9 @@ async function openOpfsLibraryStorage() {
   const sqlite = await initializeLibrarySqlite();
   const pool = await sqlite.installOpfsSAHPoolVfs({ directory: ".rostrum-library-db" });
   const db2 = new pool.OpfsSAHPoolDb("/library.sqlite");
+  const files2 = new DirectoryLibraryFiles(root);
   return {
-    files: new DirectoryLibraryFiles(root),
+    files: files2,
     database: {
       exec(statement, bind = []) {
         return db2.exec({ sql: statement, bind, rowMode: "object", returnValue: "resultRows" });
@@ -12953,6 +12969,17 @@ async function openOpfsLibraryStorage() {
       },
       close() {
         db2.close();
+      },
+      async destroy() {
+        db2.close();
+        await files2.clearLibrary({ database: false });
+        if (!await pool.removeVfs()) throw new Error("Could not remove the OPFS library database.");
+        try {
+          await root.getDirectoryHandle(".rostrum-library-db");
+          throw new Error("The OPFS library database could not be fully removed.");
+        } catch (error) {
+          if (error.name !== "NotFoundError") throw error;
+        }
       }
     }
   };
@@ -12960,7 +12987,7 @@ async function openOpfsLibraryStorage() {
 
 // src/bookshelf-storage-snapshot.js
 async function openSnapshotDatabase({ read, write, release = () => {
-} }) {
+}, destroy }) {
   const sqlite = await initializeLibrarySqlite();
   const bytes = await read();
   const filename = "/library-" + crypto.randomUUID() + ".sqlite";
@@ -12984,6 +13011,15 @@ async function openSnapshotDatabase({ read, write, release = () => {
     async close() {
       try {
         db2.close();
+      } finally {
+        await release();
+      }
+    },
+    async destroy() {
+      if (!destroy) throw new Error("This storage cannot delete library data.");
+      try {
+        db2.close();
+        await destroy();
       } finally {
         await release();
       }
@@ -13052,6 +13088,7 @@ async function openIndexedDbBytes({ name = "rostrum-bookshelf" } = {}) {
         return blob && blob.arrayBuffer();
       },
       writeDatabase: (bytes) => files2.write("library.sqlite", bytes),
+      clear: () => access("readwrite", (store) => store.clear()),
       close() {
         connection.close();
         release();
@@ -13068,7 +13105,7 @@ async function openIndexedDbBytes({ name = "rostrum-bookshelf" } = {}) {
 async function openIndexedDbLibraryStorage({ name = "rostrum-bookshelf" } = {}) {
   const storage = await openIndexedDbBytes({ name });
   try {
-    const database = await openSnapshotDatabase({ read: storage.readDatabase, write: storage.writeDatabase, release: storage.close });
+    const database = await openSnapshotDatabase({ read: storage.readDatabase, write: storage.writeDatabase, release: storage.close, destroy: storage.clear });
     return { files: storage.files, database };
   } catch (error) {
     storage.close();
@@ -13103,6 +13140,11 @@ async function openDirectoryBytes({ directory }) {
         await files2.write("library.sqlite", bytes);
         persisted = await digest(bytes);
       },
+      async clear() {
+        const current = await read();
+        if ((current && await digest(current)) !== persisted) throw new Error("The library database was changed outside this session. Reopen it before deleting data.");
+        await files2.clearLibrary();
+      },
       close: release
     };
   } catch (error) {
@@ -13115,7 +13157,7 @@ async function openDirectoryBytes({ directory }) {
 async function openDirectoryLibraryStorage({ directory }) {
   const storage = await openDirectoryBytes({ directory });
   try {
-    const database = await openSnapshotDatabase({ read: storage.readDatabase, write: storage.writeDatabase, release: storage.close });
+    const database = await openSnapshotDatabase({ read: storage.readDatabase, write: storage.writeDatabase, release: storage.close, destroy: storage.clear });
     return { files: storage.files, database };
   } catch (error) {
     storage.close();
@@ -13142,7 +13184,7 @@ function request(method, args = []) {
   });
 }
 async function openBridgedLibraryStorage() {
-  const database = await openSnapshotDatabase({ read: () => request("readDatabase"), write: (bytes) => request("writeDatabase", [bytes]), release: () => request("close") });
+  const database = await openSnapshotDatabase({ read: () => request("readDatabase"), write: (bytes) => request("writeDatabase", [bytes]), release: () => request("close"), destroy: () => request("clear") });
   return { database, files: {
     read: (path) => request("read", [path]),
     write: (path, bytes) => request("write", [path, bytes]),
@@ -14883,7 +14925,25 @@ async function open() {
   initialized = true;
 }
 var importedDocument = (hash) => sql("SELECT * FROM documents WHERE content_hash=? ORDER BY deleted_at IS NOT NULL, replaced_by_id IS NOT NULL, id LIMIT 1", [hash])[0];
+var withOriginalLocation = (metadata, location) => {
+  if (!location) return metadata;
+  if (![location.source, location.name].every((value) => typeof value === "string" && value) || location.path !== null && typeof location.path !== "string") throw new Error("Invalid original file location");
+  const clean = { source: location.source, path: location.path, name: location.name };
+  const locations = metadata.originalLocations || [];
+  if (locations.some((item) => item.source === clean.source && item.path === clean.path && item.name === clean.name)) return metadata;
+  return { ...metadata, originalLocations: [...locations, clean] };
+};
 var actions = {
+  destroyStorage() {
+  },
+  rememberOriginalLocation({ id, location }) {
+    return transaction(() => {
+      const document = sql("SELECT * FROM documents WHERE id=?", [id])[0];
+      if (!document) throw new Error("Score not found");
+      const metadata = JSON.parse(document.metadata_json), updated = withOriginalLocation(metadata, location);
+      return updated === metadata ? document : save("documents", { id, metadata_json: JSON.stringify(updated) });
+    });
+  },
   close() {
   },
   async availability({ destination = "" } = {}) {
@@ -15049,12 +15109,12 @@ var actions = {
     await open();
     return { version: 1 };
   },
-  async importFile({ file, entries, displayName = file.name, replacesId = null, derivedFromId = null }) {
+  async importFile({ file, entries, displayName = file.name, replacesId = null, derivedFromId = null, originalLocation = null }) {
     const id = crypto.randomUUID();
     const bytes = await file.arrayBuffer();
     const hash = await hashBytes(bytes);
     const existing = importedDocument(hash);
-    if (existing) return { ...existing, alreadyImported: true };
+    if (existing) return { ...actions.rememberOriginalLocation({ id: existing.id, location: originalLocation }), alreadyImported: true };
     const normalized = file.name.normalize("NFC").replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/[ .]+$/, "");
     const extension = normalized.match(/\.[a-z0-9]{1,12}$/i)?.[0] || "";
     const stem = extension ? normalized.slice(0, -extension.length) : normalized;
@@ -15069,7 +15129,7 @@ var actions = {
           storage_path: path,
           size_bytes: file.size,
           settings_json: "{}",
-          metadata_json: JSON.stringify({ displayName, originalFilename: file.name, format: file.name.split(".").pop().toLowerCase() })
+          metadata_json: JSON.stringify(withOriginalLocation({ displayName, originalFilename: file.name, format: file.name.split(".").pop().toLowerCase() }, originalLocation))
         });
         setFileState(id, { present: true });
         for (const entry of entries) save("entries", {
@@ -15307,6 +15367,13 @@ self.onmessage = ({ data }) => {
         return;
       }
       await open();
+      if (action === "destroyStorage") {
+        await db.destroy();
+        db = files = null;
+        initialized = false;
+        self.postMessage({ id, value: true });
+        return;
+      }
       value = await actions[action](args || {});
       actionCompleted = true;
       if (!["backup", "export"].includes(action)) await db.flush();
