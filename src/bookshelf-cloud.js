@@ -1,4 +1,5 @@
 // +skip
+import { LIBRARY_NAMESPACE, libraryFormat, validateLibraryFormat, LibraryFormatError, listStoredScores, scoreStoragePath } from './bookshelf-format.js';
 export { LibraryCloudTransport };
 // -skip
 
@@ -11,7 +12,26 @@ class LibraryCloudTransport {
     this.path = relative ? '/' + relative : ''; // CachedSrc uses a leading slash below its root.
     this.id = source.source + ':' + this.path;
   }
-  async connect() { await this.source.auth(); await this.source.getDir(this.path,true); }
+  async connect() { await this.source.auth(); await this.source.getDir(this.path,true); await this.ensureFormat(); }
+  async ensureFormat({create = false} = {}) {
+    const parent = await this.source.getDir(this.path,true);
+    if (!Object.hasOwn(parent.dirs,LIBRARY_NAMESPACE)) {
+      if (!create) return null;
+      try { await this.source.putDir(this.path,LIBRARY_NAMESPACE); }
+      catch (error) { if (!Object.hasOwn((await this.source.getDir(this.path,true)).dirs,LIBRARY_NAMESPACE)) throw error; }
+    }
+    const root = await this.source.getDir(this.full(''),true);
+    if (Object.hasOwn(root.files,'library-format.json')) {
+      const file = new Blob([await this.source.getFileSrc(this.full(''),'library-format.json',root,root.files['library-format.json'])]);
+      if (file.size > 4096) throw new LibraryFormatError('Invalid library format manifest.');
+      return validateLibraryFormat(JSON.parse(await file.text()));
+    }
+    if (Object.keys(root.dirs).length || Object.keys(root.files).some(name => !/^\.rostrum-[0-9a-f-]{36}\.pending$/i.test(name))) throw new LibraryFormatError('Missing format manifest in a non-empty library. No data was changed.');
+    if (!create) return null;
+    const format = libraryFormat();
+    await this.publishRaw('library-format.json',new Blob([JSON.stringify(format)],{type:'application/json'}));
+    return format;
+  }
   async background(run) {
     const users = LibraryCloudTransport.backgroundUsers;
     let state = users.get(this.source);
@@ -20,7 +40,7 @@ class LibraryCloudTransport {
     try { return await run(); }
     finally { if (!--state.count) { this.source.backgroundAuth = state.previous; users.delete(this.source); } }
   }
-  full(path) { return this.path + (path ? '/' + path : ''); }
+  full(path) { return this.path + '/' + LIBRARY_NAMESPACE + (path ? '/' + path : ''); }
   async directory(path, create = false) {
     if (path) {
       const parts = path.split('/'); let parent = '';
@@ -41,10 +61,10 @@ class LibraryCloudTransport {
     return 'changes/' + id + '.json';
   }
   scorePath(doc) {
-    if (!/^scores\/[^/\\\x00]+$/.test(doc.storage_path) || ['.','..'].includes(doc.storage_path.slice(7))) throw new Error('Invalid score path');
-    return doc.storage_path;
+    return scoreStoragePath(doc.storage_path);
   }
   async listChanges() {
+    if (!await this.ensureFormat()) return [];
     const root = await this.directory('changes'); if (!root) return [];
     const result = [];
     for (const deviceId of Object.keys(root.dirs)) if (/^[0-9a-f-]{36}$/i.test(deviceId)) {
@@ -54,7 +74,8 @@ class LibraryCloudTransport {
     return result;
   }
   async listScores() {
-    const dir = await this.directory('scores'); return dir ? Object.keys(dir.files).filter(name => /^[0-9a-f-]{36}__[^/\\\x00]+$/i.test(name)).map(name => ({ path:'scores/' + name,size:dir.files[name].size })) : [];
+    const format = await this.ensureFormat();
+    return format ? listStoredScores({directory:path => this.directory(path)},format.storageFormatVersion) : [];
   }
   async readPath(path) {
     const parts = path.split('/'), name = parts.pop(), parent = parts.join('/');
@@ -62,9 +83,13 @@ class LibraryCloudTransport {
     if (!file) throw new Error('Cloud file is missing: ' + path);
     return new Blob([await this.source.getFileSrc(this.full(parent),name,dir,file)]);
   }
-  readChanges(id) { return this.readPath(this.batchPath(id)); }
-  readScore(doc) { return this.readPath(this.scorePath(doc)); }
+  async readChanges(id) { await this.ensureFormat(); return this.readPath(this.batchPath(id)); }
+  async readScore(doc) { await this.ensureFormat(); return this.readPath(this.scorePath(doc)); }
   async publish(path, file) {
+    await this.ensureFormat({create:true});
+    return this.publishRaw(path,file,true);
+  }
+  async publishRaw(path,file,guard = false) {
     const parts = path.split('/'), name = parts.pop(), parent = parts.join('/');
     const directory = await this.directory(parent,true);
     if (Object.hasOwn(directory.files,name)) {
@@ -78,6 +103,7 @@ class LibraryCloudTransport {
     try {
       await this.source.putFile(this.full(parent),pending,file);
       await this.source.getDir(this.full(parent),true);
+      if (guard) await this.ensureFormat();
       await this.source.renameFile(this.full(parent),pending,name);
     } catch (error) {
       try { await this.source.getDir(this.full(parent),true); await this.source.trashFile(this.full(parent),pending); } catch { /* Keep the original failure. */ }

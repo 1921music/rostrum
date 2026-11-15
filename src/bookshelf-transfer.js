@@ -1,12 +1,6 @@
 import { Zip, ZipDeflate, ZipPassThrough, Unzip, UnzipInflate, strToU8 } from 'fflate';
-
-export const hashBytes = async bytes => [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))]
-  .map(value => value.toString(16).padStart(2, '0')).join('');
-
-export function scorePath(path) {
-  if (typeof path !== 'string' || !/^scores\/[^/\\\x00]+$/.test(path) || path.split('/').some(p => p === '.' || p === '..')) throw new Error('Invalid score path in library package');
-  return path;
-}
+import { LIBRARY_BACKUP_VERSION, LIBRARY_SCHEMA_VERSION, LIBRARY_STORAGE_VERSION, LIBRARY_RECORD_VERSION, scorePath, hashLibraryBytes as hashBytes, LibraryFormatError, upgradeLibraryEnvelope, backupUpgrades } from './bookshelf-format.js';
+export { scorePath, hashBytes };
 
 export async function exportLibraryPackage({ db, files, tables }) {
   const records = Object.fromEntries(Object.keys(tables).map(table => [table, db.exec(`SELECT * FROM ${table}`)]));
@@ -21,7 +15,7 @@ export async function exportLibraryPackage({ db, files, tables }) {
     const entry = new ZipDeflate(name, { level: 6 }); zip.add(entry); entry.push(bytes, true);
     if (zipError) throw zipError;
   };
-  const manifest = strToU8(JSON.stringify({ format: 'rostrum-library', version: 1, records, changes }));
+  const manifest = strToU8(JSON.stringify({ format:'rostrum-library',version:LIBRARY_BACKUP_VERSION,schemaVersion:LIBRARY_SCHEMA_VERSION,storageFormatVersion:LIBRARY_STORAGE_VERSION,recordFormatVersion:LIBRARY_RECORD_VERSION,records,changes }));
   if (manifest.length > 64 * 1024 * 1024) throw new Error('Library metadata exceeds the supported 64 MiB package size');
   addBytes('library.json', manifest);
   addBytes('library.sqlite', await db.export());
@@ -80,8 +74,8 @@ export async function readLibraryPackage(input, tables) {
   } catch (error) { await reader.cancel().catch(() => {}); throw error; }
   finally { reader.releaseLock(); }
   if (!archive['library.json']) throw new Error('Invalid library package');
-  const manifest = JSON.parse(await archive['library.json'].text());
-  if (manifest.format !== 'rostrum-library' || manifest.version !== 1 || !Array.isArray(manifest.changes)) throw new Error('Unsupported library package version');
+  const manifest = upgradeLibraryEnvelope(JSON.parse(await archive['library.json'].text()),'rostrum-library',LIBRARY_BACKUP_VERSION,backupUpgrades);
+  if (manifest.format !== 'rostrum-library' || manifest.version !== LIBRARY_BACKUP_VERSION || manifest.schemaVersion !== LIBRARY_SCHEMA_VERSION || manifest.storageFormatVersion !== LIBRARY_STORAGE_VERSION || manifest.recordFormatVersion !== LIBRARY_RECORD_VERSION || !Array.isArray(manifest.changes)) throw new LibraryFormatError('Unsupported library package version. Update Rostrum; pre-versioned backups are not imported.');
   if (!manifest.records || Object.keys(manifest.records).some(table => !Object.hasOwn(tables, table))) throw new Error('Unknown library record type');
   for (const table of Object.keys(tables)) if (!Array.isArray(manifest.records[table])) throw new Error('Incomplete library package');
   const paths = new Set();

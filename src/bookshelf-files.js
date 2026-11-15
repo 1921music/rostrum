@@ -1,3 +1,5 @@
+import { LIBRARY_NAMESPACE } from './bookshelf-format.js';
+export const libraryDirectory = root => root.getDirectoryHandle(LIBRARY_NAMESPACE,{create:true});
 // Relative paths are identical for OPFS and user-selected directories. This
 // adapter never discovers a root itself: the storage backend supplies it.
 export class DirectoryLibraryFiles {
@@ -5,10 +7,9 @@ export class DirectoryLibraryFiles {
   async clearLibrary({ database = true } = {}) {
     // Never recursively remove a user-selected directory or unrelated files.
     try {
-      const scores = await this.root.getDirectoryHandle('scores');
-      for await (const [name,handle] of scores.entries()) {
-        if (handle.kind === 'file' && /^[0-9a-f-]{36}__[^/\\\x00]+$/i.test(name)) await scores.removeEntry(name);
-      }
+      // This adapter is rooted inside the reserved generation directory.
+      // scores/ belongs entirely to this library, including migrated layouts.
+      await this.root.removeEntry('scores',{recursive:true});
     } catch (error) { if (error.name !== 'NotFoundError') throw error; }
     if (database) try { await this.root.removeEntry('library.sqlite'); }
     catch (error) { if (error.name !== 'NotFoundError') throw error; }

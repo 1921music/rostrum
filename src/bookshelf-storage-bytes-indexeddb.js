@@ -1,6 +1,6 @@
 import { holdLibraryLock } from './bookshelf-storage-lock.js';
 
-export async function openIndexedDbBytes({ name = 'rostrum-bookshelf' } = {}) {
+export async function openIndexedDbBytes({ name = 'rostrum-bookshelf-v2' } = {}) {
   const release = await holdLibraryLock('rostrum-library-idb:' + name);
   let connection;
   try {

@@ -1,4 +1,5 @@
 // +skip
+import { LIBRARY_SYNC_VERSION, LIBRARY_RECORD_VERSION, upgradeLibraryEnvelope, syncUpgrades } from './bookshelf-format.js';
 export { exchangeLibraryChanges, LibraryAutoSync };
 // -skip
 
@@ -6,6 +7,7 @@ export { exchangeLibraryChanges, LibraryAutoSync };
 // revisions are sent; imported revisions are never echoed in a full snapshot.
 async function exchangeLibraryChanges(store, transport) {
   if (!transport?.id || !['listChanges','readChanges','writeChanges','listScores','readScore','writeScore'].every(method => typeof transport[method] === 'function')) throw new Error('Invalid library sync transport');
+  await transport.ensureFormat?.({create:true});
   const initial = await store.call('syncData');
   const cache = Object.hasOwn(initial.batches,transport.id) ? initial.batches[transport.id] : {};
   const remote = await transport.listChanges(), remoteIds = new Set(), fetched = [], changes = new Map();
@@ -16,12 +18,12 @@ async function exchangeLibraryChanges(store, transport) {
     if (Object.hasOwn(cache,item.id)) { for (const id of cache[item.id]) remoteIds.add(id); continue; }
     const blob = await transport.readChanges(item.id);
     if (!(blob instanceof Blob) || blob.size > 64 * 1024 * 1024) throw new Error('Change batch exceeds the supported 64 MiB size');
-    const batch = JSON.parse(await blob.text());
-    if (batch.format !== 'rostrum-library-changes' || batch.version !== 1 || !Array.isArray(batch.changes)
+    const batch = upgradeLibraryEnvelope(JSON.parse(await blob.text()),'rostrum-library-changes',LIBRARY_SYNC_VERSION,syncUpgrades);
+    if (batch.format !== 'rostrum-library-changes' || batch.version !== LIBRARY_SYNC_VERSION || !Number.isSafeInteger(batch.recordFormatVersion) || batch.recordFormatVersion < 2 || batch.recordFormatVersion > LIBRARY_RECORD_VERSION || !Array.isArray(batch.changes)
       || item.id !== batch.deviceId + '/' + batch.batchId) throw new Error('Invalid change batch');
     const changeIds = [];
     for (const change of batch.changes) {
-      if (!change || typeof change.id !== 'string') throw new Error('Invalid change record');
+      if (!change || typeof change.id !== 'string' || !Number.isSafeInteger(change.record_version) || change.record_version < 2 || change.record_version > batch.recordFormatVersion) throw new Error('Invalid change record version or identity');
       if (changes.has(change.id) && JSON.stringify(changes.get(change.id)) !== JSON.stringify(change)) throw new Error('Conflicting copies of a change');
       changes.set(change.id,change); remoteIds.add(change.id); changeIds.push(change.id);
     }
@@ -59,7 +61,7 @@ async function exchangeLibraryChanges(store, transport) {
   if (group.length) batches.push(group);
   for (const changes of batches) {
     const batchId = crypto.randomUUID(), id = snapshot.deviceId + '/' + batchId;
-    const packet = new Blob([JSON.stringify({ format:'rostrum-library-changes',version:1,deviceId:snapshot.deviceId,batchId,changes })],{ type:'application/json' });
+    const packet = new Blob([JSON.stringify({ format:'rostrum-library-changes',version:LIBRARY_SYNC_VERSION,recordFormatVersion:LIBRARY_RECORD_VERSION,deviceId:snapshot.deviceId,batchId,changes })],{ type:'application/json' });
     await transport.writeChanges(id,packet);
     const changeIds = changes.map(change => change.id);
     for (const id of changeIds) remoteIds.add(id);

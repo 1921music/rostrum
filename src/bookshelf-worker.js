@@ -2,24 +2,16 @@ import { openLibraryStorage } from './bookshelf-storage.js';
 import { openConfiguredLibraryStorage } from './bookshelf-storage-policy.js';
 import { unzipSync } from 'fflate';
 import { exportLibraryPackage, readLibraryPackage, hashBytes, scorePath } from './bookshelf-transfer.js';
+import { LIBRARY_SCHEMA_VERSION, LIBRARY_RECORD_VERSION, createScorePath, decodeLibraryRecord } from './bookshelf-format.js';
+import { migrateLibrarySchema, migrateLibraryRecords, migrateLibraryStorage, versionedLibraryFiles } from './bookshelf-migrations.js';
+import { createLibrarySchemaV2, libraryTables } from './bookshelf-schema.js';
 
 // All database and file mutations run serially in this worker. A second tab
 // must fail explicitly rather than silently switching to temporary storage.
-let db, files;
+let db, files, rawFiles;
 let initialized = false;
 let storageOptions = {};
-const tables = {
-  documents: 'content_hash TEXT NOT NULL, storage_path TEXT NOT NULL UNIQUE, size_bytes INTEGER NOT NULL, derived_from_id TEXT REFERENCES documents(id), replaced_by_id TEXT REFERENCES documents(id), settings_json TEXT NOT NULL DEFAULT \'{}\'',
-  entries: 'document_id TEXT NOT NULL REFERENCES documents(id), parent_id TEXT REFERENCES entries(id), anchor_json TEXT NOT NULL',
-  annotations: 'document_id TEXT NOT NULL REFERENCES documents(id), anchor_json TEXT NOT NULL, content_json TEXT NOT NULL',
-  tags: 'name TEXT NOT NULL',
-  document_tags: 'document_id TEXT NOT NULL REFERENCES documents(id), tag_id TEXT NOT NULL REFERENCES tags(id)',
-  entry_tags: 'entry_id TEXT NOT NULL REFERENCES entries(id), tag_id TEXT NOT NULL REFERENCES tags(id)',
-  bookshelves: '',
-  bookshelf_documents: 'bookshelf_id TEXT NOT NULL REFERENCES bookshelves(id), document_id TEXT NOT NULL REFERENCES documents(id), order_key TEXT NOT NULL',
-  playlists: '',
-  playlist_items: 'playlist_id TEXT NOT NULL REFERENCES playlists(id), entry_id TEXT NOT NULL REFERENCES entries(id), order_key TEXT NOT NULL',
-};
+const tables = Object.fromEntries(libraryTables.map(name => [name,true]));
 function validateJsonField(value) {
   if (typeof value !== 'string') throw new Error('Library JSON fields must be text');
   const parsed = JSON.parse(value);
@@ -83,11 +75,12 @@ function save(table, values, parents = null) {
     if (key.endsWith('_json')) validateJsonField(value);
   }
   writeRow(table, row);
-  sql('INSERT INTO changes VALUES (?,?,?,?,?,?,?)', [revision, deviceId, table, row.id,
-    JSON.stringify(parents || (previous ? [previous.revision_id] : [])), JSON.stringify(row), new Date().toISOString()]);
+  sql('INSERT INTO changes VALUES (?,?,?,?,?,?,?,?)', [revision, deviceId, table, row.id,
+    JSON.stringify(parents || (previous ? [previous.revision_id] : [])), JSON.stringify(row), new Date().toISOString(),LIBRARY_RECORD_VERSION]);
   return row;
 }
 let deviceId;
+const decodeChange = change => decodeLibraryRecord(change.entity_type,JSON.parse(change.payload_json),change.record_version);
 function validateTransfer(manifest) {
   const schemas = Object.fromEntries(Object.keys(tables).map(table => [table, sql(`PRAGMA table_info(${table})`)]));
   const normalize = (table, row) => {
@@ -107,11 +100,11 @@ function validateTransfer(manifest) {
   };
   const known = new Map(sql('SELECT * FROM changes').map(change => [change.id, change]));
   const incoming = new Map();
-  const sameChange = (a, b) => ['id', 'entity_type', 'entity_id', 'parent_revision_ids_json', 'payload_json', 'created_at', 'device_id'].every(key => a[key] === b[key]);
+  const sameChange = (a, b) => ['id', 'entity_type', 'entity_id', 'parent_revision_ids_json', 'payload_json', 'created_at', 'device_id','record_version'].every(key => a[key] === b[key]);
   for (const change of manifest.changes) {
     if (!change || ['id', 'device_id', 'entity_type', 'entity_id', 'parent_revision_ids_json', 'payload_json', 'created_at'].some(key => typeof change[key] !== 'string')) throw new Error('Invalid change record');
     if (incoming.has(change.id)) throw new Error('Duplicate change identity');
-    const row = normalize(change.entity_type, JSON.parse(change.payload_json));
+    const row = normalize(change.entity_type, decodeChange(change));
     if (row.id !== change.entity_id || row.revision_id !== change.id) throw new Error('Change identity does not match its record');
     const parents = JSON.parse(change.parent_revision_ids_json);
     if (!Array.isArray(parents) || parents.some(id => typeof id !== 'string' || id === change.id) || new Set(parents).size !== parents.length) throw new Error('Invalid change ancestry');
@@ -143,7 +136,7 @@ function validateTransfer(manifest) {
       if (ids.has(row.id)) throw new Error('Duplicate library record identity');
       ids.add(row.id);
       const change = combined.get(row.revision_id);
-      if (!change || change.entity_type !== table || change.entity_id !== row.id || JSON.stringify(normalize(table, JSON.parse(change.payload_json))) !== JSON.stringify(row)) throw new Error('Library record does not match its change history');
+      if (!change || change.entity_type !== table || change.entity_id !== row.id || JSON.stringify(normalize(table, decodeChange(change))) !== JSON.stringify(row)) throw new Error('Library record does not match its change history');
     }
   }
   const documents = new Map(manifest.records.documents.map(doc => [doc.id, doc]));
@@ -152,7 +145,7 @@ function validateTransfer(manifest) {
     if (!/^[a-f0-9]{64}$/.test(doc.content_hash) || !Number.isSafeInteger(doc.size_bytes) || doc.size_bytes < 0) throw new Error('Invalid score identity');
   }
   for (const change of incoming.values()) if (change.entity_type === 'documents') {
-    const row = JSON.parse(change.payload_json), doc = documents.get(row.id);
+    const row = decodeChange(change), doc = documents.get(row.id);
     if (!doc || ['storage_path', 'content_hash', 'size_bytes'].some(key => row[key] !== doc[key])) throw new Error('A document identity has different file contents');
     const local = sql('SELECT * FROM documents WHERE id=? OR storage_path=?', [doc.id, doc.storage_path])[0];
     if (local && (local.id !== doc.id || ['storage_path', 'content_hash', 'size_bytes'].some(key => local[key] !== doc[key]))) throw new Error('The package would overwrite a different score');
@@ -163,12 +156,12 @@ function mergeRecords(manifest) {
   const { incoming, normalize, known } = validateTransfer(manifest);
   transaction(() => {
     sql('PRAGMA defer_foreign_keys=ON');
-    for (const change of incoming.values()) if (!known.has(change.id)) sql('INSERT INTO changes VALUES (?,?,?,?,?,?,?)',
-      [change.id, change.device_id, change.entity_type, change.entity_id, change.parent_revision_ids_json, change.payload_json, change.created_at]);
+    for (const change of incoming.values()) if (!known.has(change.id)) sql('INSERT INTO changes VALUES (?,?,?,?,?,?,?,?)',
+      [change.id, change.device_id, change.entity_type, change.entity_id, change.parent_revision_ids_json, change.payload_json, change.created_at,change.record_version]);
     const entities = new Map([...incoming.values()].map(change => [change.entity_type + ':' + change.entity_id, change]));
     for (const { entity_type:table, entity_id:id } of entities.values()) {
       const chosen = heads(table,id).sort((a,b) => a.id.localeCompare(b.id)).at(-1);
-      writeRow(table,normalize(table,JSON.parse(chosen.payload_json)));
+      writeRow(table,normalize(table,decodeChange(chosen)));
     }
     validateRelations();
     if (sql('PRAGMA foreign_key_check').length) throw new Error('The changes contain broken library references');
@@ -187,36 +180,20 @@ async function localFile(doc) {
   catch (error) { if (error.name !== 'NotFoundError') throw error; setFileState(doc.id,{ present:false }); return null; }
 }
 function associatedDocument(change) {
-  const row = JSON.parse(change.payload_json);
+  const row = decodeChange(change);
   if (change.entity_type === 'documents') return row.id;
   if (row.document_id) return row.document_id;
   if (row.entry_id) return sql('SELECT document_id FROM entries WHERE id=?',[row.entry_id])[0]?.document_id;
 }
 async function open() {
   if (initialized) return;
-  if (!db) ({ database: db, files } = await openLibraryStorage(() => openConfiguredLibraryStorage(storageOptions)));
+  if (!db) ({ database: db, files:rawFiles } = await openLibraryStorage(() => openConfiguredLibraryStorage(storageOptions)));
   sql('PRAGMA foreign_keys=ON');
   sql('PRAGMA trusted_schema=OFF');
-  const applicationId = sql('PRAGMA application_id')[0].application_id;
-  const existingTables = sql("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'").map(row => row.name);
-  if (applicationId && applicationId !== 0x5253544d || !applicationId && existingTables.length && !['documents', 'entries', 'changes'].every(name => existingTables.includes(name))) {
-    throw new Error('The selected database is not a Rostrum library.');
-  }
-  const version = sql('PRAGMA user_version')[0].user_version;
-  if (version > 1) throw new Error('This library requires a newer Rostrum version.');
-  transaction(() => {
-    for (const [name, extra] of Object.entries(tables)) sql(`CREATE TABLE IF NOT EXISTS ${name} (
-      id TEXT PRIMARY KEY NOT NULL, revision_id TEXT NOT NULL, deleted_at TEXT,
-      metadata_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(metadata_json))${extra ? ',' + extra : ''})`);
-    sql('CREATE TABLE IF NOT EXISTS changes (id TEXT PRIMARY KEY, device_id TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, parent_revision_ids_json TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL)');
-    sql('CREATE TABLE IF NOT EXISTS local_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
-    sql('CREATE INDEX IF NOT EXISTS changes_entity ON changes(entity_type, entity_id)');
-    sql("CREATE INDEX IF NOT EXISTS entries_document ON entries(document_id)");
-    sql('CREATE INDEX IF NOT EXISTS documents_hash ON documents(content_hash)');
-    sql("CREATE INDEX IF NOT EXISTS entries_title ON entries(json_extract(metadata_json, '$.title'))");
-    sql('PRAGMA user_version=1');
-    sql('PRAGMA application_id=1381192781');
-  });
+  await migrateLibrarySchema(db,{create:() => createLibrarySchemaV2(db)});
+  await migrateLibraryRecords(db,Object.keys(tables));
+  const storageVersion = await migrateLibraryStorage(db,rawFiles);
+  files = versionedLibraryFiles(rawFiles,storageVersion);
   deviceId = sql("SELECT value FROM local_state WHERE key='device'")[0]?.value || crypto.randomUUID();
   sql("INSERT OR IGNORE INTO local_state VALUES ('device', ?)", [deviceId]);
   initialized = true;
@@ -232,6 +209,7 @@ const withOriginalLocation = (metadata, location) => {
   return {...metadata,originalLocations:[...locations,clean]};
 };
 const actions = {
+  formatInfo() { return {schemaVersion:sql('PRAGMA user_version')[0].user_version,...sql('SELECT * FROM library_info WHERE id=1')[0],migrations:sql('SELECT * FROM library_migrations')}; },
   destroyStorage() {},
   rememberOriginalLocation({id,location}) {
     return transaction(() => {
@@ -294,7 +272,7 @@ const actions = {
       if (!change || !Object.hasOwn(tables,change.entity_type)) throw new Error('Invalid change entity');
       selected.set(change.entity_type + ':' + change.entity_id,change);
     }
-    for (const change of selected.values()) records[change.entity_type].push(JSON.parse(change.payload_json));
+    for (const change of selected.values()) records[change.entity_type].push(decodeChange(change));
     const existing = new Set(sql('SELECT id FROM documents').map(doc => doc.id));
     const result = mergeRecords({ records, changes });
     // Remote-only documents must not be mistaken for locally imported files.
@@ -371,7 +349,7 @@ const actions = {
       if (!Array.isArray(expectedRevisionIds) || [...expectedRevisionIds].sort().join() !== alternatives.map(change => change.id).sort().join()) throw new Error('This conflict changed. Refresh before resolving it.');
       const chosen = alternatives.find(change => change.id === revisionId);
       if (!chosen || alternatives.length < 2) throw new Error('This conflict has already changed. Refresh before resolving it.');
-      const row = JSON.parse(chosen.payload_json);
+      const row = decodeChange(chosen);
       delete row.revision_id;
       // Always record the explicit resolution, even when the chosen payload
       // matches the currently displayed branch.
@@ -388,7 +366,7 @@ const actions = {
     } });
     return Object.fromEntries(Object.entries(selected).map(([name, bytes]) => [name, new TextDecoder().decode(bytes)]));
   },
-  async open() { await open(); return { version: 1 }; },
+  async open() { await open(); return { version: LIBRARY_SCHEMA_VERSION }; },
   async importFile({ file, entries, displayName = file.name, replacesId = null, derivedFromId = null, originalLocation = null }) {
     const id = crypto.randomUUID();
     const bytes = await file.arrayBuffer();
@@ -397,11 +375,7 @@ const actions = {
     // restore a tombstone or change replacement/annotation relationships.
     const existing = importedDocument(hash);
     if (existing) return { ...actions.rememberOriginalLocation({id:existing.id,location:originalLocation}), alreadyImported: true };
-    const normalized = file.name.normalize('NFC').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[ .]+$/, '');
-    const extension = normalized.match(/\.[a-z0-9]{1,12}$/i)?.[0] || '';
-    const stem = extension ? normalized.slice(0, -extension.length) : normalized;
-    const safeName = ([...stem].slice(0, 100).join('').replace(/[ .]+$/, '') || 'score') + extension;
-    const path = `scores/${id}__${safeName}`;
+    const path = createScorePath(id,file.name);
     try {
       await files.write(path, bytes);
       return transaction(() => {
@@ -604,12 +578,12 @@ self.onmessage = ({ data }) => {
       }
       if (action === 'close') {
         if (db) { await db.flush(); await db.close(); }
-        db = files = null; initialized = false;
+        db = files = rawFiles = null; initialized = false;
         self.postMessage({ id, value: true }); return;
       }
       await open();
       if (action === 'destroyStorage') {
-        await db.destroy(); db = files = null; initialized = false;
+        await db.destroy(); db = files = rawFiles = null; initialized = false;
         self.postMessage({id,value:true}); return;
       }
       value = await actions[action](args || {});

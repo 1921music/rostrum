@@ -95,7 +95,7 @@ test('reimport skips identical bytes without new files, songs or changes, includ
     const renamedType = await _bookshelf_.import(new File([bytes], 'Renamed.mscz'));
     const unchanged = JSON.stringify(changesBefore) === JSON.stringify(await _bookshelf_.call('changeIds'));
     const entries = await _bookshelf_.call('search');
-    const directory = await (await navigator.storage.getDirectory()).getDirectoryHandle('scores');
+    const directory = await (await (await navigator.storage.getDirectory()).getDirectoryHandle('rostrum-library-v2')).getDirectoryHandle('scores');
     const names = []; for await (const name of directory.keys()) names.push(name);
     await _bookshelf_.call('update', { table: 'documents', values: { id: first.id, deleted_at: new Date().toISOString() } });
     const deleted = await _bookshelf_.import(new File([bytes], 'First.pdf'));
@@ -394,7 +394,7 @@ test('a failed import rolls back metadata and removes the copied file', async ({
       ] });
     } catch { failed = true; }
     const documents = await _bookshelf_.call('list');
-    const root = await navigator.storage.getDirectory(); const folder = await root.getDirectoryHandle('scores');
+    const root = await (await navigator.storage.getDirectory()).getDirectoryHandle('rostrum-library-v2'); const folder = await root.getDirectoryHandle('scores');
     const files = []; for await (const name of folder.keys()) files.push(name);
     return { failed, documents: documents.length, files: files.length };
   });
@@ -539,7 +539,7 @@ test('an external database change blocks overwriting but still permits an emerge
     const pdf = await PDFLib.PDFDocument.create(); pdf.addPage([300,400]);
     const doc = await _bookshelf_.import(new File([await pdf.save()], 'Recover.pdf'));
     const score = await _bookshelf_.openDocument(doc.id), pg = await score.pgUse(1, false);
-    const handle = await directory.getFileHandle('library.sqlite');
+    const handle = await (await directory.getDirectoryHandle('rostrum-library-v2')).getFileHandle('library.sqlite');
     const changed = new Uint8Array(await (await handle.getFile()).arrayBuffer()); changed[changed.length - 1] ^= 1;
     const writer = await handle.createWritable(); await writer.write(changed); await writer.close();
     pg.canvas.add(new fabric.Rect({ left:10,top:20,width:30,height:40,fill:'red' })); score.setDirty(true);
@@ -624,8 +624,9 @@ test('cloud sync publishes changes and separate scores through the provider inte
       try { await _bookshelf_.syncCloud('pCloud', 'My library'); } catch { failed = true; }
       return { names:[...providerCloud.directories].flatMap(([path,dir]) => [...dir.files.keys()].map(name => path + '/' + name)), failed };
   });
-  expect(result.names).toHaveLength(2);
-  expect(result.names.some(name => name.startsWith('/My library/scores/') && name.endsWith('__Cloud.pdf'))).toBe(true);
-  expect(result.names.some(name => name.startsWith('/My library/changes/') && name.endsWith('.json'))).toBe(true);
+  expect(result.names).toHaveLength(3);
+  expect(result.names).toContain('/My library/rostrum-library-v2/library-format.json');
+  expect(result.names.some(name => name.startsWith('/My library/rostrum-library-v2/scores/') && name.endsWith('__Cloud.pdf'))).toBe(true);
+  expect(result.names.some(name => name.startsWith('/My library/rostrum-library-v2/changes/') && name.endsWith('.json'))).toBe(true);
   expect(result.failed).toBe(true);
 });

@@ -1,10 +1,10 @@
-import { DirectoryLibraryFiles } from './bookshelf-files.js';
+import { DirectoryLibraryFiles, libraryDirectory } from './bookshelf-files.js';
 import { holdLibraryLock } from './bookshelf-storage-lock.js';
 
 export async function openDirectoryBytes({ directory }) {
   if (!directory || directory.kind !== 'directory') throw new Error('Choose a library folder first.');
   const release = await holdLibraryLock('rostrum-library-folder:' + directory.name);
-  const files = new DirectoryLibraryFiles(directory);
+  const files = new DirectoryLibraryFiles(await libraryDirectory(directory));
   let persisted;
   const digest = async bytes => [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].join(',');
   const read = async () => {

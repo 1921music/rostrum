@@ -24,7 +24,7 @@ for(const kind of ['opfs','directory','indexeddb'])test(`delete managed data in 
   const pdf=await PDFLib.PDFDocument.create();pdf.addPage([300,400]);await _bookshelf_.import(new File([await pdf.save()],'Owned.pdf'));
   if(kind!=='indexeddb'){
    const foreign=await testStorageRoot.getFileHandle('My own file.txt',{create:true});const writer=await foreign.createWritable();await writer.write('keep');await writer.close();
-   const scores=await testStorageRoot.getDirectoryHandle('scores');const orphan=await scores.getFileHandle('00000000-0000-0000-0000-000000000000__Orphan.pdf',{create:true});await(await orphan.createWritable()).close();
+   const managed=await testStorageRoot.getDirectoryHandle('rostrum-library-v2');const scores=await managed.getDirectoryHandle('scores');const orphan=await scores.getFileHandle('00000000-0000-0000-0000-000000000000__Orphan.pdf',{create:true});await(await orphan.createWritable()).close();
   }
   await RostrumLibraryHost.saveCloudSelection({source:'pCloud',path:'/Saved sync'});
   await _panels_.library.view.refresh();
@@ -44,9 +44,9 @@ for(const kind of ['opfs','directory','indexeddb'])test(`delete managed data in 
  expect(await page.evaluate(()=>RostrumLibraryHost.loadCloudSelection())).toEqual({source:'pCloud',path:'/Saved sync'});
  const physical=await page.evaluate(async kind=>{
   if(kind==='indexeddb')return new Promise((resolve,reject)=>{const r=indexedDB.open('deletion-test');r.onsuccess=()=>{const db=r.result;const t=db.transaction('files');const q=t.objectStore('files').count();t.oncomplete=()=>{resolve(q.result);db.close();};};r.onerror=()=>reject(r.error);});
-  const names=[];const scores=await testStorageRoot.getDirectoryHandle('scores');for await(const name of scores.keys())names.push(name);
+  const names=[],managed=await testStorageRoot.getDirectoryHandle('rostrum-library-v2');try{const scores=await managed.getDirectoryHandle('scores');for await(const name of scores.keys())names.push(name);}catch(e){if(e.name!=='NotFoundError')throw e;}
   const keep=await(await testStorageRoot.getFileHandle('My own file.txt')).getFile();
-  let database=false;try{kind==='opfs'?await testStorageRoot.getDirectoryHandle('.rostrum-library-db'):await testStorageRoot.getFileHandle('library.sqlite');database=true;}catch(e){if(e.name!=='NotFoundError')throw e;}
+  let database=false;try{kind==='opfs'?await managed.getDirectoryHandle('.rostrum-library-db'):await managed.getFileHandle('library.sqlite');database=true;}catch(e){if(e.name!=='NotFoundError')throw e;}
   return{names,keep:await keep.text(),database};
  },kind);
  expect(physical).toEqual(kind==='indexeddb'?1:{names:[],keep:'keep',database:true});
@@ -101,7 +101,7 @@ test('directory deletion refuses a database replaced outside this session',async
  const result=await page.evaluate(async()=>{
   const root=await(await navigator.storage.getDirectory()).getDirectoryHandle('external-delete',{create:true});
   await _bookshelf_.configure({kind:'directory',directory:root});
-  const handle=await root.getFileHandle('library.sqlite'),writer=await handle.createWritable();await writer.write('external database');await writer.close();
+  const handle=await(await root.getDirectoryHandle('rostrum-library-v2')).getFileHandle('library.sqlite'),writer=await handle.createWritable();await writer.write('external database');await writer.close();
   let error='';try{await _bookshelf_.deleteStorage();}catch(e){error=e.message;}
   return {error,contents:await(await handle.getFile()).text()};
  });

@@ -1,13 +1,14 @@
 import { initializeLibrarySqlite } from './bookshelf-sqlite.js';
-import { DirectoryLibraryFiles } from './bookshelf-files.js';
+import { DirectoryLibraryFiles, libraryDirectory } from './bookshelf-files.js';
+import { LIBRARY_NAMESPACE } from './bookshelf-format.js';
 
 // Storage backend boundary: both scores and SQLite persistence belong here.
 // A selected-directory backend must provide its own database persistence;
 // swapping the file root does NOT redirect the OPFS SQLite VFS.
 export async function openOpfsLibraryStorage() {
-  const root = await navigator.storage.getDirectory();
+  const root = await libraryDirectory(await navigator.storage.getDirectory());
   const sqlite = await initializeLibrarySqlite();
-  const pool = await sqlite.installOpfsSAHPoolVfs({ directory: '.rostrum-library-db' });
+  const pool = await sqlite.installOpfsSAHPoolVfs({ directory: LIBRARY_NAMESPACE + '/.rostrum-library-db' });
   const db = new pool.OpfsSAHPoolDb('/library.sqlite');
   const files = new DirectoryLibraryFiles(root);
   return {

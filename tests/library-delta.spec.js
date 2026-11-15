@@ -296,8 +296,9 @@ test('cloud provider publishes readable score files before immutable JSON batche
     await _bookshelf_.syncCloud('pCloud','My library');
     return providerCloud.calls.filter(call => call.kind === 'publish');
   });
-  expect(result[0]).toMatchObject({ path:'/My library/scores' }); expect(result[0].name).toContain('__Readable name.pdf');
-  expect(result[1].path).toMatch(/^\/My library\/changes\//); expect(result[1].name).toMatch(/\.json$/);
+  const scores = result.filter(item => item.name !== 'library-format.json');
+  expect(scores[0]).toMatchObject({ path:'/My library/rostrum-library-v2/scores' }); expect(scores[0].name).toContain('__Readable name.pdf');
+  expect(scores[1].path).toMatch(/^\/My library\/rostrum-library-v2\/changes\//); expect(scores[1].name).toMatch(/\.json$/);
 });
 
 test('overlapping silent transfers restore foreground authentication after the last transfer', async ({ page }) => {
