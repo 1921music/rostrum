@@ -16,7 +16,7 @@ function request(method, args = []) {
   });
 }
 export async function openBridgedLibraryStorage() {
-  const database = await openSnapshotDatabase({ read: () => request('readDatabase'), write: bytes => request('writeDatabase', [bytes]), release: () => request('close') });
+  const database = await openSnapshotDatabase({ read: () => request('readDatabase'), write: bytes => request('writeDatabase', [bytes]), release: () => request('close'), destroy:() => request('clear') });
   return { database, files: {
     read: path => request('read', [path]), write: (path, bytes) => request('write', [path, bytes]), remove: path => request('remove', [path]),
   } };

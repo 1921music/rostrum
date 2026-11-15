@@ -1,6 +1,15 @@
 import { openIndexedDbBytes } from './bookshelf-storage-bytes-indexeddb.js';
 import { openDirectoryBytes } from './bookshelf-storage-bytes-directory.js';
 
+export async function storageCapabilities() {
+  let opfs = false;
+  if (location.protocol !== 'file:' && navigator.storage?.getDirectory) {
+    try { await navigator.storage.getDirectory(); opfs = true; } catch {}
+  }
+  return {directory:typeof window.showDirectoryPicker === 'function' && !!navigator.locks,opfs,
+    indexeddb:!!globalThis.indexedDB && !!navigator.locks};
+}
+
 // Permission prompts must run on the host page from an explicit user gesture,
 // even when the selected directory is otherwise used by a Worker.
 export async function queryStoragePermission(options) {

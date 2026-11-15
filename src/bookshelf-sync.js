@@ -45,7 +45,9 @@ async function exchangeLibraryChanges(store, transport) {
     if (paths.has(doc.storage_path)) continue;
     const info = await store.call('fileInfo',{ id,verify:true });
     if (!info.file) throw new Error('A score is missing from both this device and the cloud: ' + doc.storage_path);
-    await transport.writeScore(doc,info.file); paths.add(doc.storage_path); uploadedFiles++;
+    if (store.uploadFile) await store.uploadFile(doc,info.file,transport);
+    else await transport.writeScore(doc,info.file);
+    paths.add(doc.storage_path); uploadedFiles++;
   }
   const batches = []; let group = [], size = 0;
   for (const change of pending) {
@@ -86,7 +88,7 @@ class LibraryAutoSync {
   }
   async run() {
     if (!this.enabled || this.running || !this.store.hasSyncDestination()) return;
-    if (document.hidden || navigator.onLine === false || this.store.reviewPending || this.store.syncPending || this.store.cloudConnecting) { this.request(this.interval); return; }
+    if (document.hidden || navigator.onLine === false || this.store.storageDeleted || this.store.deletingStorage || this.store.fullSyncRunning || this.store.reviewPending || this.store.syncPending || this.store.cloudConnecting) { this.request(this.interval); return; }
     this.running = true; this.again = false;
     try { await this.store.syncAutomatically(); }
     catch { /* Store exposes a persistent, non-modal sync error. */ }

@@ -3,7 +3,7 @@ import { initializeLibrarySqlite } from './bookshelf-sqlite.js';
 // SQLite runs in memory, but an operation is successful only after flush has
 // persisted the complete image. This backend is deliberately explicit: it is
 // not a silent fallback if OPFS fails.
-export async function openSnapshotDatabase({ read, write, release = () => {} }) {
+export async function openSnapshotDatabase({ read, write, release = () => {}, destroy }) {
   const sqlite = await initializeLibrarySqlite();
   const bytes = await read();
   const filename = '/library-' + crypto.randomUUID() + '.sqlite';
@@ -24,6 +24,10 @@ export async function openSnapshotDatabase({ read, write, release = () => {} }) 
       await write(sqlite.capi.sqlite3_js_db_export(db)); dirty = false;
     },
     async close() { try { db.close(); } finally { await release(); } },
+    async destroy() {
+      if (!destroy) throw new Error('This storage cannot delete library data.');
+      try { db.close(); await destroy(); } finally { await release(); }
+    },
   };
 }
 

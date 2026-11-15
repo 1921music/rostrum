@@ -32,6 +32,7 @@ export async function openIndexedDbBytes({ name = 'rostrum-bookshelf' } = {}) {
     return { files,
       async readDatabase() { const blob = await access('readonly', store => store.get('library.sqlite')); return blob && blob.arrayBuffer(); },
       writeDatabase: bytes => files.write('library.sqlite', bytes),
+      clear: () => access('readwrite', store => store.clear()),
       close() { connection.close(); release(); },
     };
   } catch (error) { connection?.close(); release(); throw error; }

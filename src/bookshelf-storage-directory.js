@@ -4,7 +4,7 @@ import { openDirectoryBytes } from './bookshelf-storage-bytes-directory.js';
 export async function openDirectoryLibraryStorage({ directory }) {
   const storage = await openDirectoryBytes({ directory });
   try {
-    const database = await openSnapshotDatabase({ read: storage.readDatabase, write: storage.writeDatabase, release: storage.close });
+    const database = await openSnapshotDatabase({ read: storage.readDatabase, write: storage.writeDatabase, release: storage.close, destroy:storage.clear });
     return { files: storage.files, database };
   } catch (error) { storage.close(); throw error; }
 }

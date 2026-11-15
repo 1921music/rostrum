@@ -64,6 +64,7 @@ window.pdfjsLib.GlobalWorkerOptions.workerPort = new Worker("pdf.worker.min.mjs"
 // #include src/panel.js minified
 // #include src/file.js minified
 // #include src/cloud-folder-picker.js minified
+// #include src/bookshelf-transfers.js minified
 // #include src/bookshelf.js minified
 // #include src/bookshelf-import.js minified
 // #include src/bookshelf-sync.js minified
@@ -583,6 +584,7 @@ async function main() {
 
  // Preserve native menus for mouse input; reserve touch/pen holds for Rostrum.
 listen(document, "contextmenu", (e) => {
+  if (e.target.closest('.LibraryWindow, .CloudFolderPicker')) return;
   if (e.target.closest("input, textarea, [contenteditable]")) return;
   if (e.pointerType === "touch" || e.pointerType === "pen")
     e.preventDefault();

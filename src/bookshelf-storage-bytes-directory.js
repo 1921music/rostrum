@@ -18,6 +18,10 @@ export async function openDirectoryBytes({ directory }) {
         const current = await read();
         if ((current && await digest(current)) !== persisted) throw new Error('The library database was changed outside this session. Reopen it before saving.');
         await files.write('library.sqlite', bytes); persisted = await digest(bytes);
+      }, async clear() {
+        const current = await read();
+        if ((current && await digest(current)) !== persisted) throw new Error('The library database was changed outside this session. Reopen it before deleting data.');
+        await files.clearLibrary();
       }, close: release };
   } catch (error) { release(); throw error; }
 }

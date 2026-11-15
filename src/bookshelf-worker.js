@@ -232,6 +232,7 @@ const withOriginalLocation = (metadata, location) => {
   return {...metadata,originalLocations:[...locations,clean]};
 };
 const actions = {
+  destroyStorage() {},
   rememberOriginalLocation({id,location}) {
     return transaction(() => {
       const document = sql('SELECT * FROM documents WHERE id=?',[id])[0];
@@ -607,6 +608,10 @@ self.onmessage = ({ data }) => {
         self.postMessage({ id, value: true }); return;
       }
       await open();
+      if (action === 'destroyStorage') {
+        await db.destroy(); db = files = null; initialized = false;
+        self.postMessage({id,value:true}); return;
+      }
       value = await actions[action](args || {});
       actionCompleted = true;
       // An emergency export must remain possible if persistence is failing.

@@ -25,7 +25,7 @@ async function installProviderCloud(page) {
       async getDir(path) { cloud.calls.push({ kind:'directory',path }); const dir = directories.get(path); if (!dir) throw new Error('No such folder: ' + path); return { files:Object.fromEntries(dir.files),dirs:Object.fromEntries(dir.dirs) }; },
       async putDir(path,name) { const dir = directories.get(path); const child = path + '/' + name; if (directories.has(child)) throw new Error('Folder exists'); directories.set(child,{ files:new Map(),dirs:new Map() }); dir.dirs.set(name,{}); },
       async getFileSrc(path,name) { cloud.calls.push({ kind:'read',path,name }); return directories.get(path).files.get(name).bytes; },
-      async putFile(path,name,bytes) { const files = directories.get(path).files; if (files.has(name)) throw new Error('Overwrite'); files.set(name,{ name,bytes,size:bytes.size }); cloud.calls.push({ kind:'put',path,name }); },
+      async putFile(path,name,bytes) { const files = directories.get(path).files; if (files.has(name)) throw new Error('Overwrite'); const copy = new Blob([bytes instanceof Blob ? await bytes.arrayBuffer() : bytes]); files.set(name,{ name,bytes:copy,size:copy.size }); cloud.calls.push({ kind:'put',path,name }); },
       async renameFile(path,name,newName) { if (cloud.failPublish) throw new Error('Publication failed'); const files = directories.get(path).files; if (files.has(newName)) throw new Error('Overwrite'); files.set(newName,files.get(name)); files.delete(name); cloud.calls.push({ kind:'publish',path,name:newName }); },
       async trashFile(path,name) { directories.get(path).files.delete(name); },
     };

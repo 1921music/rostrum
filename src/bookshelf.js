@@ -6,11 +6,15 @@ import { exchangeLibraryChanges, LibraryAutoSync } from './bookshelf-sync.js';
 import { LibraryCloudTransport } from './bookshelf-cloud.js';
 import { reviewScoreImport } from './bookshelf-import.js';
 import { CloudFolderPicker } from './cloud-folder-picker.js';
+import { LibraryTransferQueue } from './bookshelf-transfers.js';
 // -skip
 
 class BookshelfStore extends EventTarget {
   constructor() {
     super(); this.pending = new Map(); this.sequence = 0; this.localSaving = 0; this.cloudPending = true; this.downloads = new Map(); this.releases = new Set(); this.fileErrors = new Map();
+    this.transfers = new LibraryTransferQueue();
+    this.libraryGeneration = 0;
+    this.transfers.addEventListener('change',() => this.notifyData());
     queueMicrotask(() => this.initializeSync().catch(error => { this.syncError = error; this.notifyStatus(); }));
   }
   notifyStatus() { this.dispatchEvent(new Event('statuschange')); }
@@ -23,7 +27,8 @@ class BookshelfStore extends EventTarget {
     return this.cloudSelection.source + ':' + (path ? '/' + path : '');
   }
   async initializeSync() {
-    const [selection, settings] = await Promise.all([window.RostrumLibraryHost.loadCloudSelection(),window.RostrumLibraryHost.loadSyncSettings()]);
+    const [selection, settings, storage] = await Promise.all([window.RostrumLibraryHost.loadCloudSelection(),window.RostrumLibraryHost.loadSyncSettings(),window.RostrumLibraryHost.loadSelection()]);
+    if (this.storage === undefined) this.storage = storage || {};
     this.cloudSelection ||= selection; this.autoSettings ||= settings || { enabled:true };
     this.autoSync = new LibraryAutoSync(this); this.autoSync.setEnabled(this.autoSettings.enabled !== false); this.notifyStatus();
   }
@@ -39,6 +44,7 @@ class BookshelfStore extends EventTarget {
     catch (error) { this.syncError = error; this.notifyStatus(); throw error; }
   }
   deviceStatus() {
+    if (this.deletingStorage) return 'Device: deleting library data';
     const score = Score.activeScore;
     if (this.localError || score?.librarySaveError) return 'Device: save failed';
     if (this.localSaving || score?.libraryDocumentId && score.librarySavedGeneration !== score.librarySaveGeneration) return 'Device: saving';
@@ -69,8 +75,44 @@ class BookshelfStore extends EventTarget {
     await this.call('open');
     if (Score.activeScore?.libraryDocumentId) await this.flush(Score.activeScore);
   }
+  async deletionSummary() {
+    if (Score.activeScore?.libraryDocumentId) await this.flush(Score.activeScore);
+    const data = await this.call('syncData');
+    const status = await this.call('syncStatus',{destination:this.destinationId()});
+    const states = await this.call('availability',{destination:this.destinationId()});
+    return {scores:data.documents.length,pending:status.pending,unverified:!status.verified,
+      localOnly:states.filter(state => state.present && !state.remote).length};
+  }
+  async deleteStorage() {
+    if (this.deletingStorage || this.syncPending || this.cloudConnecting || this.checkingCloud || this.autoSync?.running || this.reviewPending || this.opening || this.downloads.size || this.releases.size || this.transfers?.size || this.fullSyncRunning)
+      throw new Error('Wait for library operations before deleting data.');
+    this.deletingStorage = true; this.notifyStatus();
+    try { if (Score.activeScore?.libraryDocumentId) { await this.flush(Score.activeScore); await Score.activeScore.dispose(); } }
+    catch (error) { this.deletingStorage = false; this.notifyStatus(); throw error; }
+    let deleted = false;
+    try { await this.call('destroyStorage'); deleted = true; }
+    finally {
+      this.worker?.terminate(); this.worker = this.workerStarting = null;
+      this.hostStorage?.close(); this.hostStorage = null;
+      this.storageDeleted = !deleted;
+      this.fileErrors.clear();
+      if (!deleted) { this.deletingStorage = false; this.notifyData(); }
+    }
+    this.syncNeeds = null; this.fullSyncState = null;
+    try { await this.call('open'); this.cloudPending = true; }
+    finally { this.deletingStorage = false; this.notifyData(); }
+    // Keep the selected backend and cloud settings. Deletion is never a synced
+    // tombstone; an enabled auto-sync restores the remote history into a fresh DB.
+    if (this.hasSyncDestination() && this.autoSettings?.enabled !== false) this.autoSync?.request(0);
+    else if (this.hasSyncDestination()) {
+      const transport = this.transport || this.makeCloudTransport(this.cloudSelection.source,this.cloudSelection.path);
+      this.checkSyncNeeds(transport).catch(() => {});
+    }
+  }
   async configure(storage) {
-    if (this.cloudConnecting || this.autoSync?.running) throw new Error('Wait for library sync before changing its location.');
+    if (this.deletingStorage) throw new Error('Wait for library data deletion.');
+    if (this.transfers.size || this.fullSyncRunning) throw new Error('Wait for library transfers before changing storage.');
+    if (this.cloudConnecting || this.checkingCloud || this.autoSync?.running) throw new Error('Wait for library sync before changing its location.');
     if (this.releases.size) throw new Error('Wait for download release before changing library location.');
     if (this.opening) throw new Error('Wait for the score to open before changing library location.');
     if (this.downloads.size) throw new Error('Wait for score downloads before changing library location.');
@@ -83,7 +125,7 @@ class BookshelfStore extends EventTarget {
     // Finish that attempt before switching, so its failure cannot clear the new worker.
     if (this.workerStarting) await this.workerStarting.catch(() => {});
     if (this.worker) { await this.call('close'); this.worker.terminate(); }
-    this.worker = this.workerStarting = null; this.storage = storage; this.localError = null; this.cloudPending = true; this.fileErrors.clear();
+    this.worker = this.workerStarting = null; this.storage = storage; this.storageDeleted = false; this.syncNeeds = null; this.fullSyncState = null; this.localError = null; this.cloudPending = true; this.fileErrors.clear();
     const result = await this.call('open');
     try { await window.RostrumLibraryHost.saveSelection(storage); }
     catch { toast('Library opened, but its location could not be remembered. Choose it again next time.'); }
@@ -105,6 +147,8 @@ class BookshelfStore extends EventTarget {
     try {
       if (previous?.libraryDocumentId) await this.flush(previous);
       const result = await exchangeLibraryChanges(this,transport);
+      this.syncNeeds = null;
+      await this.refreshSyncNeeds(transport);
       this.cloudPending = result.pending > 0; this.lastSyncedAt = Date.now(); this.notifyData(); return result;
     } catch (error) { this.syncError = error; throw error; }
     finally {
@@ -122,7 +166,7 @@ class BookshelfStore extends EventTarget {
     if (![Score.sources.gdrive, Score.sources.dbx, Score.sources.odrive, Score.sources.pcloud].includes(source)) throw new Error('Choose a cloud service');
     return new LibraryCloudTransport(FileSrc.get(source),path || '');
   }
-  async syncCloud(source, path) {
+  async syncCloud(source, path, {background = false} = {}) {
     if (this.syncPending || this.cloudConnecting || this.autoSync?.running) throw new Error('Wait for the current library sync.');
     const transport = this.makeCloudTransport(source,path);
     this.cloudConnecting = true; this.notifyStatus();
@@ -130,7 +174,7 @@ class BookshelfStore extends EventTarget {
       await transport.connect();
       this.cloudSelection = { source,path }; this.transport = transport;
       await window.RostrumLibraryHost.saveCloudSelection(this.cloudSelection);
-      return await this.sync(transport);
+      return await this.sync(transport,{automatic:background});
     } catch (error) { this.syncError = error; throw error; }
     finally { this.cloudConnecting = false; this.notifyStatus(); this.autoSync?.request(this.autoSync.interval); }
   }
@@ -156,11 +200,66 @@ class BookshelfStore extends EventTarget {
       if (!this.manualSync) { _shade_.cancel.style.display = cancelDisplay; _shade_.hide(); }
     }
   }
-  async ensureFile(id, transport = this.transport) {
+  transferKey(id,direction = 'download',transport = this.transport) { return direction + ':' + (transport?.id || this.destinationId()) + ':' + id; }
+  uploadFile(document,file,transport) {
+    return this.transfers.enqueue(this.transferKey(document.id,'upload',transport),() => transport.writeScore(document,file),
+      {label:JSON.parse(document.metadata_json).originalFilename,direction:'upload'});
+  }
+  async refreshSyncNeeds(transport = this.transport) {
+    if (!transport) return;
+    const data = await this.call('syncData');
+    const states = await this.call('availability',{destination:transport.id});
+    const status = await this.call('syncStatus',{destination:transport.id});
+    const active = new Set(data.documents.filter(doc => !doc.deleted_at && !doc.replaced_by_id).map(doc => doc.id));
+    const unknown = this.syncNeeds?.destination === transport.id && this.syncNeeds.unknown;
+    this.syncNeeds = {destination:transport.id,pending:!!unknown || status.pending > 0 || !status.verified,unknown,
+      uploads:states.filter(state => !state.remote).length,
+      downloads:states.filter(state => active.has(state.id) && !state.present).length,checkedAt:Date.now()};
+    this.notifyStatus();
+  }
+  async checkSyncNeeds(transport = this.transport,{interactive = false} = {}) {
+    if (!transport) throw new Error('Choose a library cloud destination first.');
+    if (this.syncPending || this.deletingStorage) return;
+    if (this.checkingCloud) return this.checkingCloud;
+    this.checkingCloud = (async () => {
+      const check = async () => {
+        await transport.connect?.();
+        const [remote,scores] = await Promise.all([transport.listChanges(),transport.listScores()]);
+        const generation = this.libraryGeneration;
+        const data = await this.call('syncData');
+        const cache = data.batches[transport.id] || {},remoteIds = new Set();
+        let unknown = false;
+        for (const batch of remote) {
+          if (!Object.hasOwn(cache,batch.id)) unknown = true;
+          else for (const id of cache[batch.id]) remoteIds.add(id);
+        }
+        const paths = new Set(scores.map(file => file.path));
+        const states = new Map((await this.call('availability',{destination:transport.id})).map(state => [state.id,state]));
+        this.syncNeeds = {destination:transport.id,pending:unknown || generation !== this.libraryGeneration || data.changes.some(change => !remoteIds.has(change.id)),
+          uploads:data.documents.filter(doc => !paths.has(doc.storage_path)).length,
+          downloads:data.documents.filter(doc => !doc.deleted_at && !doc.replaced_by_id && !states.get(doc.id)?.present).length,
+          unknown,checkedAt:Date.now()};
+        if (transport.id === this.destinationId()) this.cloudPending = this.syncNeeds.pending || this.syncNeeds.uploads > 0;
+      };
+      try { await (!interactive && transport.background ? transport.background(check) : check()); }
+      catch (error) { this.syncNeeds = {destination:transport.id,error:error.message}; throw error; }
+    })();
+    this.notifyStatus();
+    try { await this.checkingCloud; }
+    finally { this.checkingCloud = null; this.notifyStatus(); }
+  }
+  async ensureFile(id, transport = this.transport, {priority = 0,front = false,group = '',document = null} = {}) {
     if (this.releases.has(id)) throw new Error('Wait for this download to be released.');
-    if (this.downloads.has(id)) return this.downloads.get(id);
-    const job = (async () => {
+    const key = this.transferKey(id,'download',transport);
+    if (this.downloads.has(id)) { this.transfers.promote(key,{priority,front}); return this.downloads.get(id); }
+    const local = document ? {document} : await this.call('fileInfo',{id});
+    if (local.file) return local.file;
+    if (group === 'full-library' && this.fullSyncCancelled) throw new DOMException('Download cancelled','AbortError');
+    if (this.downloads.has(id)) { this.transfers.promote(key,{priority,front}); return this.downloads.get(id); }
+    const job = this.transfers.enqueue(key,async () => {
       const info = await this.call('fileInfo',{ id }); if (info.file) return info.file;
+      const task = this.transfers.jobs.get(key);
+      if (task) { task.label = JSON.parse(info.document.metadata_json).originalFilename; this.transfers.changed(); }
       if (navigator.onLine === false) throw new Error('This score is cloud-only. Connect to download it, or keep it offline in advance.');
       if (!transport) {
         if (!this.cloudSelection?.source) throw new Error('Connect the library cloud to download this score.');
@@ -169,11 +268,13 @@ class BookshelfStore extends EventTarget {
       const transfer = async () => { await transport.connect?.(); return transport.readScore(info.document); };
       const file = await (transport.background ? transport.background(transfer) : transfer());
       this.transport = transport;
-      await this.call('installFile',{ id,file }); this.fileErrors.delete(id); return file;
-    })();
+      await this.call('installFile',{ id,file }); this.fileErrors.delete(id);
+      if (this.syncNeeds?.destination === transport.id) await this.refreshSyncNeeds(transport);
+      return file;
+    },{priority,front,group,label:JSON.parse(local.document.metadata_json).originalFilename});
     this.downloads.set(id,job); this.notifyData();
     try { return await job; }
-    catch (error) { this.fileErrors.set(id,error.message); throw error; }
+    catch (error) { if (error.name !== 'AbortError') this.fileErrors.set(id,error.message); throw error; }
     finally { this.downloads.delete(id); this.notifyData(); }
   }
   async keepOffline(ids) {
@@ -182,6 +283,30 @@ class BookshelfStore extends EventTarget {
     for (const id of ids) try { await this.ensureFile(id); } catch (error) { failed ||= error; }
     this.autoSync?.request(); if (failed) throw failed;
   }
+  async syncAllScores(source,path) {
+    if (this.fullSyncRunning) throw new Error('A full library transfer is already running.');
+    this.fullSyncRunning = true; this.fullSyncCancelled = false;
+    const state = this.fullSyncState = {phase:'sync',total:0,completed:0,failed:0,cancelled:0}; this.notifyStatus();
+    try {
+      if (source) await this.syncCloud(source,path,{background:true});
+      else if (this.transport) await this.sync(this.transport,{automatic:true});
+      else throw new Error('Configure library cloud sync first.');
+      const docs = (await this.call('syncData')).documents.filter(doc => !doc.deleted_at && !doc.replaced_by_id);
+      const states = new Map((await this.call('availability',{destination:this.destinationId()})).map(item => [item.id,item]));
+      const missing = docs.filter(doc => !states.get(doc.id)?.present);
+      state.phase = 'download'; state.total = missing.length; this.notifyStatus();
+      await Promise.all(missing.map(async doc => {
+        if (this.fullSyncCancelled) { state.cancelled++; return; }
+        try { await this.ensureFile(doc.id,this.transport,{group:'full-library',document:doc}); state.completed++; }
+        catch (error) { if (error.name === 'AbortError') state.cancelled++; else state.failed++; }
+        finally { this.notifyStatus(); }
+      }));
+      state.phase = this.fullSyncCancelled ? 'cancelled' : state.failed ? 'failed' : 'done';
+      return {...state};
+    } catch (error) { state.phase = 'failed'; state.error = error.message; throw error; }
+    finally { this.fullSyncRunning = false; this.notifyData(); }
+  }
+  cancelFullSync() { this.fullSyncCancelled = true; this.transfers.cancelWaiting('full-library'); this.notifyStatus(); }
   async downloadPinned(transport) {
     const states = await this.call('availability',{ destination:transport.id });
     const docs = (await this.call('syncData')).documents;
@@ -206,7 +331,7 @@ class BookshelfStore extends EventTarget {
       return this.call('releaseFile',{ id,destination:transport.id });
     };
     try { return await (transport.background ? transport.background(release) : release()); }
-    finally { this.releases.delete(id); this.notifyData(); }
+    finally { this.releases.delete(id); if (this.syncNeeds) await this.refreshSyncNeeds(); this.notifyData(); }
   }
   scheduleSave(score) {
     score.librarySaveGeneration = (score.librarySaveGeneration || 0) + 1;
@@ -250,7 +375,7 @@ class BookshelfStore extends EventTarget {
       || conflict.table === 'annotations' && conflict.alternatives.some(change => JSON.parse(change.payload_json).document_id === id))) {
       throw new Error('Resolve this score’s conflicting edits before opening it.');
     }
-    await this.ensureFile(id);
+    await this.ensureFile(id,undefined,{priority:100,front:true});
     const state = await this.call('read', { id });
     const settings = JSON.parse(state.document.settings_json);
     const score = await new Score().init(null, null, JSON.parse(state.document.metadata_json).originalFilename,
@@ -294,7 +419,7 @@ class BookshelfStore extends EventTarget {
       this.worker.onmessage = async ({ data }) => {
         if (data.hostRequest) {
           const methods = {
-            readDatabase: () => this.hostStorage.readDatabase(), writeDatabase: bytes => this.hostStorage.writeDatabase(bytes), close: () => this.hostStorage.close(),
+            readDatabase: () => this.hostStorage.readDatabase(), writeDatabase: bytes => this.hostStorage.writeDatabase(bytes), close: () => this.hostStorage.close(), clear: () => this.hostStorage.clear(),
             read: path => this.hostStorage.files.read(path), write: (path, bytes) => this.hostStorage.files.write(path, bytes), remove: path => this.hostStorage.files.remove(path),
           };
           try {
@@ -336,13 +461,27 @@ class BookshelfStore extends EventTarget {
     });
   }
   async call(action, args = {}) {
+    if (this.storageDeleted) throw new Error('Library deletion was incomplete. Choose its storage location again before continuing.');
+    if (this.deletingStorage && !['destroyStorage','open','saveState'].includes(action)) throw new Error('Wait for library data deletion.');
     const shared = ['importFile','rememberOriginalLocation','update','link','moveItem','reindex','editSongs','saveState','resolveConflict','useVersion','importBackup'].includes(action);
     const writing = shared || ['mergeDelta','installFile','releaseFile','pinFile'].includes(action);
     if (writing) { this.localSaving++; this.notifyStatus(); }
     try {
       await this.ensureWorker(); const value = await this.send(action,args);
       if (!['backup','export'].includes(action)) this.localError = null;
-      if (shared) { this.cloudPending = true; this.autoSync?.request(); }
+      if (shared) {
+        this.libraryGeneration++;
+        this.cloudPending = true;
+        const needs = this.syncNeeds;
+        if (needs?.checkedAt) {
+          const status = await this.send('syncStatus',{destination:needs.destination});
+          if (this.syncNeeds === needs) {
+            needs.pending = !!needs.unknown || status.pending > 0 || !status.verified;
+            this.cloudPending = needs.pending;
+          }
+        }
+        this.autoSync?.request();
+      }
       if (writing || action === 'remoteInventory') this.notifyData();
       return value;
     }
@@ -525,6 +664,9 @@ class BookshelfView {
     }
     .LibraryWindow[hidden], .LibraryWindow [hidden] { display:none !important; }
     .LibraryWindow *, .LibraryWindow *::before, .LibraryWindow *::after { box-sizing:border-box; }
+    .LibraryWindow .LibraryWindow__panel, .LibraryWindow .LibraryWindow__panel * { user-select:text; -webkit-user-select:text; }
+    .LibraryWindow .LibraryWindow__panel * { -webkit-touch-callout:default; }
+    .LibraryWindow button, .LibraryWindow summary, .LibraryWindow select { user-select:none; -webkit-user-select:none; }
     .LibraryWindow .LibraryWindow__panel {
       pointer-events:auto; position:absolute; inset:0; display:flex; flex-direction:column;
       width:100%; height:100%; max-width:none; max-height:none; margin:0;
@@ -591,6 +733,10 @@ class BookshelfView {
     .Bookshelf__row > details > summary:hover { background:var(--library-hover); }
     .LibraryWindow summary::-webkit-details-marker { display:none; }
     .Bookshelf__footer { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:56px; padding:10px 24px; border-top:1px solid var(--library-line); background:var(--library-bg); flex:none; }
+    .Bookshelf__footer { flex-wrap:wrap; }
+    .Bookshelf__transfer-progress { width:100%; font-size:13px; overflow-wrap:anywhere; }
+    .Bookshelf__transfer-progress progress { display:block; width:100%; height:8px; margin:8px 0; accent-color:var(--library-brand); }
+    .Bookshelf__download { grid-column:2; justify-self:start; }
     .Bookshelf__save-state { display:flex; gap:16px; flex-wrap:wrap; color:var(--library-muted); font-size:12px; }
     .LibraryWindow .Bookshelf__sync { border:0; color:var(--library-brand); padding:6px 10px; white-space:nowrap; min-height:36px; }
     .Bookshelf__message:empty { display:none; }
@@ -608,7 +754,7 @@ class BookshelfView {
     .Bookshelf__filters { position:relative; }
     .Bookshelf__filter-content { top:48px; right:0; display:flex; flex-direction:column; gap:12px; }
     .Bookshelf__filter-content select[multiple] { min-height:120px; }
-    .Bookshelf__settings-content { position:absolute; z-index:6; inset:72px 0 56px; padding:24px max(24px,calc((100% - 800px)/2)); overflow:auto; background:var(--library-bg); }
+    .Bookshelf__settings-content { position:absolute; z-index:6; inset:72px 0 var(--library-footer-height,56px); padding:24px max(24px,calc((100% - 800px)/2)); overflow:auto; background:var(--library-bg); }
     .Bookshelf__settings-content h2 { margin:16px 0 24px; font-size:24px; }
     .Bookshelf__settings-content > details { border-bottom:1px solid var(--library-line); padding:16px 0; }
     .Bookshelf__settings-content > details > summary { font-weight:600; list-style:none; cursor:pointer; padding:8px 0; }
@@ -706,12 +852,17 @@ class BookshelfView {
       clearTimeout(refreshTimer);
       refreshTimer = setTimeout(() => {
         if (!this.elm.isConnected || !this.elm.getClientRects().length) return;
+        const selection = window.getSelection();
+        if (!selection.isCollapsed && this.elm.contains(selection.anchorNode)) { this.refreshNeeded = true; return; }
         if (this.elm.contains(document.activeElement) && document.activeElement.matches('input,select,textarea')) { this.refreshNeeded = true; return; }
         this.refresh?.();
       },50);
     };
     panel.listeners.push(listen(bookshelfStore,'datachange',refreshAfterChange));
     panel.listeners.push(listen(this.elm,'focusout',() => { if (this.refreshNeeded) { this.refreshNeeded = false; refreshAfterChange(); } }));
+    panel.listeners.push(listen(document,'selectionchange',() => {
+      if (this.refreshNeeded && window.getSelection().isCollapsed) { this.refreshNeeded = false; refreshAfterChange(); }
+    }));
     const updatePermission = () => {
       permission.hidden = !bookshelfStore.permissionRequired;
       permissionMessage.textContent = 'Access is required for library folder: ' + (bookshelfStore.storage?.directory?.name || '');
@@ -756,9 +907,9 @@ class BookshelfView {
     const explanation = document.createElement('div'); explanation.textContent = 'Import adds the saved library and keeps conflicting edits for review.';
     const review = document.createElement('button'); review.textContent = 'Review conflicting edits';
     const conflictResults = document.createElement('div');
-    const folder = document.createElement('button'); folder.textContent = 'Choose library folder'; folder.hidden = typeof window.showDirectoryPicker !== 'function';
-    const defaultLibrary = document.createElement('button'); defaultLibrary.textContent = 'Use default library';
-    const browserLibrary = document.createElement('button'); browserLibrary.textContent = 'Use browser compatibility library';
+    const folder = document.createElement('button'); folder.textContent = 'Choose local folder…';
+    const defaultLibrary = document.createElement('button'); defaultLibrary.textContent = 'Use OPFS';
+    const browserLibrary = document.createElement('button'); browserLibrary.textContent = 'Use IndexedDB';
     const location = document.createElement('div'); location.textContent = 'Library location: default';
     backupSettings.append(backup, explanation, restore);
     historySettings.append(review, conflictResults);
@@ -766,7 +917,45 @@ class BookshelfView {
     history.onclick = () => { mode.value = 'history'; this.refresh(); };
     historySettings.prepend(history);
     this.elm.insertBefore(transfers, results);
-    storageSettings.append(folder, defaultLibrary, browserLibrary, location);
+    const storageRows = new Map();
+    for (const [kind,title,description,choose] of [
+      ['directory','Local directory','A folder you choose on this device.',folder],
+      ['opfs','OPFS','Files stored privately inside this browser.',defaultLibrary],
+      ['indexeddb','IndexedDB','Library records and files stored in this browser’s database.',browserLibrary]
+    ]) {
+      const row = document.createElement('section'); row.dataset.storageKind = kind;
+      const heading = document.createElement('h4'); heading.textContent = title;
+      const info = document.createElement('p'); info.textContent = description;
+      const unavailable = document.createElement('p'); unavailable.setAttribute('role','status');
+      const remove = document.createElement('button'); remove.textContent = 'Delete library data'; remove.setAttribute('aria-label','Delete ' + title + ' library data'); remove.disabled = true;
+      row.append(heading,info,choose,remove,unavailable); storageSettings.append(row);
+      storageRows.set(kind,{choose,remove,unavailable});
+    }
+    storageSettings.append(location);
+    let storageCapabilities = {};
+    const updateStorageControls = () => {
+      const active = bookshelfStore.storage?.kind || 'opfs';
+      const busy = bookshelfStore.deletingStorage || bookshelfStore.syncPending || bookshelfStore.cloudConnecting || bookshelfStore.checkingCloud || bookshelfStore.fullSyncRunning || bookshelfStore.transfers.size || bookshelfStore.opening || bookshelfStore.reviewPending;
+      for (const [kind,row] of storageRows) {
+        row.choose.disabled = !storageCapabilities[kind] || !!busy;
+        row.unavailable.textContent = !storageCapabilities[kind] ? 'Unavailable in this browser or context.' : active === kind ? 'Currently in use' : '';
+        row.remove.disabled = active !== kind || !!busy || !!bookshelfStore.storageDeleted;
+      }
+    };
+    window.RostrumLibraryHost.storageCapabilities().then(capabilities => { storageCapabilities = capabilities; updateStorageControls(); });
+    panel.listeners.push(listen(bookshelfStore,'statuschange',updateStorageControls));
+    updateStorageControls();
+    for (const [kind,row] of storageRows) row.remove.onclick = () => run(async () => {
+      if ((bookshelfStore.storage?.kind || 'opfs') !== kind) return;
+      const info = await bookshelfStore.deletionSummary();
+      const target = kind === 'directory' ? 'Local directory: ' + bookshelfStore.storage.directory.name : kind === 'opfs' ? 'OPFS' : 'IndexedDB';
+      const message = `Delete library data from ${target}?\n\n${info.scores} score records and all managed local files will be removed. Other files and the folder itself remain. Cloud data, original files and sync settings will not be deleted.\n\n` +
+        (!bookshelfStore.hasSyncDestination() ? 'Warning: cloud sync is not configured. This data cannot be restored from library cloud sync.\n\n' : info.pending || info.localOnly || info.unverified ? `Warning: ${info.pending} changes not confirmed as synced; ${info.localOnly} local files not confirmed in the cloud. Unsynced data will be lost.\n\n` : 'The last sync confirmed the cloud copy. Restore requires access to that cloud.\n\n') +
+        (bookshelfStore.hasSyncDestination() && bookshelfStore.autoSettings?.enabled !== false ? 'This storage location stays selected. Automatic sync will restore the cloud library; score files download when opened.' : 'This storage location stays selected with an empty library. Automatic restore is off. Use Apply and sync to restore when a cloud destination is configured.');
+      if (!window.confirm(message)) return;
+      await bookshelfStore.deleteStorage(); await this.refresh();
+      status.textContent = 'Library data deleted from ' + target + '. ' + (bookshelfStore.hasSyncDestination() && bookshelfStore.autoSettings?.enabled !== false ? 'Automatic cloud restore requested.' : 'The library is empty. Automatic restore is off.');
+    });
     const cloud = document.createElement('select'); cloud.setAttribute('aria-label', 'Library cloud service'); cloud.add(new Option('Choose cloud service', ''));
     for (const source of [Score.sources.gdrive, Score.sources.dbx, Score.sources.odrive, Score.sources.pcloud]) cloud.add(new Option(source, source));
     const cloudPath = document.createElement('output'); cloudPath.setAttribute('aria-label', 'Library cloud folder'); cloudPath.translate = false;
@@ -779,17 +968,39 @@ class BookshelfView {
     panel.listeners.push(listen(bookshelfStore,'statuschange',() => { auto.checked = bookshelfStore.autoSettings?.enabled !== false; }));
     const sync = document.createElement('button'); sync.textContent = 'Sync library now';
     const applySync = document.createElement('button'); applySync.textContent = 'Apply and sync'; applySync.onclick = () => sync.click();
-    syncSettings.append(cloud,cloudPath,chooseCloudFolder,cloudInfo,autoLabel,applySync);
+    const checkSync = document.createElement('button'); checkSync.textContent = 'Check sync status';
+    const allSync = document.createElement('button'); allSync.textContent = 'Sync and download all scores';
+    const syncCounts = document.createElement('p'); syncCounts.setAttribute('aria-label','File sync counts');
+    syncSettings.append(cloud,cloudPath,chooseCloudFolder,cloudInfo,autoLabel,checkSync,applySync,syncCounts,allSync);
     this.elm.insertBefore(sync, transfers);
     const backupInfo = document.createElement('div'); backupInfo.textContent = 'A complete ZIP backup downloads any missing score files first.'; backupSettings.append(backupInfo);
     let cloudTouched = false, draftCloud = null, pickingCloudFolder = false, applyingCloud = false;
     const updateCloudControls = () => {
       const chosen = draftCloud && draftCloud.source === cloud.value;
+      const path = chosen ? draftCloud.path.replace(/^\/+|\/+$/g,'') : '';
+      const destination = chosen ? draftCloud.source + ':' + (path ? '/' + path : '') : '';
+      const applied = chosen && bookshelfStore.cloudSelection?.source === draftCloud.source && bookshelfStore.cloudSelection?.path === draftCloud.path;
+      const needs = bookshelfStore.syncNeeds?.destination === destination ? bookshelfStore.syncNeeds : null;
+      const known = needs?.checkedAt && !needs.error;
+      const busy = pickingCloudFolder || applyingCloud || bookshelfStore.syncPending || bookshelfStore.cloudConnecting || bookshelfStore.fullSyncRunning || bookshelfStore.deletingStorage;
       cloudPath.textContent = chosen ? draftCloud.path || '/' : 'No folder selected';
-      chooseCloudFolder.disabled = !cloud.value || pickingCloudFolder || applyingCloud;
-      sync.disabled = applySync.disabled = !chosen || pickingCloudFolder || applyingCloud;
-      cloud.disabled = pickingCloudFolder || applyingCloud;
+      chooseCloudFolder.disabled = !cloud.value || busy || !!bookshelfStore.transfers.size;
+      sync.disabled = applySync.disabled = !chosen || busy || !!bookshelfStore.checkingCloud || applied && (!known || !needs.pending && !needs.uploads);
+      allSync.disabled = !chosen || busy || !!bookshelfStore.checkingCloud || applied && (!known || !needs.pending && !needs.uploads && !needs.downloads);
+      checkSync.disabled = !chosen || busy || !!bookshelfStore.checkingCloud;
+      syncCounts.textContent = bookshelfStore.checkingCloud ? 'Checking cloud status…' : known
+        ? `Upload pending: ${needs.uploads} files · Download pending: ${needs.downloads} files` + (needs.pending ? ' · Library changes pending; file counts update after sync.' : '')
+        : needs?.error ? 'Could not check cloud status: ' + needs.error : chosen ? 'Check sync status to count pending files.' : 'Choose a sync folder first.';
+      cloud.disabled = busy || !!bookshelfStore.transfers.size;
     };
+    const checkCloudStatus = async (interactive = false) => {
+      if (!draftCloud || bookshelfStore.syncPending || bookshelfStore.deletingStorage) return;
+      try { await bookshelfStore.checkSyncNeeds(bookshelfStore.makeCloudTransport(draftCloud.source,draftCloud.path),{interactive}); }
+      catch { /* The state and retry button remain visible in this panel. */ }
+      updateCloudControls();
+    };
+    checkSync.onclick = () => checkCloudStatus(true);
+    syncSettings.addEventListener('toggle',() => { if (syncSettings.open) checkCloudStatus(); });
     const preloadCloud = () => { if (cloud.value === Score.sources.gdrive) FileSrc.get(cloud.value).preloadGIS?.(); };
     cloud.onchange = () => { cloudTouched = true; draftCloud = null; preloadCloud(); updateCloudControls(); };
     window.RostrumLibraryHost.loadCloudSelection().then(saved => {
@@ -797,6 +1008,7 @@ class BookshelfView {
         cloud.value = saved.source;
         if (cloud.value) draftCloud = {source:saved.source,path:saved.path};
         preloadCloud(); updateCloudControls();
+        if (transfers.open) checkCloudStatus();
       }
     }).catch(() => {});
     chooseCloudFolder.onclick = () => run(async () => {
@@ -822,7 +1034,16 @@ class BookshelfView {
         status.textContent = `Synced library; ${result.conflicts} conflicting items to review.`;
       } finally { applyingCloud = false; updateCloudControls(); }
     });
+    allSync.onclick = () => run(async () => {
+      if (!draftCloud) return;
+      const selected = {...draftCloud};
+      const result = await bookshelfStore.syncAllScores(selected.source,selected.path);
+      await this.refresh();
+      status.textContent = result.failed ? `Full sync finished with ${result.failed} failed files. Retry to download the remaining files.`
+        : result.phase === 'cancelled' ? 'Full sync stopped. Finished files remain on this device.' : 'All current library scores are on this device.';
+    });
     updateCloudControls();
+    panel.listeners.push(listen(bookshelfStore,'statuschange',updateCloudControls));
     folder.onclick = () => run(async () => {
       const directory = await window.showDirectoryPicker({ mode: 'readwrite' });
       await bookshelfStore.configure({ kind: 'directory', directory });
@@ -891,6 +1112,11 @@ class BookshelfView {
     };
     let generation = 0;
     this.refresh = () => run(async () => {
+      if (bookshelfStore.storageDeleted) {
+        results.replaceChildren(); const message = document.createElement('p');
+        message.textContent = 'Library deletion was incomplete. Choose its storage location again in Library settings.'; results.append(message);
+        this.rowViews?.clear(); this.closeRecord(); updateStatus(); return;
+      }
       const current = ++generation;
       const referenceTables = ['tags', 'entry_tags', 'document_tags', 'bookshelves', 'playlists'];
       const referenceRows = await Promise.all(referenceTables.map(table => records(table)));
@@ -898,8 +1124,8 @@ class BookshelfView {
       references = Object.fromEntries(referenceTables.map((table, i) => [table, referenceRows[i]]));
       const nextRevisions = new Map();
       for (const table of referenceTables) for (const row of references[table]) nextRevisions.set(table + ':' + row.id,row.revision_id);
-      location.textContent = bookshelfStore.storage?.kind === 'directory' ? 'Library folder: ' + bookshelfStore.storage.directory.name
-        : bookshelfStore.storage?.kind === 'indexeddb' ? 'Library location: browser compatibility storage' : 'Library location: default';
+      location.textContent = bookshelfStore.storage?.kind === 'directory' ? 'Local directory: ' + bookshelfStore.storage.directory.name
+        : bookshelfStore.storage?.kind === 'indexeddb' ? 'Library location: IndexedDB' : 'Library location: OPFS';
       const selectedTags = [...tagFilter.selectedOptions].map(option => option.value);
       tagFilter.replaceChildren();
       for (const tag of references.tags) { const option = new Option(tag.name, tag.id); option.selected = selectedTags.includes(tag.id); tagFilter.add(option); }
@@ -949,6 +1175,8 @@ class BookshelfView {
       for (const row of rows) if (row.membership) nextRevisions.set((row.document_id ? 'playlist_items' : 'bookshelf_documents') + ':' + row.membership.id,row.membership.revision_id);
       revisions = nextRevisions;
       const expanded = new Set([...this.elm.querySelectorAll('details[open][data-record]')].map(elm => elm.dataset.record));
+      const selection = window.getSelection();
+      if (!selection.isCollapsed && results.contains(selection.anchorNode)) { this.refreshNeeded = true; return; }
       results.replaceChildren();
       this.rowViews = new Map();
       this.updateNavigation(mode.value, collection, rows.length, selectedTags.length);
@@ -986,7 +1214,7 @@ class BookshelfView {
           panel.hide();
         });
         const recordKey = (row.document_id ? 'entries:' : 'documents:') + row.id;
-        openButton.onclick = () => panel.fullView ? this.showRecord(recordKey, false) : openRecord();
+        openButton.onclick = () => { if (!window.getSelection().isCollapsed) return; return panel.fullView ? this.showRecord(recordKey, false) : openRecord(); };
         card.append(openButton);
         if (fileLabel) {
           const fileLocation = document.createElement('div'); fileLocation.setAttribute('aria-label','Score file location');
@@ -994,15 +1222,28 @@ class BookshelfView {
           card.append(fileLocation);
         }
         rowCard.addEventListener('click', event => {
+          if (!window.getSelection().isCollapsed) return;
           if (!event.target.closest('button,summary,details,input,select')) openButton.click();
         });
+        let downloadButton = null;
         const local = availability.get(row.document_id || row.id);
         if (local) {
+          const id = row.document_id || row.id;
+          const transfer = bookshelfStore.transfers.jobs.get(bookshelfStore.transferKey(id));
           const state = document.createElement('div');
-          state.textContent = [bookshelfStore.downloads.has(row.document_id || row.id) ? 'Downloading' : local.present ? 'On this device' : local.remote ? 'Cloud only' : 'Not on this device',
+          state.setAttribute('aria-label','Local file status');
+          state.textContent = [transfer ? transfer.state === 'running' ? 'Downloading' : 'Download queued' : local.present ? 'On this device' : local.remote ? 'Cloud only' : 'Not on this device',
             local.pinned && (local.present ? 'Kept offline' : 'Offline download requested'),
             bookshelfStore.hasSyncDestination() ? local.remote ? local.pending ? 'Cloud changes pending' : 'File uploaded' : 'File upload pending' : '', bookshelfStore.fileErrors.get(row.document_id || row.id)].filter(Boolean).join(' · ');
           card.append(state);
+          if (!local.present && !row.unavailable) {
+            const download = document.createElement('button'); download.type = 'button'; download.className = 'Bookshelf__download';
+            download.textContent = transfer?.state === 'running' ? 'Downloading…' : transfer ? 'Download next' : bookshelfStore.fileErrors.has(id) ? 'Retry download' : 'Download to this device';
+            download.disabled = transfer?.state === 'running' || navigator.onLine === false || !bookshelfStore.hasSyncDestination();
+            download.onclick = () => run(async () => { await bookshelfStore.ensureFile(id,undefined,{priority:50,front:true}); });
+            downloadButton = download;
+            card.append(download);
+          }
         }
         if (mode.value === 'history') {
           const info = document.createElement('div'); info.textContent = row.deleted_at ? 'Deleted score' : row.replaced_by_id ? 'Previous version' : 'Current version'; card.append(info);
@@ -1029,6 +1270,7 @@ class BookshelfView {
         const summary = document.createElement('summary'); summary.textContent = '⋯'; summary.setAttribute('aria-label', 'Edit and organize');
         details.append(summary); card.append(details);
         this.rowViews.set(recordKey, { row:rowCard, details, summary, title:openButton.textContent,
+          downloadButton,
           description:[metadata.composer,fileLabel].filter(Boolean).join('\n'),
           open:openRecord });
         summary.addEventListener('click', event => {
@@ -1099,7 +1341,6 @@ class BookshelfView {
           });
         } else {
           recordSection('Offline storage');
-          if (local && !local.present) button(card,'Download to this device',() => bookshelfStore.ensureFile(row.id));
           if (local?.pinned) button(card,'Stop keeping offline',() => bookshelfStore.call('pinFile',{ id:row.id,pinned:false }));
           else button(card,'Keep offline',() => bookshelfStore.keepOffline([row.id]));
           if (local?.present) button(card,'Release download',() => bookshelfStore.releaseDownload(row.id)).disabled = !!local.pinned;
@@ -1225,8 +1466,31 @@ class BookshelfView {
     this.workspace.append(sidebar,main,this.inspector);
     const footer = element('footer','Bookshelf__footer');
     const saveState = element('div','Bookshelf__save-state'); saveState.append(this.deviceStatus,this.cloudStatus);
+    const transferProgress = element('div','Bookshelf__transfer-progress'); transferProgress.setAttribute('aria-label','Library transfer progress');
+    const transferText = element('div'); transferText.setAttribute('role','status');
+    const progress = document.createElement('progress'); progress.setAttribute('aria-label','File transfer progress');
+    const stop = element('button','','Stop remaining downloads'); stop.type = 'button'; stop.onclick = () => bookshelfStore.cancelFullSync();
+    transferProgress.append(transferText,progress,stop);
+    const updateProgress = () => {
+      const queue = bookshelfStore.transfers, full = bookshelfStore.fullSyncState;
+      transferProgress.hidden = !queue.size && !full;
+      const current = queue.active ? (queue.active.direction === 'upload' ? 'Uploading ' : 'Downloading ') + queue.active.label : '';
+      if (bookshelfStore.fullSyncRunning && full.phase === 'sync') {
+        transferText.textContent = 'Syncing library information and files… ' + current; progress.removeAttribute('value');
+      } else if (full && (bookshelfStore.fullSyncRunning || !queue.size)) {
+        progress.max = Math.max(1,full.total); progress.value = full.completed;
+        transferText.textContent = `${full.phase === 'done' ? 'Complete' : full.phase === 'cancelled' ? 'Stopped' : full.phase === 'failed' ? 'Some transfers failed' : 'Downloading scores'}: ${full.completed} / ${full.total} files` + (full.failed ? ` · ${full.failed} failed` : '') + (full.error ? ' · ' + full.error : '') + (current ? ' · ' + current : '');
+        if (full.phase === 'done' && !full.total) { progress.value = progress.max; transferText.textContent = 'All current library scores are on this device.'; }
+      } else {
+        progress.max = queue.completed + queue.failed + queue.size; progress.value = queue.completed;
+        transferText.textContent = `${queue.completed} / ${progress.max} files · ${Math.max(0,queue.size - (queue.active ? 1 : 0))} waiting` + (current ? ' · ' + current : '');
+      }
+      stop.hidden = !bookshelfStore.fullSyncRunning; stop.disabled = !!bookshelfStore.fullSyncCancelled;
+    };
+    this.panel.listeners.push(listen(bookshelfStore,'statuschange',updateProgress)); updateProgress();
     this.sync.className = 'Bookshelf__sync'; this.sync.setAttribute('aria-label','Sync library now'); this.sync.textContent = '↻ Sync';
-    footer.append(saveState,this.sync);
+    footer.append(saveState,this.sync,transferProgress);
+    this.footer = footer; this.resizeObserver.observe(footer);
     this.status.className = 'Bookshelf__message'; this.permission.className = 'Bookshelf__permission';
     this.elm.replaceChildren(this.permission,this.workspace,this.status,footer);
 
@@ -1295,6 +1559,7 @@ class BookshelfView {
   }
 
   updatePresentation() {
+    if (this.footer) this.panel.panel.style.setProperty('--library-footer-height',this.footer.offsetHeight + 'px');
     // CSS handles size changes. The same controls retain query, selection and scroll.
     if (this.selectedRecord && this.rowViews.has(this.selectedRecord)) {
       this.elm.dataset.detailOpen = 'true';
@@ -1307,6 +1572,7 @@ class BookshelfView {
     const previous = this.selectedRecord && this.rowViews.get(this.selectedRecord);
     if (previous && previous !== selected) {
       previous.details.open = false; previous.summary.textContent = '⋯'; previous.row.append(previous.details);
+      if (previous.downloadButton) previous.row.append(previous.downloadButton);
     }
     this.selectedRecord = key;
     for (const [id,view] of this.rowViews) view.row.dataset.selected = String(id === key);
@@ -1318,7 +1584,7 @@ class BookshelfView {
     const open = document.createElement('button'); open.type = 'button'; open.textContent = 'Open score'; open.className = 'LibraryWindow__primary';
     open.onclick = selected.open;
     selected.summary.textContent = 'Edit details'; selected.details.open = edit;
-    this.inspector.replaceChildren(back,title,description,open,selected.details);
+    this.inspector.replaceChildren(back,title,description,open,...(selected.downloadButton ? [selected.downloadButton] : []),selected.details);
     this.inspector.hidden = false; this.elm.dataset.detailOpen = 'true';
   }
 
@@ -1327,6 +1593,7 @@ class BookshelfView {
     if (selected) {
       selected.details.open = false; selected.summary.textContent = '⋯'; selected.row.dataset.selected = 'false';
       selected.row.append(selected.details);
+      if (selected.downloadButton) selected.row.append(selected.downloadButton);
       if (focus) selected.row.querySelector('button')?.focus({preventScroll:true});
     }
     this.selectedRecord = null;

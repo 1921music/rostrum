@@ -150,6 +150,26 @@ backend silently falls back to temporary storage. A second tab receives a lock
 error rather than opening another writer. Directory locking is conservative
 for folders with the same name; external database changes are detected before
 writing. Use a dedicated folder, not a database shared with another application.
+
+Storage location names the local directory, OPFS and IndexedDB explicitly.
+Unavailable choices stay visible and disabled. Only the active backend's
+**Delete library data** button is enabled. A confirmation identifies the target,
+warns about missing cloud configuration or unconfirmed changes/files, and states
+whether automatic restore is enabled. Deletion removes only managed score files
+(including orphaned UUID-prefixed score files) and the library database; foreign
+files, the user-selected folder itself, original cloud files, cloud sync copies,
+device preferences and sync configuration remain. Snapshot backends keep their
+lock until removal finishes; OPFS removes its SQLite VFS pool. A fresh empty
+library opens at the same selected location, with a new device identity and no
+deletion revisions. Automatic sync restores remote metadata only when enabled;
+when off, a read-only status check can detect available cloud changes, but restore
+requires an explicit sync. Standalone file builds perform removal via the host
+storage bridge. An interrupted deletion surfaces an error and requires reopening
+the storage location; it never silently changes the backend.
+
+Library and settings text permits native selection/copy, including touch callouts.
+Selecting text does not activate the containing score row. Data refresh is deferred
+while a selection is active, so background transfers do not erase copied text.
 When the remembered folder needs permission, Library displays its name and an
 **Allow library folder access** button. The read/write permission request runs
 on the host page in that button's user gesture, including for file-URL builds.
@@ -213,6 +233,40 @@ exchanged cloud metadata as unsynced; other pinned downloads still proceed.
 **Release download** keeps metadata, writing and cloud files, but requires an
 uploaded, hash-verified cloud copy and an unpinned, closed score. No automatic
 eviction is performed. A complete ZIP backup explicitly downloads missing files.
+
+Every score/song row in All scores, Songs, Bookshelves, Playlists and Tags shows
+local file availability. Missing files have **Download to this device** or
+**Retry download**; queued files offer **Download next**. Songs resolve to their
+owning document, so repeated appearances share one transfer. Downloads always
+read the library sync copy, never the recorded original cloud path.
+
+`LibraryTransferQueue` manages asynchronous file uploads and downloads in the
+page, with the existing SQLite Worker responsible for verification/persistence.
+Transfers run one at a time. Open requests have priority 100, manual downloads
+priority 50 and bulk/offline work priority 0; manual requests move to the head of
+their priority class. A running file finishes before a promoted job starts.
+Duplicate requests share a promise; queue failures do not block later jobs.
+Already-local files open without waiting behind a network transfer. Publishing
+still waits for required uploads before writing metadata batches.
+
+**Sync and download all scores** runs without the full-screen sync shade: it
+first performs normal sync/uploads, then queues missing current score files,
+excluding deleted/replaced documents. The library footer displays the active
+filename, completed-file counts and a progress bar, also while settings are open.
+It measures whole files rather than inventing byte-level progress. **Stop remaining
+downloads** removes waiting bulk jobs; the current file and promoted manual/open
+requests finish. Failures remain visible and re-running retries only missing
+files. The page must remain open for transfers; after reload, re-run the action
+to continue from files already saved. Transfer queue state itself is device/page
+local and not synced.
+
+**Check sync status** reads the remote inventories without applying changes or
+uploading data, including with automatic sync off. **Apply and sync** is enabled
+for a changed destination, pending metadata or missing uploads; full sync also
+enables for missing downloads. Applied destinations with unknown status require
+a status check before those actions enable. File counts distinguish pending
+uploads and downloads and count document files once. New remote metadata must
+be synced before its newly introduced documents enter the download count.
 
 **Automatic library sync** defaults on once a destination is connected. Local
 SQLite saves retain their 300 ms debounce; shared changes request a send after

@@ -9,6 +9,8 @@
  * database.flush() -> Promise<void> (all committed changes durable on success)
  * database.export() -> Uint8Array | Promise<Uint8Array> (consistent SQLite image)
  * database.close() -> void | Promise<void>
+ * database.destroy() -> Promise<void> (close and remove only owned local data)
+ * destroy is required by the concrete selectable backends, not injected readers.
  *
  * Backends surface permission, quota and persistence failures; they must not
  * silently fall back to temporary storage. Selected-folder and IndexedDB
