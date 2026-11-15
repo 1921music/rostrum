@@ -12896,17 +12896,85 @@ function initializeLibrarySqlite() {
   });
 }
 
+// src/bookshelf-format.js
+var LIBRARY_NAMESPACE = "rostrum-library-v2";
+var LIBRARY_APPLICATION_ID = 1381192781;
+var LIBRARY_SCHEMA_VERSION = 2;
+var LIBRARY_STORAGE_VERSION = 1;
+var LIBRARY_RECORD_VERSION = 2;
+var LIBRARY_BACKUP_VERSION = 2;
+var LibraryFormatError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "LibraryFormatError";
+  }
+};
+var hashLibraryBytes = async (bytes) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((n) => n.toString(16).padStart(2, "0")).join("");
+function scorePath(path) {
+  if (typeof path !== "string" || !/^scores\/[^/\\\x00]+$/.test(path) || path.split("/").some((p) => p === "." || p === "..")) throw new Error("Invalid score path in library package");
+  return path;
+}
+function createScorePath(id, name) {
+  if (!/^[0-9a-f-]{36}$/i.test(id)) throw new Error("Invalid score identity");
+  const normalized = name.normalize("NFC").replace(/[<>\u0022:\/\\|?*\x00-\x1f]/g, "_").replace(/[ .]+$/, "");
+  const extension = normalized.match(/\.[a-z0-9]{1,12}$/i)?.[0] || "";
+  const stem = extension ? normalized.slice(0, -extension.length) : normalized;
+  return scorePath(`scores/${id}__${([...stem].slice(0, 100).join("").replace(/[ .]+$/, "") || "score") + extension}`);
+}
+var storageLayouts = /* @__PURE__ */ new Map([[1, {
+  resolve: (path) => scorePath(path),
+  async list({ directory }) {
+    const dir = await directory("scores");
+    return dir ? Object.keys(dir.files).filter(isManagedScoreName).map((name) => ({ path: "scores/" + name, size: dir.files[name].size })) : [];
+  }
+}]]);
+function scoreStoragePath(path, version = LIBRARY_STORAGE_VERSION, layouts = storageLayouts) {
+  scorePath(path);
+  if (!layouts.has(version)) throw new LibraryFormatError("Unsupported score storage version. Update Rostrum before accessing these files.");
+  const layout = layouts.get(version);
+  const resolved = (typeof layout === "function" ? layout : layout.resolve)(path);
+  if (typeof resolved !== "string" || !resolved.startsWith("scores/") || resolved.split("/").some((part) => !part || part === "." || part === ".." || /[\\\x00]/.test(part))) throw new Error("Invalid physical score path");
+  return resolved;
+}
+function isManagedScoreName(name) {
+  return /^[0-9a-f-]{36}__[^/\\\x00]+$/i.test(name);
+}
+var backupUpgrades = /* @__PURE__ */ new Map();
+function upgradeLibraryEnvelope(value, kind, target, steps) {
+  if (!value || value.format !== kind || !Number.isSafeInteger(value.version) || value.version < 2 || value.version > target) throw new LibraryFormatError("Unsupported library package or sync version. Update Rostrum; pre-versioned data is not imported.");
+  if (value.version === target) return value;
+  let result = structuredClone(value);
+  while (result.version < target) {
+    const step = steps.get(result.version);
+    if (!step) throw new LibraryFormatError("Missing library format upgrade. Update Rostrum.");
+    const previous = result.version, next = step(result);
+    if (!next || next.version !== previous + 1 || next.format !== kind) throw new Error("Invalid library envelope upgrade.");
+    result = next;
+  }
+  return result;
+}
+var recordUpgrades = /* @__PURE__ */ new Map();
+function decodeLibraryRecord(table, payload, version, target = LIBRARY_RECORD_VERSION, upgrades = recordUpgrades) {
+  if (!Number.isSafeInteger(version) || version < 2 || version > target) throw new LibraryFormatError("Unsupported library record version. Update Rostrum.");
+  let row = structuredClone(payload);
+  while (version < target) {
+    const upgrade = upgrades.get(version);
+    if (!upgrade) throw new LibraryFormatError("Missing library record migration. Update Rostrum.");
+    row = upgrade(table, row);
+    version++;
+  }
+  return row;
+}
+
 // src/bookshelf-files.js
+var libraryDirectory = (root) => root.getDirectoryHandle(LIBRARY_NAMESPACE, { create: true });
 var DirectoryLibraryFiles = class {
   constructor(root) {
     this.root = root;
   }
   async clearLibrary({ database = true } = {}) {
     try {
-      const scores = await this.root.getDirectoryHandle("scores");
-      for await (const [name, handle] of scores.entries()) {
-        if (handle.kind === "file" && /^[0-9a-f-]{36}__[^/\\\x00]+$/i.test(name)) await scores.removeEntry(name);
-      }
+      await this.root.removeEntry("scores", { recursive: true });
     } catch (error) {
       if (error.name !== "NotFoundError") throw error;
     }
@@ -12951,9 +13019,9 @@ var DirectoryLibraryFiles = class {
 
 // src/bookshelf-storage-opfs.js
 async function openOpfsLibraryStorage() {
-  const root = await navigator.storage.getDirectory();
+  const root = await libraryDirectory(await navigator.storage.getDirectory());
   const sqlite = await initializeLibrarySqlite();
-  const pool = await sqlite.installOpfsSAHPoolVfs({ directory: ".rostrum-library-db" });
+  const pool = await sqlite.installOpfsSAHPoolVfs({ directory: LIBRARY_NAMESPACE + "/.rostrum-library-db" });
   const db2 = new pool.OpfsSAHPoolDb("/library.sqlite");
   const files2 = new DirectoryLibraryFiles(root);
   return {
@@ -13048,7 +13116,7 @@ async function holdLibraryLock(name) {
 }
 
 // src/bookshelf-storage-bytes-indexeddb.js
-async function openIndexedDbBytes({ name = "rostrum-bookshelf" } = {}) {
+async function openIndexedDbBytes({ name = "rostrum-bookshelf-v2" } = {}) {
   const release = await holdLibraryLock("rostrum-library-idb:" + name);
   let connection;
   try {
@@ -13059,10 +13127,10 @@ async function openIndexedDbBytes({ name = "rostrum-bookshelf" } = {}) {
       request2.onerror = () => reject(request2.error);
     });
     const access = (mode, run) => new Promise((resolve, reject) => {
-      const transaction2 = connection.transaction("files", mode);
-      const request2 = run(transaction2.objectStore("files"));
-      transaction2.oncomplete = () => resolve(request2.result);
-      transaction2.onabort = transaction2.onerror = () => reject(transaction2.error || request2.error);
+      const transaction3 = connection.transaction("files", mode);
+      const request2 = run(transaction3.objectStore("files"));
+      transaction3.oncomplete = () => resolve(request2.result);
+      transaction3.onabort = transaction3.onerror = () => reject(transaction3.error || request2.error);
     });
     const validate = (path) => {
       if (typeof path !== "string" || path.split("/").some((p) => !p || p === "." || p === ".." || /[\\\x00]/.test(p))) throw new Error("Invalid library path");
@@ -13102,7 +13170,7 @@ async function openIndexedDbBytes({ name = "rostrum-bookshelf" } = {}) {
 }
 
 // src/bookshelf-storage-indexeddb.js
-async function openIndexedDbLibraryStorage({ name = "rostrum-bookshelf" } = {}) {
+async function openIndexedDbLibraryStorage({ name = "rostrum-bookshelf-v2" } = {}) {
   const storage = await openIndexedDbBytes({ name });
   try {
     const database = await openSnapshotDatabase({ read: storage.readDatabase, write: storage.writeDatabase, release: storage.close, destroy: storage.clear });
@@ -13117,7 +13185,7 @@ async function openIndexedDbLibraryStorage({ name = "rostrum-bookshelf" } = {}) 
 async function openDirectoryBytes({ directory }) {
   if (!directory || directory.kind !== "directory") throw new Error("Choose a library folder first.");
   const release = await holdLibraryLock("rostrum-library-folder:" + directory.name);
-  const files2 = new DirectoryLibraryFiles(directory);
+  const files2 = new DirectoryLibraryFiles(await libraryDirectory(directory));
   let persisted;
   const digest = async (bytes) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].join(",");
   const read = async () => {
@@ -14554,11 +14622,6 @@ function unzipSync(data, opts) {
 }
 
 // src/bookshelf-transfer.js
-var hashBytes = async (bytes) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((value) => value.toString(16).padStart(2, "0")).join("");
-function scorePath(path) {
-  if (typeof path !== "string" || !/^scores\/[^/\\\x00]+$/.test(path) || path.split("/").some((p) => p === "." || p === "..")) throw new Error("Invalid score path in library package");
-  return path;
-}
 async function exportLibraryPackage({ db: db2, files: files2, tables: tables2 }) {
   const records = Object.fromEntries(Object.keys(tables2).map((table) => [table, db2.exec(`SELECT * FROM ${table}`)]));
   const changes = db2.exec("SELECT * FROM changes");
@@ -14574,14 +14637,14 @@ async function exportLibraryPackage({ db: db2, files: files2, tables: tables2 })
     entry.push(bytes, true);
     if (zipError) throw zipError;
   };
-  const manifest = strToU8(JSON.stringify({ format: "rostrum-library", version: 1, records, changes }));
+  const manifest = strToU8(JSON.stringify({ format: "rostrum-library", version: LIBRARY_BACKUP_VERSION, schemaVersion: LIBRARY_SCHEMA_VERSION, storageFormatVersion: LIBRARY_STORAGE_VERSION, recordFormatVersion: LIBRARY_RECORD_VERSION, records, changes }));
   if (manifest.length > 64 * 1024 * 1024) throw new Error("Library metadata exceeds the supported 64 MiB package size");
   addBytes("library.json", manifest);
   addBytes("library.sqlite", await db2.export());
   for (const doc of records.documents) {
     const file = await files2.read(scorePath(doc.storage_path));
     if (file.size > 512 * 1024 * 1024) throw new Error("A score exceeds the supported 512 MiB package member size");
-    if (file.size !== doc.size_bytes || await hashBytes(await file.arrayBuffer()) !== doc.content_hash) throw new Error("Cannot back up damaged or missing score: " + doc.storage_path);
+    if (file.size !== doc.size_bytes || await hashLibraryBytes(await file.arrayBuffer()) !== doc.content_hash) throw new Error("Cannot back up damaged or missing score: " + doc.storage_path);
     const entry = new ZipPassThrough(doc.storage_path);
     zip.add(entry);
     const reader = file.stream().getReader();
@@ -14645,8 +14708,8 @@ async function readLibraryPackage(input, tables2) {
     reader.releaseLock();
   }
   if (!archive["library.json"]) throw new Error("Invalid library package");
-  const manifest = JSON.parse(await archive["library.json"].text());
-  if (manifest.format !== "rostrum-library" || manifest.version !== 1 || !Array.isArray(manifest.changes)) throw new Error("Unsupported library package version");
+  const manifest = upgradeLibraryEnvelope(JSON.parse(await archive["library.json"].text()), "rostrum-library", LIBRARY_BACKUP_VERSION, backupUpgrades);
+  if (manifest.format !== "rostrum-library" || manifest.version !== LIBRARY_BACKUP_VERSION || manifest.schemaVersion !== LIBRARY_SCHEMA_VERSION || manifest.storageFormatVersion !== LIBRARY_STORAGE_VERSION || manifest.recordFormatVersion !== LIBRARY_RECORD_VERSION || !Array.isArray(manifest.changes)) throw new LibraryFormatError("Unsupported library package version. Update Rostrum; pre-versioned backups are not imported.");
   if (!manifest.records || Object.keys(manifest.records).some((table) => !Object.hasOwn(tables2, table))) throw new Error("Unknown library record type");
   for (const table of Object.keys(tables2)) if (!Array.isArray(manifest.records[table])) throw new Error("Incomplete library package");
   const paths = /* @__PURE__ */ new Set();
@@ -14655,29 +14718,233 @@ async function readLibraryPackage(input, tables2) {
     if (paths.has(path)) throw new Error("Duplicate score path");
     paths.add(path);
     const data = archive[path];
-    if (!data || data.size !== doc.size_bytes || await hashBytes(await data.arrayBuffer()) !== doc.content_hash) throw new Error("Invalid or missing score in package: " + path);
+    if (!data || data.size !== doc.size_bytes || await hashLibraryBytes(await data.arrayBuffer()) !== doc.content_hash) throw new Error("Invalid or missing score in package: " + path);
   }
   if (Object.keys(archive).some((path) => path !== "library.json" && !paths.has(path))) throw new Error("Package contains unreferenced score files");
   return { ...manifest, archive };
 }
 
+// src/bookshelf-migrations.js
+var schemaMigrations = /* @__PURE__ */ new Map();
+var storageMigrations = /* @__PURE__ */ new Map();
+var INITIAL_SCHEMA_VERSION = 2;
+function transaction(db2, run) {
+  db2.exec("BEGIN IMMEDIATE");
+  try {
+    const result = run();
+    db2.exec("COMMIT");
+    return result;
+  } catch (error) {
+    db2.exec("ROLLBACK");
+    throw error;
+  }
+}
+function createMigrationTables(db2) {
+  db2.exec("CREATE TABLE library_info (id INTEGER PRIMARY KEY CHECK(id=1), storage_format_version INTEGER NOT NULL, record_format_version INTEGER NOT NULL)");
+  db2.exec("INSERT INTO library_info VALUES (1,?,?)", [LIBRARY_STORAGE_VERSION, LIBRARY_RECORD_VERSION]);
+  db2.exec("CREATE TABLE library_migrations (kind TEXT NOT NULL, from_version INTEGER NOT NULL, to_version INTEGER NOT NULL, phase TEXT NOT NULL, completed_at TEXT, PRIMARY KEY(kind,to_version))");
+  db2.exec("CREATE TABLE library_file_moves (target_version INTEGER NOT NULL, logical_path TEXT NOT NULL, from_path TEXT NOT NULL, to_path TEXT NOT NULL, content_hash TEXT NOT NULL, size_bytes INTEGER NOT NULL, was_present INTEGER NOT NULL, state TEXT NOT NULL, PRIMARY KEY(target_version,logical_path))");
+}
+async function migrateLibrarySchema(db2, { create, target = LIBRARY_SCHEMA_VERSION, steps = schemaMigrations } = {}) {
+  if (!Number.isSafeInteger(target) || target < INITIAL_SCHEMA_VERSION) throw new LibraryFormatError("Invalid target schema version.");
+  const version = db2.exec("PRAGMA user_version")[0].user_version;
+  const app = db2.exec("PRAGMA application_id")[0].application_id;
+  const names = db2.exec("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'");
+  if (app && app !== LIBRARY_APPLICATION_ID || !app && names.length || !version && names.length) throw new LibraryFormatError("The selected database is not a versioned Rostrum library.");
+  if (version > target || version && version < INITIAL_SCHEMA_VERSION) throw new LibraryFormatError("Unsupported library schema. Pre-versioned data is not migrated; use a new library. Newer schemas require an updated Rostrum.");
+  if (version) {
+    const info2 = db2.exec("SELECT * FROM library_info WHERE id=1")[0];
+    if (!info2 || !Number.isSafeInteger(info2.record_format_version) || info2.record_format_version < 2 || info2.record_format_version > LIBRARY_RECORD_VERSION || !Number.isSafeInteger(info2.storage_format_version) || info2.storage_format_version < 1 || info2.storage_format_version > LIBRARY_STORAGE_VERSION) throw new LibraryFormatError("Unsupported library data or storage format. Update Rostrum before modifying this database.");
+    for (let v2 = info2.record_format_version; v2 < LIBRARY_RECORD_VERSION; v2++) if (!recordUpgrades.has(v2)) throw new LibraryFormatError("Missing library record migration. Update Rostrum.");
+  }
+  if (!version) {
+    if (!create) throw new Error("A new library requires a schema initializer.");
+    transaction(db2, () => {
+      create();
+      createMigrationTables(db2);
+      db2.exec(`PRAGMA application_id=${LIBRARY_APPLICATION_ID}`);
+      db2.exec(`PRAGMA user_version=${INITIAL_SCHEMA_VERSION}`);
+      db2.exec("INSERT INTO library_migrations VALUES ('schema',0,?,'done',?)", [INITIAL_SCHEMA_VERSION, (/* @__PURE__ */ new Date()).toISOString()]);
+    });
+    await db2.flush();
+  }
+  let current = version || INITIAL_SCHEMA_VERSION;
+  for (let v2 = current; v2 < target; v2++) if (!steps.has(v2)) throw new LibraryFormatError("Missing database migration step. Update Rostrum.");
+  while (current < target) {
+    const from = current, to = current + 1;
+    transaction(db2, () => {
+      if (steps.get(from).constructor.name === "AsyncFunction") throw new Error("Schema migrations must be synchronous transactions.");
+      const before = db2.exec("SELECT * FROM library_info WHERE id=1")[0];
+      const result = steps.get(from)(db2);
+      if (result?.then) throw new Error("Schema migrations must be synchronous transactions.");
+      const after = db2.exec("SELECT * FROM library_info WHERE id=1")[0];
+      if (after.storage_format_version !== before.storage_format_version || after.record_format_version !== before.record_format_version) throw new Error("Schema steps cannot change file or record formats; use their migration engines.");
+      if (db2.exec("PRAGMA foreign_key_check").length) throw new Error("Database migration broke a library reference.");
+      db2.exec(`PRAGMA user_version=${to}`);
+      db2.exec("INSERT INTO library_migrations VALUES ('schema',?,?,'done',?)", [from, to, (/* @__PURE__ */ new Date()).toISOString()]);
+    });
+    await db2.flush();
+    current = to;
+  }
+  const info = db2.exec("SELECT * FROM library_info WHERE id=1")[0];
+  if (!info || info.record_format_version > LIBRARY_RECORD_VERSION) throw new LibraryFormatError("Unsupported library record format. Update Rostrum.");
+  return info;
+}
+async function migrateLibraryRecords(db2, tables2, { target = LIBRARY_RECORD_VERSION, upgrades = recordUpgrades } = {}) {
+  let current = db2.exec("SELECT record_format_version FROM library_info WHERE id=1")[0]?.record_format_version;
+  if (!Number.isSafeInteger(target) || !Number.isSafeInteger(current) || current < 2 || current > target) throw new LibraryFormatError("Unsupported library record format. Update Rostrum.");
+  for (let v2 = current; v2 < target; v2++) if (!upgrades.has(v2)) throw new LibraryFormatError("Missing library record migration. Update Rostrum.");
+  while (current < target) {
+    const to = current + 1;
+    transaction(db2, () => {
+      for (const table of tables2) {
+        if (!/^[a-z_]+$/.test(table)) throw new Error("Invalid library table");
+        const columns = db2.exec(`PRAGMA table_info(${table})`).map((column) => column.name);
+        for (const row of db2.exec(`SELECT * FROM ${table}`)) {
+          const change = db2.exec("SELECT * FROM changes WHERE id=?", [row.revision_id])[0];
+          if (!change || change.entity_type !== table || change.entity_id !== row.id) throw new Error("Missing migration source revision.");
+          const decoded = decodeLibraryRecord(table, JSON.parse(change.payload_json), change.record_version, to, upgrades);
+          if (decoded.id !== row.id || decoded.revision_id !== row.revision_id || Object.keys(decoded).some((key) => !columns.includes(key))) throw new Error("Record migration changed identity or produced unknown fields.");
+          if (table === "documents" && ["storage_path", "content_hash", "size_bytes"].some((key) => decoded[key] !== row[key])) throw new Error("Record migration cannot change score identity or contents; use a storage layout migration.");
+          const keys = columns.filter((key) => key !== "id");
+          db2.exec(`UPDATE ${table} SET ${keys.map((key) => key + "=?").join(",")} WHERE id=?`, [...keys.map((key) => Object.hasOwn(decoded, key) ? decoded[key] : row[key]), row.id]);
+        }
+      }
+      if (db2.exec("PRAGMA foreign_key_check").length) throw new Error("Record migration broke a library reference.");
+      db2.exec("UPDATE library_info SET record_format_version=? WHERE id=1", [to]);
+      db2.exec("INSERT INTO library_migrations VALUES ('records',?,?,'done',?)", [current, to, (/* @__PURE__ */ new Date()).toISOString()]);
+    });
+    await db2.flush();
+    current = to;
+  }
+}
+async function readOptional(files2, path) {
+  try {
+    return await files2.read(path);
+  } catch (error) {
+    if (error.name === "NotFoundError") return null;
+    throw error;
+  }
+}
+async function verify(file, entry) {
+  if (!file || file.size !== entry.size_bytes || await hashLibraryBytes(await file.arrayBuffer()) !== entry.content_hash) throw new Error("Migration file verification failed: " + entry.logical_path);
+}
+async function migrateLibraryStorage(db2, rawFiles2, { target = LIBRARY_STORAGE_VERSION, layouts = storageLayouts, steps = storageMigrations } = {}) {
+  if (!Number.isSafeInteger(target) || target < 1) throw new LibraryFormatError("Invalid target storage version.");
+  let current = db2.exec("SELECT storage_format_version FROM library_info WHERE id=1")[0]?.storage_format_version;
+  if (!Number.isSafeInteger(current) || current < 1 || current > target || !layouts.has(current) || !layouts.has(target)) throw new LibraryFormatError("Unsupported library storage version. Update Rostrum.");
+  for (let v2 = current; v2 < target; v2++) if (!steps.has(v2) || !layouts.has(v2 + 1)) throw new LibraryFormatError("Missing file storage migration step. Update Rostrum.");
+  for (; ; ) {
+    let run = db2.exec("SELECT * FROM library_migrations WHERE kind='storage' AND phase<>'done' ORDER BY to_version LIMIT 1")[0];
+    if (!run && current === target) break;
+    if (!run) {
+      const to = current + 1;
+      await steps.get(current)({ db: db2, from: current, to });
+      const docs = db2.exec("SELECT id,storage_path,content_hash,size_bytes FROM documents");
+      const entries2 = [];
+      for (const doc of docs) {
+        const source = scoreStoragePath(doc.storage_path, current, layouts), destination = scoreStoragePath(doc.storage_path, to, layouts);
+        const file = await readOptional(rawFiles2, source);
+        if (file) await verify(file, { ...doc, logical_path: doc.storage_path });
+        const local = db2.exec("SELECT value FROM local_state WHERE key=?", ["file:" + doc.id])[0];
+        if (!file && local && JSON.parse(local.value).present) throw new Error("A local score is missing; restore it before migrating: " + doc.storage_path);
+        entries2.push({ logical: doc.storage_path, source, destination, hash: doc.content_hash, size: doc.size_bytes, present: !!file });
+      }
+      const destinations = new Set(entries2.map((e) => e.destination)), sources = new Set(entries2.map((e) => e.source));
+      if (destinations.size !== entries2.length || entries2.some((e) => e.destination !== e.source && sources.has(e.destination))) throw new Error("File migration paths overlap.");
+      transaction(db2, () => {
+        db2.exec("INSERT INTO library_migrations VALUES ('storage',?,?,'copying',NULL)", [current, to]);
+        for (const e of entries2) db2.exec("INSERT INTO library_file_moves VALUES (?,?,?,?,?,?,?,?)", [to, e.logical, e.source, e.destination, e.hash, e.size, e.present ? 1 : 0, e.present ? "planned" : "absent"]);
+      });
+      await db2.flush();
+      run = { from_version: current, to_version: to, phase: "copying" };
+    }
+    if (run.to_version > target || !layouts.has(run.from_version) || !layouts.has(run.to_version) || !steps.has(run.from_version)) throw new LibraryFormatError("A newer file migration is pending. Update Rostrum to resume it.");
+    const entries = db2.exec("SELECT * FROM library_file_moves WHERE target_version=?", [run.to_version]);
+    if (run.to_version !== run.from_version + 1 || run.phase === "copying" && current !== run.from_version || run.phase === "cleanup" && current !== run.to_version) throw new Error("Invalid file migration checkpoint versions.");
+    for (const e of entries) {
+      const doc = db2.exec("SELECT content_hash,size_bytes FROM documents WHERE storage_path=?", [e.logical_path])[0];
+      if (!doc || doc.content_hash !== e.content_hash || doc.size_bytes !== e.size_bytes || e.from_path !== scoreStoragePath(e.logical_path, run.from_version, layouts) || e.to_path !== scoreStoragePath(e.logical_path, run.to_version, layouts)) throw new Error("Invalid file migration checkpoint identity.");
+    }
+    if (run.phase === "copying") {
+      for (const e of entries.filter((e2) => e2.was_present)) {
+        let destination = await readOptional(rawFiles2, e.to_path);
+        if (!destination) {
+          const source = await readOptional(rawFiles2, e.from_path);
+          await verify(source, e);
+          await rawFiles2.write(e.to_path, source);
+          destination = await rawFiles2.read(e.to_path);
+        }
+        await verify(destination, e);
+        transaction(db2, () => db2.exec("UPDATE library_file_moves SET state='copied' WHERE target_version=? AND logical_path=?", [run.to_version, e.logical_path]));
+        await db2.flush();
+      }
+      transaction(db2, () => {
+        db2.exec("UPDATE library_info SET storage_format_version=? WHERE id=1", [run.to_version]);
+        db2.exec("UPDATE library_migrations SET phase='cleanup' WHERE kind='storage' AND to_version=?", [run.to_version]);
+      });
+      await db2.flush();
+      run.phase = "cleanup";
+      current = run.to_version;
+    }
+    if (run.phase !== "cleanup") throw new Error("Invalid file migration checkpoint.");
+    for (const e of entries.filter((e2) => e2.was_present)) {
+      await verify(await readOptional(rawFiles2, e.to_path), e);
+      if (e.from_path !== e.to_path) try {
+        await rawFiles2.remove(e.from_path);
+      } catch (error) {
+        if (error.name !== "NotFoundError") throw error;
+      }
+      transaction(db2, () => db2.exec("UPDATE library_file_moves SET state='cleaned' WHERE target_version=? AND logical_path=?", [run.to_version, e.logical_path]));
+      await db2.flush();
+    }
+    transaction(db2, () => db2.exec("UPDATE library_migrations SET phase='done',completed_at=? WHERE kind='storage' AND to_version=?", [(/* @__PURE__ */ new Date()).toISOString(), run.to_version]));
+    await db2.flush();
+    current = run.to_version;
+  }
+  return current;
+}
+function versionedLibraryFiles(rawFiles2, version) {
+  return {
+    read: (path) => rawFiles2.read(scoreStoragePath(path, version)),
+    write: (path, bytes) => rawFiles2.write(scoreStoragePath(path, version), bytes),
+    remove: (path) => rawFiles2.remove(scoreStoragePath(path, version))
+  };
+}
+
+// src/bookshelf-schema.js
+var libraryTables = ["documents", "entries", "annotations", "tags", "document_tags", "entry_tags", "bookshelves", "bookshelf_documents", "playlists", "playlist_items"];
+function createLibrarySchemaV2(db2) {
+  const baseline = {
+    documents: "content_hash TEXT NOT NULL, storage_path TEXT NOT NULL UNIQUE, size_bytes INTEGER NOT NULL, derived_from_id TEXT REFERENCES documents(id), replaced_by_id TEXT REFERENCES documents(id), settings_json TEXT NOT NULL DEFAULT '{}'",
+    entries: "document_id TEXT NOT NULL REFERENCES documents(id), parent_id TEXT REFERENCES entries(id), anchor_json TEXT NOT NULL",
+    annotations: "document_id TEXT NOT NULL REFERENCES documents(id), anchor_json TEXT NOT NULL, content_json TEXT NOT NULL",
+    tags: "name TEXT NOT NULL",
+    document_tags: "document_id TEXT NOT NULL REFERENCES documents(id), tag_id TEXT NOT NULL REFERENCES tags(id)",
+    entry_tags: "entry_id TEXT NOT NULL REFERENCES entries(id), tag_id TEXT NOT NULL REFERENCES tags(id)",
+    bookshelves: "",
+    bookshelf_documents: "bookshelf_id TEXT NOT NULL REFERENCES bookshelves(id), document_id TEXT NOT NULL REFERENCES documents(id), order_key TEXT NOT NULL",
+    playlists: "",
+    playlist_items: "playlist_id TEXT NOT NULL REFERENCES playlists(id), entry_id TEXT NOT NULL REFERENCES entries(id), order_key TEXT NOT NULL"
+  };
+  for (const [name, extra] of Object.entries(baseline)) db2.exec(`CREATE TABLE ${name} (
+    id TEXT PRIMARY KEY NOT NULL, revision_id TEXT NOT NULL, deleted_at TEXT,
+    metadata_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(metadata_json))${extra ? "," + extra : ""})`);
+  db2.exec("CREATE TABLE changes (id TEXT PRIMARY KEY, device_id TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, parent_revision_ids_json TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL, record_version INTEGER NOT NULL)");
+  db2.exec("CREATE TABLE local_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+  db2.exec("CREATE INDEX changes_entity ON changes(entity_type,entity_id)");
+  db2.exec("CREATE INDEX entries_document ON entries(document_id)");
+  db2.exec("CREATE INDEX documents_hash ON documents(content_hash)");
+  db2.exec("CREATE INDEX entries_title ON entries(json_extract(metadata_json,'$.title'))");
+}
+
 // src/bookshelf-worker.js
 var db;
 var files;
+var rawFiles;
 var initialized = false;
 var storageOptions = {};
-var tables = {
-  documents: "content_hash TEXT NOT NULL, storage_path TEXT NOT NULL UNIQUE, size_bytes INTEGER NOT NULL, derived_from_id TEXT REFERENCES documents(id), replaced_by_id TEXT REFERENCES documents(id), settings_json TEXT NOT NULL DEFAULT '{}'",
-  entries: "document_id TEXT NOT NULL REFERENCES documents(id), parent_id TEXT REFERENCES entries(id), anchor_json TEXT NOT NULL",
-  annotations: "document_id TEXT NOT NULL REFERENCES documents(id), anchor_json TEXT NOT NULL, content_json TEXT NOT NULL",
-  tags: "name TEXT NOT NULL",
-  document_tags: "document_id TEXT NOT NULL REFERENCES documents(id), tag_id TEXT NOT NULL REFERENCES tags(id)",
-  entry_tags: "entry_id TEXT NOT NULL REFERENCES entries(id), tag_id TEXT NOT NULL REFERENCES tags(id)",
-  bookshelves: "",
-  bookshelf_documents: "bookshelf_id TEXT NOT NULL REFERENCES bookshelves(id), document_id TEXT NOT NULL REFERENCES documents(id), order_key TEXT NOT NULL",
-  playlists: "",
-  playlist_items: "playlist_id TEXT NOT NULL REFERENCES playlists(id), entry_id TEXT NOT NULL REFERENCES entries(id), order_key TEXT NOT NULL"
-};
+var tables = Object.fromEntries(libraryTables.map((name) => [name, true]));
 function validateJsonField(value) {
   if (typeof value !== "string") throw new Error("Library JSON fields must be text");
   const parsed = JSON.parse(value);
@@ -14686,7 +14953,7 @@ function validateJsonField(value) {
 function sql(statement, bind = []) {
   return db.exec(statement, bind);
 }
-function transaction(run) {
+function transaction2(run) {
   sql("BEGIN IMMEDIATE");
   try {
     const value = run();
@@ -14753,18 +15020,20 @@ function save(table, values, parents = null) {
     if (key.endsWith("_json")) validateJsonField(value);
   }
   writeRow(table, row);
-  sql("INSERT INTO changes VALUES (?,?,?,?,?,?,?)", [
+  sql("INSERT INTO changes VALUES (?,?,?,?,?,?,?,?)", [
     revision,
     deviceId,
     table,
     row.id,
     JSON.stringify(parents || (previous ? [previous.revision_id] : [])),
     JSON.stringify(row),
-    (/* @__PURE__ */ new Date()).toISOString()
+    (/* @__PURE__ */ new Date()).toISOString(),
+    LIBRARY_RECORD_VERSION
   ]);
   return row;
 }
 var deviceId;
+var decodeChange = (change) => decodeLibraryRecord(change.entity_type, JSON.parse(change.payload_json), change.record_version);
 function validateTransfer(manifest) {
   const schemas = Object.fromEntries(Object.keys(tables).map((table) => [table, sql(`PRAGMA table_info(${table})`)]));
   const normalize = (table, row) => {
@@ -14783,11 +15052,11 @@ function validateTransfer(manifest) {
   };
   const known = new Map(sql("SELECT * FROM changes").map((change) => [change.id, change]));
   const incoming = /* @__PURE__ */ new Map();
-  const sameChange = (a, b) => ["id", "entity_type", "entity_id", "parent_revision_ids_json", "payload_json", "created_at", "device_id"].every((key) => a[key] === b[key]);
+  const sameChange = (a, b) => ["id", "entity_type", "entity_id", "parent_revision_ids_json", "payload_json", "created_at", "device_id", "record_version"].every((key) => a[key] === b[key]);
   for (const change of manifest.changes) {
     if (!change || ["id", "device_id", "entity_type", "entity_id", "parent_revision_ids_json", "payload_json", "created_at"].some((key) => typeof change[key] !== "string")) throw new Error("Invalid change record");
     if (incoming.has(change.id)) throw new Error("Duplicate change identity");
-    const row = normalize(change.entity_type, JSON.parse(change.payload_json));
+    const row = normalize(change.entity_type, decodeChange(change));
     if (row.id !== change.entity_id || row.revision_id !== change.id) throw new Error("Change identity does not match its record");
     const parents = JSON.parse(change.parent_revision_ids_json);
     if (!Array.isArray(parents) || parents.some((id) => typeof id !== "string" || id === change.id) || new Set(parents).size !== parents.length) throw new Error("Invalid change ancestry");
@@ -14828,7 +15097,7 @@ function validateTransfer(manifest) {
       if (ids.has(row.id)) throw new Error("Duplicate library record identity");
       ids.add(row.id);
       const change = combined.get(row.revision_id);
-      if (!change || change.entity_type !== table || change.entity_id !== row.id || JSON.stringify(normalize(table, JSON.parse(change.payload_json))) !== JSON.stringify(row)) throw new Error("Library record does not match its change history");
+      if (!change || change.entity_type !== table || change.entity_id !== row.id || JSON.stringify(normalize(table, decodeChange(change))) !== JSON.stringify(row)) throw new Error("Library record does not match its change history");
     }
   }
   const documents = new Map(manifest.records.documents.map((doc) => [doc.id, doc]));
@@ -14837,7 +15106,7 @@ function validateTransfer(manifest) {
     if (!/^[a-f0-9]{64}$/.test(doc.content_hash) || !Number.isSafeInteger(doc.size_bytes) || doc.size_bytes < 0) throw new Error("Invalid score identity");
   }
   for (const change of incoming.values()) if (change.entity_type === "documents") {
-    const row = JSON.parse(change.payload_json), doc = documents.get(row.id);
+    const row = decodeChange(change), doc = documents.get(row.id);
     if (!doc || ["storage_path", "content_hash", "size_bytes"].some((key) => row[key] !== doc[key])) throw new Error("A document identity has different file contents");
     const local = sql("SELECT * FROM documents WHERE id=? OR storage_path=?", [doc.id, doc.storage_path])[0];
     if (local && (local.id !== doc.id || ["storage_path", "content_hash", "size_bytes"].some((key) => local[key] !== doc[key]))) throw new Error("The package would overwrite a different score");
@@ -14846,16 +15115,16 @@ function validateTransfer(manifest) {
 }
 function mergeRecords(manifest) {
   const { incoming, normalize, known } = validateTransfer(manifest);
-  transaction(() => {
+  transaction2(() => {
     sql("PRAGMA defer_foreign_keys=ON");
     for (const change of incoming.values()) if (!known.has(change.id)) sql(
-      "INSERT INTO changes VALUES (?,?,?,?,?,?,?)",
-      [change.id, change.device_id, change.entity_type, change.entity_id, change.parent_revision_ids_json, change.payload_json, change.created_at]
+      "INSERT INTO changes VALUES (?,?,?,?,?,?,?,?)",
+      [change.id, change.device_id, change.entity_type, change.entity_id, change.parent_revision_ids_json, change.payload_json, change.created_at, change.record_version]
     );
     const entities = new Map([...incoming.values()].map((change) => [change.entity_type + ":" + change.entity_id, change]));
     for (const { entity_type: table, entity_id: id } of entities.values()) {
       const chosen = heads(table, id).sort((a, b) => a.id.localeCompare(b.id)).at(-1);
-      writeRow(table, normalize(table, JSON.parse(chosen.payload_json)));
+      writeRow(table, normalize(table, decodeChange(chosen)));
     }
     validateRelations();
     if (sql("PRAGMA foreign_key_check").length) throw new Error("The changes contain broken library references");
@@ -14890,36 +15159,20 @@ async function localFile(doc) {
   }
 }
 function associatedDocument(change) {
-  const row = JSON.parse(change.payload_json);
+  const row = decodeChange(change);
   if (change.entity_type === "documents") return row.id;
   if (row.document_id) return row.document_id;
   if (row.entry_id) return sql("SELECT document_id FROM entries WHERE id=?", [row.entry_id])[0]?.document_id;
 }
 async function open() {
   if (initialized) return;
-  if (!db) ({ database: db, files } = await openLibraryStorage(() => openConfiguredLibraryStorage(storageOptions)));
+  if (!db) ({ database: db, files: rawFiles } = await openLibraryStorage(() => openConfiguredLibraryStorage(storageOptions)));
   sql("PRAGMA foreign_keys=ON");
   sql("PRAGMA trusted_schema=OFF");
-  const applicationId = sql("PRAGMA application_id")[0].application_id;
-  const existingTables = sql("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'").map((row) => row.name);
-  if (applicationId && applicationId !== 1381192781 || !applicationId && existingTables.length && !["documents", "entries", "changes"].every((name) => existingTables.includes(name))) {
-    throw new Error("The selected database is not a Rostrum library.");
-  }
-  const version = sql("PRAGMA user_version")[0].user_version;
-  if (version > 1) throw new Error("This library requires a newer Rostrum version.");
-  transaction(() => {
-    for (const [name, extra] of Object.entries(tables)) sql(`CREATE TABLE IF NOT EXISTS ${name} (
-      id TEXT PRIMARY KEY NOT NULL, revision_id TEXT NOT NULL, deleted_at TEXT,
-      metadata_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(metadata_json))${extra ? "," + extra : ""})`);
-    sql("CREATE TABLE IF NOT EXISTS changes (id TEXT PRIMARY KEY, device_id TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, parent_revision_ids_json TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL)");
-    sql("CREATE TABLE IF NOT EXISTS local_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
-    sql("CREATE INDEX IF NOT EXISTS changes_entity ON changes(entity_type, entity_id)");
-    sql("CREATE INDEX IF NOT EXISTS entries_document ON entries(document_id)");
-    sql("CREATE INDEX IF NOT EXISTS documents_hash ON documents(content_hash)");
-    sql("CREATE INDEX IF NOT EXISTS entries_title ON entries(json_extract(metadata_json, '$.title'))");
-    sql("PRAGMA user_version=1");
-    sql("PRAGMA application_id=1381192781");
-  });
+  await migrateLibrarySchema(db, { create: () => createLibrarySchemaV2(db) });
+  await migrateLibraryRecords(db, Object.keys(tables));
+  const storageVersion = await migrateLibraryStorage(db, rawFiles);
+  files = versionedLibraryFiles(rawFiles, storageVersion);
   deviceId = sql("SELECT value FROM local_state WHERE key='device'")[0]?.value || crypto.randomUUID();
   sql("INSERT OR IGNORE INTO local_state VALUES ('device', ?)", [deviceId]);
   initialized = true;
@@ -14934,10 +15187,13 @@ var withOriginalLocation = (metadata, location) => {
   return { ...metadata, originalLocations: [...locations, clean] };
 };
 var actions = {
+  formatInfo() {
+    return { schemaVersion: sql("PRAGMA user_version")[0].user_version, ...sql("SELECT * FROM library_info WHERE id=1")[0], migrations: sql("SELECT * FROM library_migrations") };
+  },
   destroyStorage() {
   },
   rememberOriginalLocation({ id, location }) {
-    return transaction(() => {
+    return transaction2(() => {
       const document = sql("SELECT * FROM documents WHERE id=?", [id])[0];
       if (!document) throw new Error("Score not found");
       const metadata = JSON.parse(document.metadata_json), updated = withOriginalLocation(metadata, location);
@@ -14957,11 +15213,11 @@ var actions = {
     }
     return result;
   },
-  async fileInfo({ id, verify = false }) {
+  async fileInfo({ id, verify: verify2 = false }) {
     const document = sql("SELECT * FROM documents WHERE id=?", [id])[0];
     if (!document) throw new Error("Score not found");
     const file = await localFile(document);
-    if (file && verify && (file.size !== document.size_bytes || await hashBytes(await file.arrayBuffer()) !== document.content_hash)) throw new Error("Local score contents do not match the imported file");
+    if (file && verify2 && (file.size !== document.size_bytes || await hashLibraryBytes(await file.arrayBuffer()) !== document.content_hash)) throw new Error("Local score contents do not match the imported file");
     return { document, file };
   },
   async installFile({ id, file }) {
@@ -14972,7 +15228,7 @@ var actions = {
   },
   async verifyFile({ id, file }) {
     const doc = sql("SELECT * FROM documents WHERE id=?", [id])[0];
-    if (!doc || !(file instanceof Blob) || file.size !== doc.size_bytes || await hashBytes(await file.arrayBuffer()) !== doc.content_hash) throw new Error("Downloaded score is damaged or does not match its hash");
+    if (!doc || !(file instanceof Blob) || file.size !== doc.size_bytes || await hashLibraryBytes(await file.arrayBuffer()) !== doc.content_hash) throw new Error("Downloaded score is damaged or does not match its hash");
     return true;
   },
   pinFile({ id, pinned }) {
@@ -15002,7 +15258,7 @@ var actions = {
       if (!change || !Object.hasOwn(tables, change.entity_type)) throw new Error("Invalid change entity");
       selected.set(change.entity_type + ":" + change.entity_id, change);
     }
-    for (const change of selected.values()) records[change.entity_type].push(JSON.parse(change.payload_json));
+    for (const change of selected.values()) records[change.entity_type].push(decodeChange(change));
     const existing = new Set(sql("SELECT id FROM documents").map((doc) => doc.id));
     const result = mergeRecords({ records, changes });
     for (const doc of records.documents) if (!existing.has(doc.id)) setFileState(doc.id, { present: false });
@@ -15026,7 +15282,7 @@ var actions = {
     return { pending: sql("SELECT id FROM changes").filter((row) => !known.has(row.id)).length, verified: !!getLocal("remote:" + destination), conflicts: actions.conflicts().length };
   },
   async findImportedFile({ file }) {
-    const existing = importedDocument(await hashBytes(await file.arrayBuffer()));
+    const existing = importedDocument(await hashLibraryBytes(await file.arrayBuffer()));
     return existing ? { ...existing, alreadyImported: true } : null;
   },
   changeIds() {
@@ -15057,7 +15313,7 @@ var actions = {
           if (error.name !== "NotFoundError") throw error;
         }
         if (existing) {
-          if (await hashBytes(await existing.arrayBuffer()) !== doc.content_hash) throw new Error("A different file already exists at " + doc.storage_path);
+          if (await hashLibraryBytes(await existing.arrayBuffer()) !== doc.content_hash) throw new Error("A different file already exists at " + doc.storage_path);
         } else {
           await files.write(doc.storage_path, manifest.archive[doc.storage_path]);
           created.push(doc.storage_path);
@@ -15085,12 +15341,12 @@ var actions = {
   },
   resolveConflict({ table, id, revisionId, expectedRevisionIds }) {
     if (!Object.hasOwn(tables, table)) throw new Error("Unknown library record type");
-    return transaction(() => {
+    return transaction2(() => {
       const alternatives = heads(table, id);
       if (!Array.isArray(expectedRevisionIds) || [...expectedRevisionIds].sort().join() !== alternatives.map((change) => change.id).sort().join()) throw new Error("This conflict changed. Refresh before resolving it.");
       const chosen = alternatives.find((change) => change.id === revisionId);
       if (!chosen || alternatives.length < 2) throw new Error("This conflict has already changed. Refresh before resolving it.");
-      const row = JSON.parse(chosen.payload_json);
+      const row = decodeChange(chosen);
       delete row.revision_id;
       return save(table, row, alternatives.map((change) => change.id));
     });
@@ -15107,22 +15363,18 @@ var actions = {
   },
   async open() {
     await open();
-    return { version: 1 };
+    return { version: LIBRARY_SCHEMA_VERSION };
   },
   async importFile({ file, entries, displayName = file.name, replacesId = null, derivedFromId = null, originalLocation = null }) {
     const id = crypto.randomUUID();
     const bytes = await file.arrayBuffer();
-    const hash = await hashBytes(bytes);
+    const hash = await hashLibraryBytes(bytes);
     const existing = importedDocument(hash);
     if (existing) return { ...actions.rememberOriginalLocation({ id: existing.id, location: originalLocation }), alreadyImported: true };
-    const normalized = file.name.normalize("NFC").replace(/[<>:"/\\|?*\x00-\x1f]/g, "_").replace(/[ .]+$/, "");
-    const extension = normalized.match(/\.[a-z0-9]{1,12}$/i)?.[0] || "";
-    const stem = extension ? normalized.slice(0, -extension.length) : normalized;
-    const safeName = ([...stem].slice(0, 100).join("").replace(/[ .]+$/, "") || "score") + extension;
-    const path = `scores/${id}__${safeName}`;
+    const path = createScorePath(id, file.name);
     try {
       await files.write(path, bytes);
-      return transaction(() => {
+      return transaction2(() => {
         const document = save("documents", {
           id,
           content_hash: hash,
@@ -15179,7 +15431,7 @@ var actions = {
     return sql("SELECT * FROM documents");
   },
   useVersion({ id }) {
-    return transaction(() => {
+    return transaction2(() => {
       let row = sql("SELECT * FROM documents WHERE id=?", [id])[0];
       if (!row) throw new Error("Score not found");
       const visited = /* @__PURE__ */ new Set([id]);
@@ -15195,7 +15447,7 @@ var actions = {
     });
   },
   reindex({ documentId, entries }) {
-    return transaction(() => {
+    return transaction2(() => {
       if (!sql("SELECT id FROM documents WHERE id=? AND deleted_at IS NULL", [documentId]).length) throw new Error("Score not found");
       const previous = sql("SELECT * FROM entries WHERE document_id=?", [documentId]);
       const mapping = /* @__PURE__ */ new Map();
@@ -15231,7 +15483,7 @@ var actions = {
     return { ...state, entries: sql("SELECT * FROM entries WHERE document_id=?", [id]) };
   },
   editSongs({ documentId, expectedRevisionId, expectedEntries, displayName, entries }) {
-    return transaction(() => {
+    return transaction2(() => {
       const document = sql("SELECT * FROM documents WHERE id=? AND deleted_at IS NULL", [documentId])[0];
       if (!document) throw new Error("Score not found");
       const current = sql("SELECT id, revision_id, deleted_at FROM entries WHERE document_id=?", [documentId]);
@@ -15282,7 +15534,7 @@ var actions = {
     return { document, file: await files.read(document.storage_path), annotations: sql("SELECT * FROM annotations WHERE document_id=? AND deleted_at IS NULL", [id]) };
   },
   saveState({ documentId, settings, annotations }) {
-    return transaction(() => {
+    return transaction2(() => {
       if (!sql("SELECT id FROM documents WHERE id=? AND deleted_at IS NULL", [documentId]).length) throw new Error("Score not found");
       const existing = sql("SELECT * FROM annotations WHERE document_id=? AND deleted_at IS NULL", [documentId]);
       const ids = /* @__PURE__ */ new Set();
@@ -15304,14 +15556,14 @@ var actions = {
     });
   },
   update({ table, values, expectedRevisionId }) {
-    return transaction(() => {
+    return transaction2(() => {
       if (expectedRevisionId && sql(`SELECT revision_id FROM ${Object.hasOwn(tables, table) ? table : "documents"} WHERE id=?`, [values.id])[0]?.revision_id !== expectedRevisionId) throw new Error("This item changed. Refresh the list before editing it.");
       return save(table, values);
     });
   },
   link({ table, values }) {
     if (!["document_tags", "entry_tags", "bookshelf_documents", "playlist_items"].includes(table)) throw new Error("Invalid membership");
-    return transaction(() => {
+    return transaction2(() => {
       if (table !== "playlist_items") {
         const rows = sql(`SELECT * FROM ${table} WHERE deleted_at IS NULL`);
         const existing = rows.find((row) => Object.entries(values).filter(([key]) => key !== "order_key").every(([key, value]) => row[key] === value));
@@ -15328,7 +15580,7 @@ var actions = {
   },
   moveItem({ table, id, direction }) {
     if (!["playlist_items", "bookshelf_documents"].includes(table) || ![-1, 1].includes(direction)) throw new Error("Invalid move");
-    return transaction(() => {
+    return transaction2(() => {
       const parent = table === "playlist_items" ? "playlist_id" : "bookshelf_id";
       const item = sql(`SELECT * FROM ${table} WHERE id=? AND deleted_at IS NULL`, [id])[0];
       if (!item) throw new Error("Item not found");
@@ -15361,7 +15613,7 @@ self.onmessage = ({ data }) => {
           await db.flush();
           await db.close();
         }
-        db = files = null;
+        db = files = rawFiles = null;
         initialized = false;
         self.postMessage({ id, value: true });
         return;
@@ -15369,7 +15621,7 @@ self.onmessage = ({ data }) => {
       await open();
       if (action === "destroyStorage") {
         await db.destroy();
-        db = files = null;
+        db = files = rawFiles = null;
         initialized = false;
         self.postMessage({ id, value: true });
         return;
