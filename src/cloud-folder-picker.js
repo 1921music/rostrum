@@ -37,12 +37,13 @@ css('CloudFolderPicker', `
 // Uses the same authenticated FileSrc adapters and path encoding as File → Open.
 // Folder browsing never changes the sync destination; the caller applies the result.
 class CloudFolderPicker {
-  constructor(service, initialPath = '') {
+  constructor(service, initialPath = '', {files = false} = {}) {
+    this.pickFiles = files;
     this.service = service; this.source = FileSrc.get(service);
     const relative = initialPath.replace(/^\/+|\/+$/g,'');
     this.path = relative ? '/' + relative : ''; this.valid = false; this.epoch = 0;
     this.elm = document.createElement('dialog'); this.elm.className = 'CloudFolderPicker';
-    this.elm.setAttribute('aria-label','Choose library sync folder');
+    this.elm.setAttribute('aria-label',files ? 'Choose cloud score' : 'Choose library sync folder');
     this.elm.innerHTML = `<header><h2 tabindex="-1"></h2><button type="button" class="CloudFolderPicker__close" aria-label="Close folder picker">${iconSvg('Close',{size:'20px'})}</button></header>
       <div class="CloudFolderPicker__toolbar"><button type="button" data-up>Up</button><button type="button" data-refresh>Refresh</button><button type="button" data-new>New folder</button></div>
       <nav class="CloudFolderPicker__path" aria-label="Cloud folder path"></nav>
@@ -51,7 +52,11 @@ class CloudFolderPicker {
       <div class="CloudFolderPicker__list" role="group" aria-label="Cloud folders" tabindex="-1"></div>
       <footer>Current folder<output class="CloudFolderPicker__selected" aria-label="Current cloud folder" translate="no"></output><div class="CloudFolderPicker__actions"><button type="button" data-cancel>Cancel</button><button type="button" data-confirm>Use this folder</button></div></footer>`;
     const find = selector => this.elm.querySelector(selector);
-    this.title = find('h2'); this.title.textContent = 'Choose sync folder — ' + service;
+    this.title = find('h2'); this.title.textContent = (files ? 'Choose score — ' : 'Choose sync folder — ') + service;
+    if (files) {
+      find('.CloudFolderPicker__notice > p').textContent = 'Open a folder, then choose a score to import into your library.';
+      find('[data-confirm]').hidden = true; find('[data-new]').hidden = true;
+    }
     this.up = find('[data-up]'); this.refresh = find('[data-refresh]'); this.newFolder = find('[data-new]');
     this.crumbs = find('nav'); this.status = find('[data-status]'); this.error = find('[role=alert]'); this.errorText = find('[data-error]');
     this.retry = find('[data-retry]'); this.form = find('form'); this.name = find('input'); this.list = find('[aria-label="Cloud folders"]'); this.current = find('output'); this.confirm = find('[data-confirm]');
@@ -108,7 +113,13 @@ class CloudFolderPicker {
         button.innerHTML = iconSvg('Folder',{size:'22px'}); const label = document.createElement('span'); label.textContent = name; label.translate = false; button.append(label);
         button.onclick = () => this.navigate(pathJoin(path,name)); this.list.append(button);
       }
-      if (!names.length) { const empty = document.createElement('p'); empty.className = 'CloudFolderPicker__empty'; empty.textContent = 'No subfolders in this folder.'; this.list.append(empty); }
+      const files = this.pickFiles ? Object.keys(directory.files || {}).filter(name => /\.(pdf|mscz|mxl|musicxml|xml)$/i.test(name)).sort((a,b) => a.localeCompare(b)) : [];
+      for (const name of files) {
+        const button = document.createElement('button'); button.type = 'button'; button.className = 'CloudFolderPicker__folder';
+        button.innerHTML = iconSvg('File',{size:'22px'}); const label = document.createElement('span'); label.textContent = name; label.translate = false; button.append(label);
+        button.onclick = () => { this.result = {source:this.service,path,name}; this.close(); }; this.list.append(button);
+      }
+      if (!names.length && !files.length) { const empty = document.createElement('p'); empty.className = 'CloudFolderPicker__empty'; empty.textContent = this.pickFiles ? 'No scores or subfolders in this folder.' : 'No subfolders in this folder.'; this.list.append(empty); }
       this.status.textContent = ''; this.list.focus({preventScroll:true});
     } catch (error) {
       if (this.elm.open && epoch === this.epoch) { this.status.textContent = ''; this.showError(error,path); }

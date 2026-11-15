@@ -336,7 +336,7 @@ class BookshelfStore extends EventTarget {
     });
   }
   async call(action, args = {}) {
-    const shared = ['importFile','update','link','moveItem','reindex','editSongs','saveState','resolveConflict','useVersion','importBackup'].includes(action);
+    const shared = ['importFile','rememberOriginalLocation','update','link','moveItem','reindex','editSongs','saveState','resolveConflict','useVersion','importBackup'].includes(action);
     const writing = shared || ['mergeDelta','installFile','releaseFile','pinFile'].includes(action);
     if (writing) { this.localSaving++; this.notifyStatus(); }
     try {
@@ -411,7 +411,7 @@ class BookshelfStore extends EventTarget {
   }
   async import(file, options = {}) {
     const existing = await this.call('findImportedFile', { file });
-    if (existing) return existing;
+    if (existing) return options.originalLocation ? {...await this.call('rememberOriginalLocation',{id:existing.id,location:options.originalLocation}),alreadyImported:true} : existing;
     // importFile checks again in the serial Worker queue for concurrent imports.
     return this.call('importFile', { file, entries: await this.analyze(file), ...options });
   }
@@ -421,7 +421,7 @@ class BookshelfStore extends EventTarget {
     let preview;
     try {
       const existing = await this.call('findImportedFile', { file });
-      if (existing) return existing;
+      if (existing) return options.originalLocation ? {...await this.call('rememberOriginalLocation',{id:existing.id,location:options.originalLocation}),alreadyImported:true} : existing;
       preview = await new Score().init(null, null, file.name, await file.arrayBuffer(), false);
       const entries = await this.analyze(file, preview);
       return await reviewScoreImport(file, entries, preview, draft => this.call('importFile', { file, ...draft, ...options }),
@@ -970,6 +970,12 @@ class BookshelfView {
         card.append(kind);
         const openButton = document.createElement('button');
         const metadata = JSON.parse(row.metadata_json);
+        const documentMetadata = row.document_id ? JSON.parse(row.document_metadata || '{}') : metadata;
+        const cloudLocations = (documentMetadata.originalLocations || []).filter(location =>
+          [Score.sources.gdrive,Score.sources.dbx,Score.sources.odrive,Score.sources.pcloud].includes(location.source) && typeof location.path === 'string');
+        const fileLabel = cloudLocations.length
+          ? cloudLocations.map(location => location.source + ' · ' + (location.path.replace(/\/+$/,'') || '') + '/' + location.name).join('\n')
+          : documentMetadata.originalFilename || '';
         openButton.textContent = metadata.title || metadata.displayName;
         openButton.className = 'Bookshelf__open';
         openButton.disabled = !!row.unavailable || bookshelfStore.opening?.id === (row.document_id || row.id);
@@ -982,6 +988,11 @@ class BookshelfView {
         const recordKey = (row.document_id ? 'entries:' : 'documents:') + row.id;
         openButton.onclick = () => panel.fullView ? this.showRecord(recordKey, false) : openRecord();
         card.append(openButton);
+        if (fileLabel) {
+          const fileLocation = document.createElement('div'); fileLocation.setAttribute('aria-label','Score file location');
+          fileLocation.translate = false; fileLocation.style.whiteSpace = 'pre-wrap'; fileLocation.textContent = fileLabel;
+          card.append(fileLocation);
+        }
         rowCard.addEventListener('click', event => {
           if (!event.target.closest('button,summary,details,input,select')) openButton.click();
         });
@@ -1009,7 +1020,7 @@ class BookshelfView {
         }
         if (isEntry) {
           const description = document.createElement('div');
-          description.textContent = [metadata.composer, row.document_metadata && JSON.parse(row.document_metadata).displayName,
+          description.textContent = [metadata.composer,
             row.anchor_json && 'Page ' + (JSON.parse(row.anchor_json).pageIndex + 1), row.previousVersion && 'Previous version'].filter(Boolean).join(' · ');
           card.append(description);
         }
@@ -1018,7 +1029,7 @@ class BookshelfView {
         const summary = document.createElement('summary'); summary.textContent = '⋯'; summary.setAttribute('aria-label', 'Edit and organize');
         details.append(summary); card.append(details);
         this.rowViews.set(recordKey, { row:rowCard, details, summary, title:openButton.textContent,
-          description:metadata.composer || row.document_metadata && JSON.parse(row.document_metadata).displayName || metadata.originalFilename || '',
+          description:[metadata.composer,fileLabel].filter(Boolean).join('\n'),
           open:openRecord });
         summary.addEventListener('click', event => {
           if (details.parentElement === this.inspector) return;
@@ -1032,6 +1043,16 @@ class BookshelfView {
           controls.append(section); card = section; return section;
         };
         recordSection('Name and song details');
+        const originalLocations = documentMetadata.originalLocations || [];
+        if (originalLocations.length) {
+          const origin = document.createElement('div'); origin.setAttribute('aria-label','Original file locations');
+          for (const location of originalLocations) {
+            const line = document.createElement('div'); line.translate = false; line.style.overflowWrap = 'anywhere';
+            line.textContent = location.source + ' · ' + (location.path === null ? location.name + ' (folder unavailable)' : (location.path || '') + '/' + location.name);
+            origin.append(line);
+          }
+          const heading = document.createElement('div'); heading.textContent = 'Original file location'; card.append(heading,origin);
+        }
         const table = isEntry ? 'entries' : 'documents';
         const title = document.createElement('input'); title.value = label(row); title.setAttribute('aria-label', isEntry ? 'Song title' : 'Score name'); card.append(title);
         button(card, 'Rename', () => update(table, { id: row.id, metadata_json: JSON.stringify({ ...metadata, [isEntry ? 'title' : 'displayName']: title.value, userEditedFields: [...new Set([...(metadata.userEditedFields || []), isEntry ? 'title' : 'displayName'])] }) }));
@@ -1125,7 +1146,7 @@ class BookshelfView {
       let imported = 0, skipped = 0, cancelled = 0;
       try { for (const file of input.files) {
         status.textContent = 'Importing ' + file.name;
-        const result = await bookshelfStore.importReviewed(file);
+        const result = await bookshelfStore.importReviewed(file,{originalLocation:{source:Score.sources.local,path:null,name:file.name}});
         if (!result) cancelled++;
         else if (result.alreadyImported) skipped++;
         else imported++;
@@ -1152,8 +1173,9 @@ class BookshelfView {
       importCurrent.disabled = true;
       try {
         const name = _score_.saveName;
+        const originalLocation = _score_.libraryDocumentId ? null : {source:_score_.source || Score.sources.local,path:_score_.source === Score.sources.local ? null : _score_.path ?? null,name:_score_.name || name};
         const bytes = await _score_.toFile();
-        const imported = await bookshelfStore.importReviewed(new File([bytes], name));
+        const imported = await bookshelfStore.importReviewed(new File([bytes], name),{originalLocation});
         await this.refresh();
         if (imported?.alreadyImported) status.textContent = 'Score already imported; skipped. Previous or deleted scores remain in history.';
       } finally { importCurrent.disabled = false; }
@@ -1213,9 +1235,37 @@ class BookshelfView {
     const addContent = element('div','Bookshelf__add-content');
     this.input.className = 'Bookshelf__file-input'; this.input.tabIndex = -1;
     const chooseFiles = element('button','','Choose files…'); chooseFiles.type = 'button'; chooseFiles.onclick = () => { add.open = false; this.input.click(); };
+    const cloudLabel = element('label','','Cloud service');
+    const cloudService = element('select'); cloudService.setAttribute('aria-label','Add from cloud service');
+    cloudService.add(new Option('Choose cloud service',''));
+    for (const source of [Score.sources.gdrive,Score.sources.dbx,Score.sources.odrive,Score.sources.pcloud]) cloudService.add(new Option(source,source));
+    cloudLabel.append(cloudService);
+    const preload = () => { if (cloudService.value === Score.sources.gdrive) FileSrc.get(cloudService.value).preloadGIS?.(); };
+    const chooseCloud = element('button','','Choose cloud file…'); chooseCloud.type = 'button';
+    chooseCloud.disabled = true;
+    cloudService.onchange = () => { chooseCloud.disabled = !cloudService.value; preload(); };
+    chooseCloud.onclick = async () => {
+      add.open = false; chooseCloud.disabled = true;
+      try {
+        const picker = this.cloudFolderPicker = new CloudFolderPicker(cloudService.value,'',{files:true});
+        const location = await picker.show(); this.cloudFolderPicker = null;
+        if (!location || this.panel.closing) return;
+        this.status.textContent = 'Downloading ' + location.name;
+        const result = await FileSrc.get(location.source).getFile(location.path,location.name);
+        if (this.panel.closing) return;
+        const file = new File([result.data],location.name);
+        const imported = await bookshelfStore.importReviewed(file,{originalLocation:location});
+        await this.refresh();
+        this.status.textContent = imported ? imported.alreadyImported ? 'Score already imported; original file location recorded.' : 'Imported ' + location.name : 'Import cancelled.';
+      } catch (error) { this.status.textContent = error.message; }
+      finally {
+        this.cloudFolderPicker = null; chooseCloud.disabled = false;
+        if (addSummary.isConnected && !this.panel.closing) addSummary.focus({preventScroll:true});
+      }
+    };
     const importCurrent = this.importCurrent.onclick;
     this.importCurrent.onclick = event => { add.open = false; return importCurrent(event); };
-    addContent.append(chooseFiles,this.input,this.importCurrent); add.append(addSummary,addContent);
+    addContent.append(chooseFiles,this.input,this.importCurrent,cloudLabel,chooseCloud); add.append(addSummary,addContent);
     this.panel.addSlot.append(add);
     const settings = this.transfers; settings.className = 'Bookshelf__popover Bookshelf__settings';
     const settingsSummary = settings.querySelector('summary'); settingsSummary.setAttribute('aria-label','Library settings');
@@ -1264,6 +1314,7 @@ class BookshelfView {
     back.onclick = () => this.closeRecord(true);
     const title = document.createElement('h2'); title.textContent = selected.title;
     const description = document.createElement('p'); description.textContent = selected.description;
+    description.style.cssText = 'white-space:pre-wrap;overflow-wrap:anywhere';
     const open = document.createElement('button'); open.type = 'button'; open.textContent = 'Open score'; open.className = 'LibraryWindow__primary';
     open.onclick = selected.open;
     selected.summary.textContent = 'Edit details'; selected.details.open = edit;

@@ -222,7 +222,24 @@ async function open() {
   initialized = true;
 }
 const importedDocument = hash => sql('SELECT * FROM documents WHERE content_hash=? ORDER BY deleted_at IS NOT NULL, replaced_by_id IS NOT NULL, id LIMIT 1', [hash])[0];
+const withOriginalLocation = (metadata, location) => {
+  if (!location) return metadata;
+  if (![location.source,location.name].every(value => typeof value === 'string' && value) ||
+      (location.path !== null && typeof location.path !== 'string')) throw new Error('Invalid original file location');
+  const clean = {source:location.source,path:location.path,name:location.name};
+  const locations = metadata.originalLocations || [];
+  if (locations.some(item => item.source === clean.source && item.path === clean.path && item.name === clean.name)) return metadata;
+  return {...metadata,originalLocations:[...locations,clean]};
+};
 const actions = {
+  rememberOriginalLocation({id,location}) {
+    return transaction(() => {
+      const document = sql('SELECT * FROM documents WHERE id=?',[id])[0];
+      if (!document) throw new Error('Score not found');
+      const metadata = JSON.parse(document.metadata_json), updated = withOriginalLocation(metadata,location);
+      return updated === metadata ? document : save('documents',{id,metadata_json:JSON.stringify(updated)});
+    });
+  },
   close() {},
   async availability({ destination = '' } = {}) {
     const inventory = getLocal('remote:' + destination,{ changeIds:[],paths:[] });
@@ -371,14 +388,14 @@ const actions = {
     return Object.fromEntries(Object.entries(selected).map(([name, bytes]) => [name, new TextDecoder().decode(bytes)]));
   },
   async open() { await open(); return { version: 1 }; },
-  async importFile({ file, entries, displayName = file.name, replacesId = null, derivedFromId = null }) {
+  async importFile({ file, entries, displayName = file.name, replacesId = null, derivedFromId = null, originalLocation = null }) {
     const id = crypto.randomUUID();
     const bytes = await file.arrayBuffer();
     const hash = await hashBytes(bytes);
     // Keep old/deleted documents intact too: reimporting must not silently
     // restore a tombstone or change replacement/annotation relationships.
     const existing = importedDocument(hash);
-    if (existing) return { ...existing, alreadyImported: true };
+    if (existing) return { ...actions.rememberOriginalLocation({id:existing.id,location:originalLocation}), alreadyImported: true };
     const normalized = file.name.normalize('NFC').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[ .]+$/, '');
     const extension = normalized.match(/\.[a-z0-9]{1,12}$/i)?.[0] || '';
     const stem = extension ? normalized.slice(0, -extension.length) : normalized;
@@ -388,7 +405,7 @@ const actions = {
       await files.write(path, bytes);
       return transaction(() => {
         const document = save('documents', { id, content_hash: hash, storage_path: path, size_bytes: file.size,
-          settings_json: '{}', metadata_json: JSON.stringify({ displayName, originalFilename: file.name, format: file.name.split('.').pop().toLowerCase() }) });
+          settings_json: '{}', metadata_json: JSON.stringify(withOriginalLocation({ displayName, originalFilename: file.name, format: file.name.split('.').pop().toLowerCase() },originalLocation)) });
         setFileState(id,{ present:true });
         for (const entry of entries) save('entries', { id: entry.id, document_id: id, parent_id: entry.parent_id || null,
           anchor_json: JSON.stringify(entry.anchor), metadata_json: JSON.stringify(entry.metadata), deleted_at: entry.deleted_at || null });

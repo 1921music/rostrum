@@ -107,8 +107,28 @@ check rejects drafts made stale by another update. Snapshot persistence failures
 keep the draft and committed revisions so retrying can include further edits.
 Imports skip an already registered SHA-256 hash, even under another filename.
 Previous/deleted documents also count as registered; use the history view to
-restore them. Skipping does not create songs, copies, revisions or replacement
-relationships. It does not remove duplicates registered by older app versions.
+restore them. Skipping does not create songs, copies or replacement relationships.
+If an import supplies a new original file location, skipping records that location
+as a metadata revision. It does not remove duplicates registered by older app versions.
+
+**Library → Add → Choose cloud file…** browses Drive, Dropbox, OneDrive or pCloud
+using the same authenticated adapters as File → Open. It downloads the chosen
+score, opens the normal import review, and owns a copy after confirmation.
+Document metadata `originalLocations` records only `{source,path,name}`; the
+original service and folder path appear under **Edit and organize**. Paths use
+the FileSrc encoding (including ∕ for a slash inside a Drive folder name).
+The locations sync and travel in backups as document metadata; credentials do not.
+Identical content selected from another location adds provenance without replacing
+the score or its songs. Local uploads record the filename and a null path because
+the browser does not expose the containing folder. Import current score also
+records its source, except when it is already a library score. Existing imports
+cannot recover an unknown original location automatically. Locations are provenance,
+not a live link: moving or changing the cloud original does not update the copy,
+and library edits do not overwrite it. Cloud-file import does not configure library sync.
+All scores, Songs, Bookshelves, Playlists and Tags show the cloud service and full
+original file path beneath the title. Multiple cloud origins appear on separate
+lines, including in the score detail header. Files without a known cloud origin
+show their original filename instead.
 
 Library scores autosave annotations and per-score settings to SQLite without
 rewriting their imported PDF/MSCZ. Save As remains the explicit file export path.
