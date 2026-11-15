@@ -159,8 +159,17 @@ An emergency export remains possible when a committed in-memory snapshot
 cannot be persisted. The app retains the unsaved indication in this case.
 
 Library sync uses the connected Drive/Dropbox/OneDrive/pCloud account and the
-dedicated folder selected in Library. Apply a destination with **Sync library
-now**. Scores are separate immutable `scores/<documentId>__<original name>`
+dedicated folder selected in Library. **Cloud sync → Choose sync folder** browses
+folders with breadcrumbs, Up/Refresh and New folder, using the same `FileSrc`
+authentication and encoded paths as File → Open. It lists folders only and
+returns the current folder with **Use this folder**, including an explicit root
+selection. Browsing and cancellation leave the applied destination unchanged;
+**Apply and sync** (or **Sync library now**) applies the draft and remembers it.
+Existing destinations reopen at the saved path. Directory/authentication errors
+stay in the picker with retry; late responses after closing are ignored.
+`tests/cloud-folder-picker.spec.js` mocks all four providers and verifies path
+selection, creation, cancellation, saved destinations and narrow-screen scrolling.
+Scores are separate immutable `scores/<documentId>__<original name>`
 files; metadata travels in `changes/<deviceId>/<batchId>.json`. No library ZIP
 or SQLite image is sent by sync. Only unpublished change records are uploaded;
 annotations are separate records, so writing does not re-upload a PDF/MSCZ.

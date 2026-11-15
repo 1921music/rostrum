@@ -4159,7 +4159,16 @@ class LibraryPanel extends Panel {
         if (!this.view.dismissLayer()) this.hide();
       } else if (event.key === 'Tab' && this.fullView) {
         const focusable = [...this.panel.querySelectorAll('button,input,select,summary,[tabindex="0"]')]
-          .filter(elm => elm.tabIndex >= 0 && !elm.disabled && !elm.closest('[inert]') && elm.getClientRects().length && getComputedStyle(elm).visibility !== 'hidden');
+          .filter(elm => {
+            if (elm.tabIndex < 0 || elm.disabled || elm.closest('[inert]')) return false;
+            // Closed details can still expose descendant geometry. Only their
+            // own summary is focusable, not controls or nested summaries inside.
+            for (let parent = elm.parentElement; parent && parent !== this.panel; parent = parent.parentElement) {
+              if (parent.tagName === 'DETAILS' && !parent.open &&
+                  !parent.querySelector(':scope > summary')?.contains(elm)) return false;
+            }
+            return elm.getClientRects().length && getComputedStyle(elm).visibility !== 'hidden';
+          });
         const first = focusable[0], last = focusable.at(-1);
         if (event.shiftKey && (document.activeElement === first || document.activeElement === this.panel)) { event.preventDefault(); last?.focus(); }
         else if (!event.shiftKey && (document.activeElement === last || document.activeElement === this.panel)) { event.preventDefault(); first?.focus(); }
@@ -4209,6 +4218,7 @@ class LibraryPanel extends Panel {
   constrain() {}
   destructor() {
     this.view.resizeObserver.disconnect();
+    this.view.cloudFolderPicker?.close();
     super.destructor();
   }
 }
