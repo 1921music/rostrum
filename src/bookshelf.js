@@ -761,6 +761,12 @@ class BookshelfView {
     .Bookshelf__settings-content > details[open] > :not(summary) { display:block; margin:12px 0; max-width:100%; }
     .Bookshelf__settings-content label:has(input[type=checkbox]) { display:flex !important; gap:8px; align-items:center; }
     .Bookshelf__settings-content :is(p,div) { overflow-wrap:anywhere; }
+    .Bookshelf__storage-option { padding:16px; border:1px solid var(--library-line); border-radius:12px; background:var(--library-surface); }
+    .Bookshelf__storage-option[data-active=true] { border-color:var(--library-brand); background:var(--library-selected); }
+    .Bookshelf__storage-heading { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin:0; }
+    .Bookshelf__storage-badge { padding:2px 9px; border-radius:999px; background:var(--library-bg); color:var(--library-brand); font-size:12px; font-weight:600; white-space:nowrap; }
+    .Bookshelf__storage-option p { margin:8px 0; }
+    .Bookshelf__storage-option button { margin:8px 8px 0 0; }
     .Bookshelf__settings-content pre { font-size:12px; }
     .Bookshelf__inspector { min-width:0; min-height:0; overflow:auto; padding:24px; background:var(--library-bg); border-left:1px solid var(--library-line); }
     .Bookshelf__inspector h2 { font-size:20px; line-height:1.4; margin:20px 0 8px; overflow-wrap:anywhere; }
@@ -910,7 +916,7 @@ class BookshelfView {
     const folder = document.createElement('button'); folder.textContent = 'Choose local folder…';
     const defaultLibrary = document.createElement('button'); defaultLibrary.textContent = 'Use OPFS';
     const browserLibrary = document.createElement('button'); browserLibrary.textContent = 'Use IndexedDB';
-    const location = document.createElement('div'); location.textContent = 'Library location: default';
+    const location = document.createElement('p'); location.translate = false; location.setAttribute('aria-label','Library folder'); location.hidden = true;
     backupSettings.append(backup, explanation, restore);
     historySettings.append(review, conflictResults);
     const history = document.createElement('button'); history.textContent = 'Previous and deleted scores';
@@ -923,24 +929,31 @@ class BookshelfView {
       ['opfs','OPFS','Files stored privately inside this browser.',defaultLibrary],
       ['indexeddb','IndexedDB','Library records and files stored in this browser’s database.',browserLibrary]
     ]) {
-      const row = document.createElement('section'); row.dataset.storageKind = kind;
-      const heading = document.createElement('h4'); heading.textContent = title;
+      const row = document.createElement('section'); row.dataset.storageKind = kind; row.className = 'Bookshelf__storage-option';
+      const heading = document.createElement('h4'); heading.className = 'Bookshelf__storage-heading'; heading.textContent = title;
+      const badge = document.createElement('span'); badge.className = 'Bookshelf__storage-badge'; badge.textContent = 'In use'; badge.hidden = true; heading.append(badge);
       const info = document.createElement('p'); info.textContent = description;
       const unavailable = document.createElement('p'); unavailable.setAttribute('role','status');
       const remove = document.createElement('button'); remove.textContent = 'Delete library data'; remove.setAttribute('aria-label','Delete ' + title + ' library data'); remove.disabled = true;
       row.append(heading,info,choose,remove,unavailable); storageSettings.append(row);
-      storageRows.set(kind,{choose,remove,unavailable});
+      if (kind === 'directory') row.insertBefore(location,choose);
+      storageRows.set(kind,{row,badge,choose,remove,unavailable});
     }
-    storageSettings.append(location);
     let storageCapabilities = {};
     const updateStorageControls = () => {
       const active = bookshelfStore.storage?.kind || 'opfs';
       const busy = bookshelfStore.deletingStorage || bookshelfStore.syncPending || bookshelfStore.cloudConnecting || bookshelfStore.checkingCloud || bookshelfStore.fullSyncRunning || bookshelfStore.transfers.size || bookshelfStore.opening || bookshelfStore.reviewPending;
       for (const [kind,row] of storageRows) {
+        row.row.dataset.active = String(active === kind);
+        if (active === kind) row.row.setAttribute('aria-current','true'); else row.row.removeAttribute('aria-current');
+        row.badge.hidden = active !== kind;
         row.choose.disabled = !storageCapabilities[kind] || !!busy;
-        row.unavailable.textContent = !storageCapabilities[kind] ? 'Unavailable in this browser or context.' : active === kind ? 'Currently in use' : '';
+        row.unavailable.textContent = !storageCapabilities[kind] ? 'Unavailable in this browser or context.' : '';
+        row.unavailable.hidden = !!storageCapabilities[kind];
         row.remove.disabled = active !== kind || !!busy || !!bookshelfStore.storageDeleted;
       }
+      location.textContent = active === 'directory' ? bookshelfStore.storage?.directory?.name || '' : '';
+      location.hidden = !location.textContent;
     };
     window.RostrumLibraryHost.storageCapabilities().then(capabilities => { storageCapabilities = capabilities; updateStorageControls(); });
     panel.listeners.push(listen(bookshelfStore,'statuschange',updateStorageControls));
@@ -1047,13 +1060,13 @@ class BookshelfView {
     folder.onclick = () => run(async () => {
       const directory = await window.showDirectoryPicker({ mode: 'readwrite' });
       await bookshelfStore.configure({ kind: 'directory', directory });
-      location.textContent = 'Library folder: ' + directory.name; await this.refresh();
+      await this.refresh();
     });
     defaultLibrary.onclick = () => run(async () => {
-      await bookshelfStore.configure({}); location.textContent = 'Library location: default'; await this.refresh();
+      await bookshelfStore.configure({}); await this.refresh();
     });
     browserLibrary.onclick = () => run(async () => {
-      await bookshelfStore.configure({ kind: 'indexeddb' }); location.textContent = 'Library location: browser compatibility storage'; await this.refresh();
+      await bookshelfStore.configure({ kind: 'indexeddb' }); await this.refresh();
     });
     backup.onclick = () => run(async () => {
       const bytes = await bookshelfStore.exportBackup();
@@ -1124,8 +1137,7 @@ class BookshelfView {
       references = Object.fromEntries(referenceTables.map((table, i) => [table, referenceRows[i]]));
       const nextRevisions = new Map();
       for (const table of referenceTables) for (const row of references[table]) nextRevisions.set(table + ':' + row.id,row.revision_id);
-      location.textContent = bookshelfStore.storage?.kind === 'directory' ? 'Local directory: ' + bookshelfStore.storage.directory.name
-        : bookshelfStore.storage?.kind === 'indexeddb' ? 'Library location: IndexedDB' : 'Library location: OPFS';
+      updateStorageControls();
       const selectedTags = [...tagFilter.selectedOptions].map(option => option.value);
       tagFilter.replaceChildren();
       for (const tag of references.tags) { const option = new Option(tag.name, tag.id); option.selected = selectedTags.includes(tag.id); tagFilter.add(option); }
