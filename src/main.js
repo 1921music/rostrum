@@ -63,6 +63,7 @@ window.pdfjsLib.GlobalWorkerOptions.workerPort = new Worker("pdf.worker.min.mjs"
 // #include src/smufl.js minified
 // #include src/panel.js minified
 // #include src/file.js minified
+// #include src/cloud-folder-picker.js minified
 // #include src/bookshelf.js minified
 // #include src/bookshelf-import.js minified
 // #include src/bookshelf-sync.js minified
@@ -117,7 +118,7 @@ class Gestures {
   }
 
   onWheel(e) {
-    if (e.target.closest?.('.LibraryWindow')) return;
+    if (e.target.closest?.('.LibraryWindow, .CloudFolderPicker')) return;
     e.preventDefault();
     if (!e.ctrlKey) return;
     let dXY = -Math.sign(e.deltaY) / 100;
@@ -129,7 +130,7 @@ class Gestures {
   }
 
   onDown(e) {
-    if (e.target.closest?.('.LibraryWindow')) return;
+    if (e.target.closest?.('.LibraryWindow, .CloudFolderPicker')) return;
     // Swallow a touch on anything flying (see numb() in common.js). This listener is
     // capture-phase on _body_, so it runs ahead of every other pointerdown handler.
     if (numbed(e.target)) { e.preventDefault(); e.stopImmediatePropagation(); return; }

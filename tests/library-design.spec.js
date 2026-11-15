@@ -77,7 +77,8 @@ test('native wheel scrolling works inside the library and full-screen focus stay
   await expect.poll(() => results.evaluate(elm => elm.scrollTop)).toBeGreaterThan(100);
   await page.locator('.LibraryWindow__panel').focus();
   await page.keyboard.press('Shift+Tab');
-  await expect(page.getByRole('button',{name:'Sync library now',exact:true})).toBeFocused();
+  await expect(page.getByRole('button',{name:'Sync library now',exact:true})).toBeDisabled();
+  await expect(results.getByLabel('Edit and organize',{exact:true}).last()).toBeFocused();
   await page.keyboard.press('Tab');
   await expect(page.getByLabel('Add scores',{exact:true})).toBeFocused();
   await page.locator('summary[aria-label="Library settings"]').click();

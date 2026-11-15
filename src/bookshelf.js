@@ -5,6 +5,7 @@ import { toast, css, listen, iconSvg } from './common.js';
 import { exchangeLibraryChanges, LibraryAutoSync } from './bookshelf-sync.js';
 import { LibraryCloudTransport } from './bookshelf-cloud.js';
 import { reviewScoreImport } from './bookshelf-import.js';
+import { CloudFolderPicker } from './cloud-folder-picker.js';
 // -skip
 
 class BookshelfStore extends EventTarget {
@@ -768,31 +769,60 @@ class BookshelfView {
     storageSettings.append(folder, defaultLibrary, browserLibrary, location);
     const cloud = document.createElement('select'); cloud.setAttribute('aria-label', 'Library cloud service'); cloud.add(new Option('Choose cloud service', ''));
     for (const source of [Score.sources.gdrive, Score.sources.dbx, Score.sources.odrive, Score.sources.pcloud]) cloud.add(new Option(source, source));
-    const cloudPath = document.createElement('input'); cloudPath.setAttribute('aria-label', 'Library cloud folder'); cloudPath.placeholder = 'Folder path (blank is root)';
-    const cloudInfo = document.createElement('div'); cloudInfo.textContent = 'Use the same dedicated cloud folder on each device. Apply a new destination with Sync library now. Changes sync automatically; scores download only when opened or kept offline. Old ZIP backups can be imported separately.';
+    const cloudPath = document.createElement('output'); cloudPath.setAttribute('aria-label', 'Library cloud folder'); cloudPath.translate = false;
+    cloudPath.style.cssText = 'display:block;overflow-wrap:anywhere;padding:12px;border:1px solid var(--library-line);border-radius:8px;background:var(--library-surface);';
+    const chooseCloudFolder = document.createElement('button'); chooseCloudFolder.type = 'button'; chooseCloudFolder.textContent = 'Choose sync folder…'; chooseCloudFolder.setAttribute('aria-label','Choose sync folder');
+    const cloudInfo = document.createElement('div'); cloudInfo.textContent = 'Choose a dedicated cloud folder, then Apply and sync. Use the same folder on each device. Changes sync automatically; scores download when opened or kept offline.';
     const autoLabel = document.createElement('label'); autoLabel.textContent = 'Automatic library sync';
     const auto = document.createElement('input'); auto.type = 'checkbox'; auto.setAttribute('aria-label','Automatic library sync'); auto.checked = bookshelfStore.autoSettings?.enabled !== false; autoLabel.append(auto);
     auto.onchange = () => run(async () => { await bookshelfStore.setAutoSync(auto.checked); });
     panel.listeners.push(listen(bookshelfStore,'statuschange',() => { auto.checked = bookshelfStore.autoSettings?.enabled !== false; }));
     const sync = document.createElement('button'); sync.textContent = 'Sync library now';
-    syncSettings.append(cloud, cloudPath, cloudInfo, autoLabel);
+    const applySync = document.createElement('button'); applySync.textContent = 'Apply and sync'; applySync.onclick = () => sync.click();
+    syncSettings.append(cloud,cloudPath,chooseCloudFolder,cloudInfo,autoLabel,applySync);
     this.elm.insertBefore(sync, transfers);
-    const applySync = document.createElement('button'); applySync.textContent = 'Apply and sync';
-    applySync.onclick = () => sync.click(); syncSettings.append(applySync);
     const backupInfo = document.createElement('div'); backupInfo.textContent = 'A complete ZIP backup downloads any missing score files first.'; backupSettings.append(backupInfo);
-    let cloudTouched = false;
-    cloud.onchange = cloudPath.oninput = () => { cloudTouched = true; };
+    let cloudTouched = false, draftCloud = null, pickingCloudFolder = false, applyingCloud = false;
+    const updateCloudControls = () => {
+      const chosen = draftCloud && draftCloud.source === cloud.value;
+      cloudPath.textContent = chosen ? draftCloud.path || '/' : 'No folder selected';
+      chooseCloudFolder.disabled = !cloud.value || pickingCloudFolder || applyingCloud;
+      sync.disabled = applySync.disabled = !chosen || pickingCloudFolder || applyingCloud;
+      cloud.disabled = pickingCloudFolder || applyingCloud;
+    };
+    const preloadCloud = () => { if (cloud.value === Score.sources.gdrive) FileSrc.get(cloud.value).preloadGIS?.(); };
+    cloud.onchange = () => { cloudTouched = true; draftCloud = null; preloadCloud(); updateCloudControls(); };
     window.RostrumLibraryHost.loadCloudSelection().then(saved => {
-      if (!cloudTouched && saved) { cloud.value = saved.source; cloudPath.value = saved.path; }
+      if (!cloudTouched && saved && typeof saved.path === 'string') {
+        cloud.value = saved.source;
+        if (cloud.value) draftCloud = {source:saved.source,path:saved.path};
+        preloadCloud(); updateCloudControls();
+      }
     }).catch(() => {});
-    sync.onclick = () => run(async () => {
-      sync.disabled = true; status.textContent = 'Syncing library';
+    chooseCloudFolder.onclick = () => run(async () => {
+      const service = cloud.value;
+      if (!service) return;
+      cloudTouched = true; pickingCloudFolder = true; updateCloudControls();
       try {
-        const result = await bookshelfStore.syncCloud(cloud.value, cloudPath.value.trim()); await this.refresh();
-        await window.RostrumLibraryHost.saveCloudSelection({ source: cloud.value, path: cloudPath.value.trim() }).catch(() => {});
-        status.textContent = `Synced library; ${result.conflicts} conflicting items to review.`;
-      } finally { sync.disabled = false; }
+        const picker = this.cloudFolderPicker = new CloudFolderPicker(service,draftCloud?.source === service ? draftCloud.path : '');
+        const path = await picker.show();
+        if (path !== null && cloud.value === service && !panel.closing) {
+          draftCloud = {source:service,path}; status.textContent = 'Folder selected. Use Apply and sync to change the sync destination.';
+        }
+      } finally {
+        this.cloudFolderPicker = null; pickingCloudFolder = false; updateCloudControls();
+        if (chooseCloudFolder.isConnected && !chooseCloudFolder.disabled) chooseCloudFolder.focus({preventScroll:true});
+      }
     });
+    sync.onclick = () => run(async () => {
+      if (!draftCloud || draftCloud.source !== cloud.value) throw new Error('Choose a cloud folder first.');
+      const selected = {...draftCloud}; applyingCloud = true; updateCloudControls(); status.textContent = 'Syncing library';
+      try {
+        const result = await bookshelfStore.syncCloud(selected.source,selected.path); await this.refresh();
+        status.textContent = `Synced library; ${result.conflicts} conflicting items to review.`;
+      } finally { applyingCloud = false; updateCloudControls(); }
+    });
+    updateCloudControls();
     folder.onclick = () => run(async () => {
       const directory = await window.showDirectoryPicker({ mode: 'readwrite' });
       await bookshelfStore.configure({ kind: 'directory', directory });
