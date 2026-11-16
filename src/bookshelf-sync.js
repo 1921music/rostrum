@@ -88,11 +88,11 @@ class LibraryAutoSync {
   async run() {
     if (!this.enabled || this.running || !this.store.hasSyncDestination()) return;
     if (this.store.inBackground || navigator.onLine === false || this.store.operationBlock('sync') || this.store.fullSyncRunning) { this.request(this.interval); return; }
-    this.running = true; this.again = false;
+    this.running = true; this.again = false; this.store.notifyStatus();
     try { await this.store.syncAutomatically(); }
     catch { /* Store exposes a persistent, non-modal sync error. */ }
     finally {
-      this.running = false;
+      this.running = false; this.store.notifyStatus();
       if (this.enabled) this.request(this.again ? this.delay : this.interval);
     }
   }

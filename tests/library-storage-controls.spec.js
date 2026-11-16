@@ -107,3 +107,25 @@ test('directory deletion refuses a database replaced outside this session',async
  });
  expect(result.error).toContain('changed outside this session');expect(result.contents).toBe('external database');
 });
+
+
+for (const fails of [false,true]) test(`storage choices unlock after automatic sync ${fails ? 'fails' : 'finishes'}`,async ({page}) => {
+ await start(page);await settings(page);
+ const choose = page.getByRole('button',{name:'Use IndexedDB',exact:true});
+ await expect(choose).toBeEnabled();
+ await page.evaluate(async fails => {
+  const transport = {id:'mock-storage-sync',listChanges:async()=>{
+    await new Promise(resolve => {window.resumeStorageSync=resolve;});
+    if(fails)throw new Error('Mock sync failure');return [];
+   },listScores:async()=>[],readChanges:async()=>{throw new Error('Unexpected read');},
+   writeChanges:async()=>{throw new Error('Unexpected write');},readScore:async()=>{throw new Error('Unexpected read');},writeScore:async()=>{throw new Error('Unexpected write');}};
+  _bookshelf_.transport=transport;_bookshelf_.autoSync.setEnabled(true);
+ },fails);
+ await expect.poll(()=>page.evaluate(()=>!!window.resumeStorageSync)).toBe(true);
+ await expect(choose).toBeDisabled();
+ await page.evaluate(()=>resumeStorageSync());
+ await expect.poll(()=>page.evaluate(()=>!!_bookshelf_.autoSync.running)).toBe(false);
+ await expect(choose).toBeEnabled();
+ await page.evaluate(()=>_bookshelf_.setAutoSync(false));
+ await choose.click();await expect.poll(()=>page.evaluate(()=>_bookshelf_.storage.kind)).toBe('indexeddb');
+});
