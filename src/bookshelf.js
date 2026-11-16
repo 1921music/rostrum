@@ -343,6 +343,9 @@ class BookshelfView {
     history.onclick = () => { mode.value = 'history'; this.refresh(); };
     historySettings.prepend(history);
     this.elm.insertBefore(transfers, results);
+    const storageBlocked = document.createElement('p');
+    storageBlocked.setAttribute('role','status'); storageBlocked.setAttribute('aria-label','Storage location unavailable reason');
+    storageBlocked.hidden = true; storageSettings.append(storageBlocked);
     const storageRows = new Map();
     for (const [kind,title,description,choose] of [
       ['directory','Local directory','A folder you choose on this device.',folder],
@@ -363,6 +366,8 @@ class BookshelfView {
     const updateStorageControls = () => {
       const active = this.model.storage?.kind || 'opfs';
       const busy = this.model.operationBlock('storage');
+      storageBlocked.textContent = busy ? 'Storage location cannot be changed right now. ' + busy : '';
+      storageBlocked.hidden = !busy;
       for (const [kind,row] of storageRows) {
         row.row.dataset.active = String(active === kind);
         if (active === kind) row.row.setAttribute('aria-current','true'); else row.row.removeAttribute('aria-current');

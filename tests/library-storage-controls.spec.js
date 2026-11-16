@@ -123,9 +123,11 @@ for (const fails of [false,true]) test(`storage choices unlock after automatic s
  },fails);
  await expect.poll(()=>page.evaluate(()=>!!window.resumeStorageSync)).toBe(true);
  await expect(choose).toBeDisabled();
+ await expect(page.getByLabel('Storage location unavailable reason')).toHaveText('Storage location cannot be changed right now. Wait for the current library sync.');
  await page.evaluate(()=>resumeStorageSync());
  await expect.poll(()=>page.evaluate(()=>!!_bookshelf_.autoSync.running)).toBe(false);
  await expect(choose).toBeEnabled();
+ await expect(page.getByLabel('Storage location unavailable reason')).toBeHidden();
  await page.evaluate(()=>_bookshelf_.setAutoSync(false));
  await choose.click();await expect.poll(()=>page.evaluate(()=>_bookshelf_.storage.kind)).toBe('indexeddb');
 });
