@@ -2,17 +2,17 @@
 export { LIBRARY_NAMESPACE, LIBRARY_APPLICATION_ID, LIBRARY_SCHEMA_VERSION, LIBRARY_STORAGE_VERSION,
   LIBRARY_RECORD_VERSION, LIBRARY_SYNC_VERSION, LIBRARY_BACKUP_VERSION, LibraryFormatError,
   libraryFormat, validateLibraryFormat, scorePath, createScorePath, scoreStoragePath,
-  listStoredScores, isManagedScoreName, checkRecordVersion, hashLibraryBytes, checkLibraryEnvelope };
+  listStoredScores, isManagedScoreName, checkRecordVersion, hashLibraryBytes, libraryEntityId, checkLibraryEnvelope };
 // -skip
 
 // This namespace is a permanent generation boundary, NOT a schema version.
 // Future in-place migrations must keep it unchanged. Pre-versioned clients use
 // the parent directory and cannot damage files or batches inside this namespace.
-const LIBRARY_NAMESPACE = 'rostrum-library-v2';
+const LIBRARY_NAMESPACE = 'rostrum-library-v3';
 const LIBRARY_APPLICATION_ID = 0x5253544d;
-const LIBRARY_SCHEMA_VERSION = 3;
-const LIBRARY_STORAGE_VERSION = 1;
-const LIBRARY_RECORD_VERSION = 2;
+const LIBRARY_SCHEMA_VERSION = 4;
+const LIBRARY_STORAGE_VERSION = 2;
+const LIBRARY_RECORD_VERSION = 3;
 const LIBRARY_SYNC_VERSION = 2;
 const LIBRARY_BACKUP_VERSION = 2;
 class LibraryFormatError extends Error {
@@ -36,18 +36,18 @@ function scorePath(path) {
   if (typeof path !== 'string' || !/^scores\/[^/\\\x00]+$/.test(path) || path.split('/').some(p => p === '.' || p === '..')) throw new Error('Invalid score path in library package');
   return path;
 }
-function createScorePath(id,name) {
-  if (!/^[0-9a-f-]{36}$/i.test(id)) throw new Error('Invalid score identity');
-  const normalized = name.normalize('NFC').replace(/[<>\u0022:\/\\|?*\x00-\x1f]/g,'_').replace(/[ .]+$/,'');
-  const extension = normalized.match(/\.[a-z0-9]{1,12}$/i)?.[0] || '';
-  const stem = extension ? normalized.slice(0,-extension.length) : normalized;
-  return scorePath(`scores/${id}__${([...stem].slice(0,100).join('').replace(/[ .]+$/,'') || 'score') + extension}`);
+async function libraryEntityId(...parts) {
+  return hashLibraryBytes(new TextEncoder().encode(JSON.stringify(parts)));
+}
+function createScorePath(id) {
+  if (!/^[a-f0-9]{64}$/.test(id)) throw new Error('Invalid score identity');
+  return scorePath(`scores/${id}`);
 }
 function scoreStoragePath(path,version = LIBRARY_STORAGE_VERSION) {
   if (version !== LIBRARY_STORAGE_VERSION) throw new LibraryFormatError('Unsupported score storage version. Update Rostrum.');
   return scorePath(path);
 }
-function isManagedScoreName(name) { return /^[0-9a-f-]{36}__[^/\\\x00]+$/i.test(name); }
+function isManagedScoreName(name) { return /^[a-f0-9]{64}$/.test(name); }
 async function listStoredScores({directory},version = LIBRARY_STORAGE_VERSION) {
   if (version !== LIBRARY_STORAGE_VERSION) throw new LibraryFormatError('Unsupported score storage version. Update Rostrum.');
   const dir = await directory('scores');

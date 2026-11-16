@@ -2,7 +2,7 @@ import { openLibraryStorage } from './bookshelf-storage.js';
 import { openConfiguredLibraryStorage } from './bookshelf-storage-policy.js';
 import { unzipSync } from 'fflate';
 import { exportLibraryPackage, readLibraryPackage, hashBytes, scorePath } from './bookshelf-transfer.js';
-import { LIBRARY_SCHEMA_VERSION, LIBRARY_RECORD_VERSION, createScorePath, scoreStoragePath, checkRecordVersion } from './bookshelf-format.js';
+import { LIBRARY_SCHEMA_VERSION, LIBRARY_RECORD_VERSION, createScorePath, scoreStoragePath, checkRecordVersion, libraryEntityId } from './bookshelf-format.js';
 import { initializeLibrarySchema, libraryTables } from './bookshelf-schema.js';
 
 // All database and file mutations run serially in this worker. A second tab
@@ -24,10 +24,20 @@ function transaction(run) {
   try { const value = run(); sql('COMMIT'); return value; }
   catch (error) { sql('ROLLBACK'); throw error; }
 }
-function heads(table, id) {
+function revisionHeads(table, id) {
   const changes = sql('SELECT * FROM changes WHERE entity_type=? AND entity_id=?', [table, id]);
   const parents = new Set(changes.flatMap(change => JSON.parse(change.parent_revision_ids_json)));
   return changes.filter(change => !parents.has(change.id));
+}
+function heads(table,id) {
+  const unique = new Map();
+  for (const change of revisionHeads(table,id).sort((a,b) => a.id.localeCompare(b.id))) {
+    const row = JSON.parse(change.payload_json); delete row.revision_id;
+    if (table === 'bookshelf_documents' && !JSON.parse(change.parent_revision_ids_json).length) delete row.order_key;
+    const key = JSON.stringify(Object.keys(row).sort().map(key => [key,row[key]]));
+    unique.set(key,change);
+  }
+  return [...unique.values()];
 }
 function writeRow(table, row) {
   const keys = Object.keys(row);
@@ -75,7 +85,7 @@ function save(table, values, parents = null) {
   }
   writeRow(table, row);
   sql('INSERT INTO changes VALUES (?,?,?,?,?,?,?,?)', [revision, deviceId, table, row.id,
-    JSON.stringify(parents || (previous ? [previous.revision_id] : [])), JSON.stringify(row), new Date().toISOString(),LIBRARY_RECORD_VERSION]);
+    JSON.stringify(parents || revisionHeads(table,row.id).map(change => change.id)), JSON.stringify(row), new Date().toISOString(),LIBRARY_RECORD_VERSION]);
   return row;
 }
 let deviceId;
@@ -141,7 +151,7 @@ function validateTransfer(manifest) {
   const documents = new Map(manifest.records.documents.map(doc => [doc.id, doc]));
   for (const doc of documents.values()) {
     scorePath(doc.storage_path);
-    if (!/^[a-f0-9]{64}$/.test(doc.content_hash) || !Number.isSafeInteger(doc.size_bytes) || doc.size_bytes < 0) throw new Error('Invalid score identity');
+    if (doc.id !== doc.content_hash || doc.storage_path !== createScorePath(doc.id) || !/^[a-f0-9]{64}$/.test(doc.content_hash) || !Number.isSafeInteger(doc.size_bytes) || doc.size_bytes < 0) throw new Error('Invalid score identity');
   }
   for (const change of incoming.values()) if (change.entity_type === 'documents') {
     const row = decodeChange(change), doc = documents.get(row.id);
@@ -150,6 +160,14 @@ function validateTransfer(manifest) {
     if (local && (local.id !== doc.id || ['storage_path', 'content_hash', 'size_bytes'].some(key => local[key] !== doc[key]))) throw new Error('The package would overwrite a different score');
   }
   return { incoming, normalize, known };
+}
+function mergeOriginalLocations(row, rows) {
+  const locations = new Map();
+  for (const item of rows) for (const location of JSON.parse(item.metadata_json).originalLocations || [])
+    locations.set(JSON.stringify([location.source,location.path,location.name]),location);
+  if (!locations.size) return row;
+  return {...row,metadata_json:JSON.stringify({...JSON.parse(row.metadata_json),
+    originalLocations:[...locations].sort(([a],[b]) => a.localeCompare(b)).map(([,value]) => value)})};
 }
 function mergeRecords(manifest) {
   const { incoming, normalize, known } = validateTransfer(manifest);
@@ -160,7 +178,19 @@ function mergeRecords(manifest) {
     const entities = new Map([...incoming.values()].map(change => [change.entity_type + ':' + change.entity_id, change]));
     for (const { entity_type:table, entity_id:id } of entities.values()) {
       const chosen = heads(table,id).sort((a,b) => a.id.localeCompare(b.id)).at(-1);
-      writeRow(table,normalize(table,decodeChange(chosen)));
+      const alternatives = heads(table,id);
+      const rows = alternatives.map(change => normalize(table,decodeChange(change)));
+      const withoutOrigins = row => {
+        const value = {...row}; delete value.revision_id;
+        const metadata = JSON.parse(value.metadata_json); delete metadata.originalLocations;
+        value.metadata_json = JSON.stringify(metadata);
+        return JSON.stringify(value);
+      };
+      if (table === 'documents' && rows.length > 1 && rows.every(row => withoutOrigins(row) === withoutOrigins(rows[0]))) {
+        const revisions = revisionHeads(table,id);
+        const row = mergeOriginalLocations(normalize(table,decodeChange(chosen)),revisions.map(decodeChange));
+        save(table,row,revisions.map(change => change.id));
+      } else writeRow(table,normalize(table,decodeChange(chosen)));
     }
     validateRelations();
     if (sql('PRAGMA foreign_key_check').length) throw new Error('The changes contain broken library references');
@@ -209,6 +239,7 @@ const withOriginalLocation = (metadata, location) => {
   if (locations.some(item => item.source === clean.source && item.path === clean.path && item.name === clean.name)) return metadata;
   return {...metadata,originalLocations:[...locations,clean]};
 };
+const relationId = (table,values) => libraryEntityId(table,Object.entries(values).filter(([key]) => !['order_key','id','revision_id','deleted_at','metadata_json'].includes(key)).sort());
 const actions = {
   formatInfo() { return {schemaVersion:sql('PRAGMA user_version')[0].user_version,...sql('SELECT * FROM library_info WHERE id=1')[0]}; },
   destroyStorage() {},
@@ -286,31 +317,28 @@ const actions = {
     Object.defineProperty(batches[destination],id,{ value:changeIds, enumerable:true, configurable:true, writable:true });
     setLocal('delta-batches',batches);
   },
-  remoteInventory({ destination, changeIds, paths }) {
+  remoteInventory({ destination, changeIds, paths, unknown = false }) {
     if (!Array.isArray(changeIds) || !Array.isArray(paths) || [...changeIds,...paths].some(value => typeof value !== 'string')) throw new Error('Invalid remote inventory');
     for (const path of paths) scorePath(path);
-    setLocal('remote:' + destination,{ changeIds:[...new Set(changeIds)].sort(), paths:[...new Set(paths)].sort() });
+    setLocal('remote:' + destination,{ changeIds:[...new Set(changeIds)].sort(), paths:[...new Set(paths)].sort(),unknown,checkedAt:Date.now() });
     return actions.syncStatus({ destination });
   },
   syncStatus({ destination = '' } = {}) {
     const inventory = getLocal('remote:' + destination,{ changeIds:[],paths:[] });
     const known = new Set(inventory.changeIds);
-    return { pending:sql('SELECT id FROM changes').filter(row => !known.has(row.id)).length, verified:!!getLocal('remote:' + destination), conflicts:actions.conflicts().length };
+    return { unknown:!!inventory.unknown, pending:sql('SELECT id FROM changes').filter(row => !known.has(row.id)).length, verified:!!getLocal('remote:' + destination), conflicts:actions.conflicts().length };
+  },
+  async syncSummary({destination}) {
+    const states = await actions.availability({destination}), status = actions.syncStatus({destination});
+    const active = new Set(sql('SELECT id FROM documents WHERE deleted_at IS NULL AND replaced_by_id IS NULL').map(row => row.id));
+    return {...status,uploads:states.filter(state => !state.remote).length,
+      downloads:states.filter(state => active.has(state.id) && !state.present).length};
   },
   async findImportedFile({ file }) {
     const existing = importedDocument(await hashBytes(await file.arrayBuffer()));
     return existing ? { ...existing, alreadyImported: true } : null;
   },
   changeIds() { return sql('SELECT id FROM changes ORDER BY id').map(row => row.id); },
-  localState(args) {
-    if (typeof args.key !== 'string' || !['sync-packages:', 'sync-published:'].some(prefix => args.key.startsWith(prefix))) throw new Error('Invalid sync state key');
-    if (Object.hasOwn(args, 'value')) {
-      if (!Array.isArray(args.value) || args.value.some(value => typeof value !== 'string')) throw new Error('Invalid sync state');
-      sql('INSERT INTO local_state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', [args.key, JSON.stringify(args.value)]);
-    }
-    const row = sql('SELECT value FROM local_state WHERE key=?', [args.key])[0];
-    return row ? JSON.parse(row.value) : null;
-  },
   backup() { return exportLibraryPackage({ db, files, tables }); },
   async importBackup({ bytes, file }) {
     const manifest = await readLibraryPackage(file || bytes, tables);
@@ -350,11 +378,14 @@ const actions = {
       if (!Array.isArray(expectedRevisionIds) || [...expectedRevisionIds].sort().join() !== alternatives.map(change => change.id).sort().join()) throw new Error('This conflict changed. Refresh before resolving it.');
       const chosen = alternatives.find(change => change.id === revisionId);
       if (!chosen || alternatives.length < 2) throw new Error('This conflict has already changed. Refresh before resolving it.');
-      const row = decodeChange(chosen);
+      // Displayed alternatives may represent several equal revisions. Resolve
+      // every actual branch, including those hidden by display deduplication.
+      const revisions = revisionHeads(table,id);
+      const row = table === 'documents' ? mergeOriginalLocations(decodeChange(chosen),revisions.map(decodeChange)) : decodeChange(chosen);
       delete row.revision_id;
       // Always record the explicit resolution, even when the chosen payload
       // matches the currently displayed branch.
-      return save(table, row, alternatives.map(change => change.id));
+      return save(table, row, revisions.map(change => change.id));
     });
   },
   async musicMetadataFiles({ file }) {
@@ -369,14 +400,25 @@ const actions = {
   },
   async open() { await open(); return { version: LIBRARY_SCHEMA_VERSION }; },
   async importFile({ file, entries, displayName = file.name, replacesId = null, derivedFromId = null, originalLocation = null }) {
-    const id = crypto.randomUUID();
     const bytes = await file.arrayBuffer();
     const hash = await hashBytes(bytes);
+    const id = hash;
     // Keep old/deleted documents intact too: reimporting must not silently
     // restore a tombstone or change replacement/annotation relationships.
     const existing = importedDocument(hash);
-    if (existing) return { ...actions.rememberOriginalLocation({id:existing.id,location:originalLocation}), alreadyImported: true };
+    if (existing) {
+      await files.write(existing.storage_path,bytes); setFileState(existing.id,{present:true});
+      return { ...actions.rememberOriginalLocation({id:existing.id,location:originalLocation}), alreadyImported:true };
+    }
     const path = createScorePath(id,file.name);
+    const inherited = [];
+    if (replacesId) for (const [table,key] of [['bookshelf_documents','bookshelf_id'],['document_tags','tag_id']]) {
+      for (const previous of sql(`SELECT * FROM ${table} WHERE document_id=? AND deleted_at IS NULL`,[replacesId])) {
+        const values = {[key]:previous[key],document_id:id};
+        inherited.push({table,values:{...values,id:await relationId(table,values),metadata_json:previous.metadata_json,
+          ...(table === 'bookshelf_documents' ? {order_key:previous.order_key} : {})}});
+      }
+    }
     try {
       await files.write(path, bytes);
       return transaction(() => {
@@ -389,13 +431,7 @@ const actions = {
         if (replacesId) {
           if (!sql('SELECT id FROM documents WHERE id=? AND deleted_at IS NULL', [replacesId]).length) throw new Error('Original score not found');
           save('documents', { id: replacesId, replaced_by_id: id });
-          for (const link of sql('SELECT * FROM bookshelf_documents WHERE document_id=? AND deleted_at IS NULL', [replacesId])) {
-            save('bookshelf_documents', { id: crypto.randomUUID(), bookshelf_id: link.bookshelf_id,
-              document_id: id, order_key: link.order_key, metadata_json: link.metadata_json });
-          }
-          for (const link of sql('SELECT tag_id FROM document_tags WHERE document_id=? AND deleted_at IS NULL', [replacesId])) {
-            save('document_tags', { id: crypto.randomUUID(), document_id: id, tag_id: link.tag_id });
-          }
+          for (const item of inherited) save(item.table,item.values);
         }
         return document;
       });
@@ -532,15 +568,16 @@ const actions = {
       return save(table,values);
     });
   },
-  link({ table, values }) {
+  async link({ table, values }) {
     if (!['document_tags', 'entry_tags', 'bookshelf_documents', 'playlist_items'].includes(table)) throw new Error('Invalid membership');
+    const identity = table === 'playlist_items' ? crypto.randomUUID() : await relationId(table,values);
     return transaction(() => {
       if (table !== 'playlist_items') {
         const rows = sql(`SELECT * FROM ${table} WHERE deleted_at IS NULL`);
         const existing = rows.find(row => Object.entries(values).filter(([key]) => key !== 'order_key').every(([key, value]) => row[key] === value));
         if (existing) return existing;
       }
-      return save(table, { id: crypto.randomUUID(), ...values });
+      return save(table, { id:identity, ...values,deleted_at:null });
     });
   },
   records({ table, parent, id }) {

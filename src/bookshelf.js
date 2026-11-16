@@ -2,642 +2,61 @@
 import { Score } from './score.js';
 import { checkUnsaved, FileSrc } from './file.js';
 import { toast, css, listen, iconSvg } from './common.js';
-import { exchangeLibraryChanges, LibraryAutoSync } from './bookshelf-sync.js';
+import { BookshelfStore } from './bookshelf-model.js';
 import { LibraryCloudTransport } from './bookshelf-cloud.js';
 import { reviewScoreImport } from './bookshelf-import.js';
 import { CloudFolderPicker } from './cloud-folder-picker.js';
-import { LibraryTransferQueue } from './bookshelf-transfers.js';
 // -skip
 
-class BookshelfStore extends EventTarget {
-  constructor() {
-    super(); this.pending = new Map(); this.sequence = 0; this.localSaving = 0; this.cloudPending = true; this.downloads = new Map(); this.releases = new Set(); this.fileErrors = new Map();
-    this.transfers = new LibraryTransferQueue();
-    this.libraryGeneration = 0;
-    this.transfers.addEventListener('change',() => this.notifyData());
-    queueMicrotask(() => this.initializeSync().catch(error => { this.syncError = error; this.notifyStatus(); }));
-  }
-  notifyStatus() { this.dispatchEvent(new Event('statuschange')); }
-  notifyData() { this.dispatchEvent(new Event('datachange')); this.notifyStatus(); }
-  hasSyncDestination() { return !!(this.transport || this.cloudSelection?.source); }
-  destinationId() {
-    if (this.transport) return this.transport.id;
-    if (!this.cloudSelection?.source) return '';
-    const path = (this.cloudSelection.path || '').replace(/^\/+|\/+$/g,'');
-    return this.cloudSelection.source + ':' + (path ? '/' + path : '');
-  }
-  async initializeSync() {
-    const [selection, settings, storage] = await Promise.all([window.RostrumLibraryHost.loadCloudSelection(),window.RostrumLibraryHost.loadSyncSettings(),window.RostrumLibraryHost.loadSelection()]);
-    if (this.storage === undefined) this.storage = storage || {};
-    this.cloudSelection ||= selection; this.autoSettings ||= settings || { enabled:true };
-    this.autoSync = new LibraryAutoSync(this); this.autoSync.setEnabled(this.autoSettings.enabled !== false); this.notifyStatus();
-  }
-  async setAutoSync(enabled) {
-    this.autoSettings = { enabled:!!enabled };
-    this.autoSync?.setEnabled(enabled); this.notifyStatus();
-    await window.RostrumLibraryHost.saveSyncSettings(this.autoSettings);
-  }
-  async syncAutomatically() {
-    const transport = this.transport || this.makeCloudTransport(this.cloudSelection.source,this.cloudSelection.path);
-    const run = async () => { await transport.connect?.(); return this.sync(transport,{ automatic:true }); };
-    try { return await (transport.background ? transport.background(run) : run()); }
-    catch (error) { this.syncError = error; this.notifyStatus(); throw error; }
-  }
-  deviceStatus() {
-    if (this.deletingStorage) return 'Device: deleting library data';
-    const score = Score.activeScore;
-    if (this.localError || score?.librarySaveError) return 'Device: save failed';
-    if (this.localSaving || score?.libraryDocumentId && score.librarySavedGeneration !== score.librarySaveGeneration) return 'Device: saving';
-    if (this.downloads.size) return 'Device: downloading scores';
-    if (this.fileErrors.size) return 'Device: score download failed';
-    if (this.opening) return 'Device: opening score';
-    return 'Device: saved';
-  }
-  cloudStatus() {
-    if (!this.hasSyncDestination()) return 'Cloud: not configured';
-    if (navigator.onLine === false) return 'Cloud: offline; changes kept on this device';
-    if (this.cloudConnecting) return 'Cloud: connecting';
-    if (this.syncPending) return 'Cloud: syncing';
-    if (this.syncError?.name === 'AuthRequiredError') return 'Cloud: sign-in required; use Sync library now';
-    if (this.syncError) return 'Cloud: sync failed — ' + this.syncError.message;
-    const score = Score.activeScore;
-    return this.cloudPending || this.localSaving || score?.libraryDocumentId && score.librarySavedGeneration !== score.librarySaveGeneration
-      ? 'Cloud: changes waiting to sync' : 'Cloud: synced';
-  }
-  setPermissionRequired(required) {
-    this.permissionRequired = required;
-    this.dispatchEvent(new Event('permissionchange'));
-  }
-  async reauthorizeStorage() {
-    // Call requestPermission before any other await to retain user activation.
-    await window.RostrumLibraryHost.requestStoragePermission(this.storage);
-    this.setPermissionRequired(false);
-    await this.call('open');
-    if (Score.activeScore?.libraryDocumentId) await this.flush(Score.activeScore);
-  }
-  async deletionSummary() {
-    if (Score.activeScore?.libraryDocumentId) await this.flush(Score.activeScore);
-    const data = await this.call('syncData');
-    const status = await this.call('syncStatus',{destination:this.destinationId()});
-    const states = await this.call('availability',{destination:this.destinationId()});
-    return {scores:data.documents.length,pending:status.pending,unverified:!status.verified,
-      localOnly:states.filter(state => state.present && !state.remote).length};
-  }
-  async deleteStorage() {
-    if (this.deletingStorage || this.syncPending || this.cloudConnecting || this.checkingCloud || this.autoSync?.running || this.reviewPending || this.opening || this.downloads.size || this.releases.size || this.transfers?.size || this.fullSyncRunning)
-      throw new Error('Wait for library operations before deleting data.');
-    this.deletingStorage = true; this.notifyStatus();
-    try { if (Score.activeScore?.libraryDocumentId) { await this.flush(Score.activeScore); await Score.activeScore.dispose(); } }
-    catch (error) { this.deletingStorage = false; this.notifyStatus(); throw error; }
-    let deleted = false;
-    try { await this.call('destroyStorage'); deleted = true; }
-    finally {
-      this.worker?.terminate(); this.worker = this.workerStarting = null;
-      this.hostStorage?.close(); this.hostStorage = null;
-      this.storageDeleted = !deleted;
-      this.fileErrors.clear();
-      if (!deleted) { this.deletingStorage = false; this.notifyData(); }
-    }
-    this.syncNeeds = null; this.fullSyncState = null;
-    try { await this.call('open'); this.cloudPending = true; }
-    finally { this.deletingStorage = false; this.notifyData(); }
-    // Keep the selected backend and cloud settings. Deletion is never a synced
-    // tombstone; an enabled auto-sync restores the remote history into a fresh DB.
-    if (this.hasSyncDestination() && this.autoSettings?.enabled !== false) this.autoSync?.request(0);
-    else if (this.hasSyncDestination()) {
-      const transport = this.transport || this.makeCloudTransport(this.cloudSelection.source,this.cloudSelection.path);
-      this.checkSyncNeeds(transport).catch(() => {});
-    }
-  }
-  async configure(storage) {
-    if (this.deletingStorage) throw new Error('Wait for library data deletion.');
-    if (this.transfers.size || this.fullSyncRunning) throw new Error('Wait for library transfers before changing storage.');
-    if (this.cloudConnecting || this.checkingCloud || this.autoSync?.running) throw new Error('Wait for library sync before changing its location.');
-    if (this.releases.size) throw new Error('Wait for download release before changing library location.');
-    if (this.opening) throw new Error('Wait for the score to open before changing library location.');
-    if (this.downloads.size) throw new Error('Wait for score downloads before changing library location.');
-    if (this.reviewPending) throw new Error('Finish the score import review before changing its library location.');
-    if (this.syncPending) throw new Error('Wait for library sync before changing its location.');
-    if (Score.activeScore?.libraryDocumentId) {
-      await this.flush(Score.activeScore); await Score.activeScore.dispose();
-    }
-    // The startup library may still be initializing the remembered backend.
-    // Finish that attempt before switching, so its failure cannot clear the new worker.
-    if (this.workerStarting) await this.workerStarting.catch(() => {});
-    if (this.worker) { await this.call('close'); this.worker.terminate(); }
-    this.worker = this.workerStarting = null; this.storage = storage; this.storageDeleted = false; this.syncNeeds = null; this.fullSyncState = null; this.localError = null; this.cloudPending = true; this.fileErrors.clear();
-    const result = await this.call('open');
-    try { await window.RostrumLibraryHost.saveSelection(storage); }
-    catch { toast('Library opened, but its location could not be remembered. Choose it again next time.'); }
-    this.autoSync?.request(); this.notifyData();
-    return result;
-  }
-  async sync(transport, { automatic = false } = {}) {
-    if (this.opening) throw new Error('Wait for the score to open before syncing.');
-    if (this.reviewPending) throw new Error('Finish the score import review before syncing.');
-    if (this.syncPending) throw new Error('Library sync is already running.');
-    if (navigator.onLine === false) throw new Error('Cloud sync needs a connection; changes remain saved on this device.');
-    const previous = Score.activeScore;
-    const documentId = previous?.libraryDocumentId;
-    const index = Math.max(0, Number(previous?.numbers?.pn || 1) - 1);
-    const anchor = previous && { type: previous.music ? 'music' : 'pdf', pageIndex: previous.pgs[index]?.mozPn ? previous.pgs[index].mozPn - 1 : index };
-    this.syncPending = true; this.manualSync = !automatic; this.transport = transport; this.syncError = null; this.notifyStatus();
-    const cancelDisplay = _shade_.cancel.style.display;
-    if (!automatic) { _shade_.cancel.style.display = 'none'; _shade_.show('Syncing library', 0); }
-    try {
-      if (previous?.libraryDocumentId) await this.flush(previous);
-      const result = await exchangeLibraryChanges(this,transport);
-      this.syncNeeds = null;
-      await this.refreshSyncNeeds(transport);
-      this.cloudPending = result.pending > 0; this.lastSyncedAt = Date.now(); this.notifyData(); return result;
-    } catch (error) { this.syncError = error; throw error; }
-    finally {
-      if (!automatic && documentId && !Score.activeScore) {
-        try { await this.openDocument(documentId, anchor, true); }
-        catch (error) { toast('Review the synced library before reopening this score: ' + error.message); }
-      }
-      this.syncPending = false; this.manualSync = false;
-      if (!automatic) { _shade_.cancel.style.display = cancelDisplay; _shade_.hide(); }
-      this.notifyStatus();
-      if (!automatic) this.autoSync?.request(this.autoSync.interval);
-    }
-  }
-  makeCloudTransport(source, path) {
-    if (![Score.sources.gdrive, Score.sources.dbx, Score.sources.odrive, Score.sources.pcloud].includes(source)) throw new Error('Choose a cloud service');
-    return new LibraryCloudTransport(FileSrc.get(source),path || '');
-  }
-  async syncCloud(source, path, {background = false} = {}) {
-    if (this.syncPending || this.cloudConnecting || this.autoSync?.running) throw new Error('Wait for the current library sync.');
-    const transport = this.makeCloudTransport(source,path);
-    this.cloudConnecting = true; this.notifyStatus();
-    try {
-      await transport.connect();
-      this.cloudSelection = { source,path }; this.transport = transport;
-      await window.RostrumLibraryHost.saveCloudSelection(this.cloudSelection);
-      return await this.sync(transport,{automatic:background});
-    } catch (error) { this.syncError = error; throw error; }
-    finally { this.cloudConnecting = false; this.notifyStatus(); this.autoSync?.request(this.autoSync.interval); }
-  }
-  async applyRemoteChanges(changes) {
-    if (this.opening) throw new Error('Wait for the score to open before receiving changes.');
-    if (this.reviewPending) throw new Error('Finish the current score review before receiving library changes.');
-    const previous = Score.activeScore, id = previous?.libraryDocumentId;
-    const affectsOpen = id && changes.some(change => {
-      const row = JSON.parse(change.payload_json);
-      return change.entity_type === 'documents' && row.id === id || change.entity_type === 'annotations' && row.document_id === id;
-    });
-    if (!affectsOpen) return this.call('mergeDelta',{ changes });
-    const index = Math.max(0,Number(previous.numbers?.pn || 1) - 1);
-    const anchor = { type:previous.music ? 'music' : 'pdf',pageIndex:previous.pgs[index]?.mozPn ? previous.pgs[index].mozPn - 1 : index };
-    const cancelDisplay = _shade_.cancel.style.display;
-    if (!this.manualSync) { _shade_.cancel.style.display = 'none'; _shade_.show('Applying score changes',0); }
-    try {
-      await this.flush(previous); await previous.dispose();
-      return await this.call('mergeDelta',{ changes });
-    } finally {
-      try { if (!Score.activeScore) await this.openDocument(id,anchor,true); }
-      catch (error) { toast('Review this score before reopening it: ' + error.message); }
-      if (!this.manualSync) { _shade_.cancel.style.display = cancelDisplay; _shade_.hide(); }
-    }
-  }
-  transferKey(id,direction = 'download',transport = this.transport) { return direction + ':' + (transport?.id || this.destinationId()) + ':' + id; }
-  uploadFile(document,file,transport) {
-    return this.transfers.enqueue(this.transferKey(document.id,'upload',transport),() => transport.writeScore(document,file),
-      {label:JSON.parse(document.metadata_json).originalFilename,direction:'upload'});
-  }
-  async refreshSyncNeeds(transport = this.transport) {
-    if (!transport) return;
-    const data = await this.call('syncData');
-    const states = await this.call('availability',{destination:transport.id});
-    const status = await this.call('syncStatus',{destination:transport.id});
-    const active = new Set(data.documents.filter(doc => !doc.deleted_at && !doc.replaced_by_id).map(doc => doc.id));
-    const unknown = this.syncNeeds?.destination === transport.id && this.syncNeeds.unknown;
-    this.syncNeeds = {destination:transport.id,pending:!!unknown || status.pending > 0 || !status.verified,unknown,
-      uploads:states.filter(state => !state.remote).length,
-      downloads:states.filter(state => active.has(state.id) && !state.present).length,checkedAt:Date.now()};
-    this.notifyStatus();
-  }
-  async checkSyncNeeds(transport = this.transport,{interactive = false} = {}) {
-    if (!transport) throw new Error('Choose a library cloud destination first.');
-    if (this.syncPending || this.deletingStorage) return;
-    if (this.checkingCloud) return this.checkingCloud;
-    this.checkingCloud = (async () => {
-      const check = async () => {
-        await transport.connect?.();
-        const [remote,scores] = await Promise.all([transport.listChanges(),transport.listScores()]);
-        const generation = this.libraryGeneration;
-        const data = await this.call('syncData');
-        const cache = data.batches[transport.id] || {},remoteIds = new Set();
-        let unknown = false;
-        for (const batch of remote) {
-          if (!Object.hasOwn(cache,batch.id)) unknown = true;
-          else for (const id of cache[batch.id]) remoteIds.add(id);
+const bookshelfStore = new BookshelfStore({
+  get host() { return window.RostrumLibraryHost; },
+  get runtime() { return window._bookshelfRuntime_; },
+  createCloudTransport(source,path) {
+    if (![Score.sources.gdrive,Score.sources.dbx,Score.sources.odrive,Score.sources.pcloud].includes(source)) throw new Error('Choose a cloud service');
+    return new LibraryCloudTransport(FileSrc.get(source),path);
+  },
+  readOriginalFile: location => FileSrc.get(location.source).getFile(location.path,location.name),
+  scores: {
+    get active() { return Score.activeScore; },
+    preview: async file => new Score().init(null,null,file.name,await file.arrayBuffer(),false),
+    review: reviewScoreImport,
+    async open(state,anchor) {
+      const settings = JSON.parse(state.document.settings_json);
+      const score = await new Score().init(null,null,JSON.parse(state.document.metadata_json).originalFilename,
+        await state.file.arrayBuffer(),true,{...state,settings});
+      if (anchor) {
+        let page = Number(anchor.pageIndex);
+        if (anchor.type === 'pdf' && Number.isInteger(page)) {
+          const actual = score.pgs.findIndex(pg => pg.mozPn === page + 1);
+          if (actual < 0) throw new Error('The indexed page is not present in this score view');
+          page = actual;
         }
-        const paths = new Set(scores.map(file => file.path));
-        const states = new Map((await this.call('availability',{destination:transport.id})).map(state => [state.id,state]));
-        this.syncNeeds = {destination:transport.id,pending:unknown || generation !== this.libraryGeneration || data.changes.some(change => !remoteIds.has(change.id)),
-          uploads:data.documents.filter(doc => !paths.has(doc.storage_path)).length,
-          downloads:data.documents.filter(doc => !doc.deleted_at && !doc.replaced_by_id && !states.get(doc.id)?.present).length,
-          unknown,checkedAt:Date.now()};
-        if (transport.id === this.destinationId()) this.cloudPending = this.syncNeeds.pending || this.syncNeeds.uploads > 0;
-      };
-      try { await (!interactive && transport.background ? transport.background(check) : check()); }
-      catch (error) { this.syncNeeds = {destination:transport.id,error:error.message}; throw error; }
-    })();
-    this.notifyStatus();
-    try { await this.checkingCloud; }
-    finally { this.checkingCloud = null; this.notifyStatus(); }
-  }
-  async ensureFile(id, transport = this.transport, {priority = 0,front = false,group = '',document = null} = {}) {
-    if (this.releases.has(id)) throw new Error('Wait for this download to be released.');
-    const key = this.transferKey(id,'download',transport);
-    if (this.downloads.has(id)) { this.transfers.promote(key,{priority,front}); return this.downloads.get(id); }
-    const local = document ? {document} : await this.call('fileInfo',{id});
-    if (local.file) return local.file;
-    if (group === 'full-library' && this.fullSyncCancelled) throw new DOMException('Download cancelled','AbortError');
-    if (this.downloads.has(id)) { this.transfers.promote(key,{priority,front}); return this.downloads.get(id); }
-    const job = this.transfers.enqueue(key,async () => {
-      const info = await this.call('fileInfo',{ id }); if (info.file) return info.file;
-      const task = this.transfers.jobs.get(key);
-      if (task) { task.label = JSON.parse(info.document.metadata_json).originalFilename; this.transfers.changed(); }
-      if (navigator.onLine === false) throw new Error('This score is cloud-only. Connect to download it, or keep it offline in advance.');
-      if (!transport) {
-        if (!this.cloudSelection?.source) throw new Error('Connect the library cloud to download this score.');
-        transport = this.makeCloudTransport(this.cloudSelection.source,this.cloudSelection.path);
+        if (Number.isInteger(page) && page >= 0 && page < score.pgs.length) await window._Layout_.activeLayout.pgGoTo(page + 1);
       }
-      const transfer = async () => { await transport.connect?.(); return transport.readScore(info.document); };
-      const file = await (transport.background ? transport.background(transfer) : transfer());
-      this.transport = transport;
-      await this.call('installFile',{ id,file }); this.fileErrors.delete(id);
-      if (this.syncNeeds?.destination === transport.id) await this.refreshSyncNeeds(transport);
-      return file;
-    },{priority,front,group,label:JSON.parse(local.document.metadata_json).originalFilename});
-    this.downloads.set(id,job); this.notifyData();
-    try { return await job; }
-    catch (error) { if (error.name !== 'AbortError') this.fileErrors.set(id,error.message); throw error; }
-    finally { this.downloads.delete(id); this.notifyData(); }
+      return score;
+    },
+  },
+});
+// Application integration: reader lifecycle and presentation, never storage decisions.
+bookshelfStore.addEventListener('warning',event => toast(event.detail.message));
+let syncCancelDisplay;
+bookshelfStore.addEventListener('statuschange',() => {
+  const message = bookshelfStore.syncPending && bookshelfStore.manualSync ? 'Syncing library'
+    : bookshelfStore.applyingChanges ? 'Applying score changes' : null;
+  if (message && syncCancelDisplay === undefined) {
+    syncCancelDisplay = _shade_.cancel.style.display;
+    _shade_.cancel.style.display = 'none'; _shade_.show(message,0);
+  } else if (!message && syncCancelDisplay !== undefined) {
+    _shade_.cancel.style.display = syncCancelDisplay; syncCancelDisplay = undefined; _shade_.hide();
   }
-  async keepOffline(ids) {
-    for (const id of ids) await this.call('pinFile',{ id,pinned:true });
-    let failed;
-    for (const id of ids) try { await this.ensureFile(id); } catch (error) { failed ||= error; }
-    this.autoSync?.request(); if (failed) throw failed;
-  }
-  async syncAllScores(source,path) {
-    if (this.fullSyncRunning) throw new Error('A full library transfer is already running.');
-    this.fullSyncRunning = true; this.fullSyncCancelled = false;
-    const state = this.fullSyncState = {phase:'sync',total:0,completed:0,failed:0,cancelled:0}; this.notifyStatus();
-    try {
-      if (source) await this.syncCloud(source,path,{background:true});
-      else if (this.transport) await this.sync(this.transport,{automatic:true});
-      else throw new Error('Configure library cloud sync first.');
-      const docs = (await this.call('syncData')).documents.filter(doc => !doc.deleted_at && !doc.replaced_by_id);
-      const states = new Map((await this.call('availability',{destination:this.destinationId()})).map(item => [item.id,item]));
-      const missing = docs.filter(doc => !states.get(doc.id)?.present);
-      state.phase = 'download'; state.total = missing.length; this.notifyStatus();
-      await Promise.all(missing.map(async doc => {
-        if (this.fullSyncCancelled) { state.cancelled++; return; }
-        try { await this.ensureFile(doc.id,this.transport,{group:'full-library',document:doc}); state.completed++; }
-        catch (error) { if (error.name === 'AbortError') state.cancelled++; else state.failed++; }
-        finally { this.notifyStatus(); }
-      }));
-      state.phase = this.fullSyncCancelled ? 'cancelled' : state.failed ? 'failed' : 'done';
-      return {...state};
-    } catch (error) { state.phase = 'failed'; state.error = error.message; throw error; }
-    finally { this.fullSyncRunning = false; this.notifyData(); }
-  }
-  cancelFullSync() { this.fullSyncCancelled = true; this.transfers.cancelWaiting('full-library'); this.notifyStatus(); }
-  async downloadPinned(transport) {
-    const states = await this.call('availability',{ destination:transport.id });
-    const docs = (await this.call('syncData')).documents;
-    let downloadFailures = 0;
-    for (const state of states) if (state.pinned && !state.present && docs.some(doc => doc.id === state.id && !doc.deleted_at)) {
-      try { await this.ensureFile(state.id,transport); }
-      catch { downloadFailures++; } // Keep the request and expose its device error; metadata is already synced.
-    }
-    return downloadFailures;
-  }
-  async releaseDownload(id) {
-    if (this.releases.has(id) || this.downloads.has(id) || this.opening?.id === id) throw new Error('Wait for the current score operation.');
-    if (Score.activeScore?.libraryDocumentId === id) throw new Error('Close this score before releasing its download.');
-    if (!this.transport || navigator.onLine === false) throw new Error('Connect and sync before releasing a download.');
-    const transport = this.transport;
-    this.releases.add(id);
-    const release = async () => {
-      const info = await this.call('fileInfo',{ id });
-      const remote = await transport.listScores();
-      if (!remote.some(file => file.path === info.document.storage_path)) throw new Error('This score is not uploaded. Keep its local copy and sync first.');
-      await this.call('verifyFile',{ id,file:await transport.readScore(info.document) });
-      return this.call('releaseFile',{ id,destination:transport.id });
-    };
-    try { return await (transport.background ? transport.background(release) : release()); }
-    finally { this.releases.delete(id); if (this.syncNeeds) await this.refreshSyncNeeds(); this.notifyData(); }
-  }
-  scheduleSave(score) {
-    score.librarySaveGeneration = (score.librarySaveGeneration || 0) + 1;
-    clearTimeout(score.librarySaveTimer);
-    this.notifyStatus();
-    score.librarySaveTimer = setTimeout(() => this.flush(score).catch(error => {
-      score.librarySaveError = error;
-      toast('Library save failed: ' + error.message);
-    }), 300);
-  }
-  async flush(score) {
-    clearTimeout(score.librarySaveTimer);
-    if (score.librarySavePromise) await score.librarySavePromise;
-    if (!score.libraryDocumentId || score.librarySavedGeneration === score.librarySaveGeneration) return;
-    const save = async () => {
-      while (score.librarySavedGeneration !== score.librarySaveGeneration) {
-        const generation = score.librarySaveGeneration;
-        const state = await score.captureLibraryState();
-        await this.call('saveState', { documentId: score.libraryDocumentId, ...state });
-        score.librarySavedGeneration = generation;
-      }
-      score.librarySaveError = null;
-      score.setDirty(false);
-    };
-    score.librarySavePromise = save();
-    try { await score.librarySavePromise; } finally { score.librarySavePromise = null; this.notifyStatus(); }
-  }
-  async openDocument(id, anchor, afterSync = false) {
-    if (this.opening) {
-      if (this.opening.id === id) return this.opening.promise;
-      throw new Error('Wait for the current score to open.');
-    }
-    const promise = this.openDocumentAux(id,anchor,afterSync); this.opening = { id,promise }; this.notifyStatus();
-    try { return await promise; } finally { this.opening = null; this.notifyData(); }
-  }
-  async openDocumentAux(id, anchor, afterSync) {
-    if (this.syncPending && this.manualSync && !afterSync) throw new Error('Wait for library sync before opening another score.');
-    if (Score.activeScore?.libraryDocumentId) await this.flush(Score.activeScore);
-    const conflicts = await this.call('conflicts');
-    if (conflicts.some(conflict => conflict.table === 'documents' && conflict.id === id
-      || conflict.table === 'annotations' && conflict.alternatives.some(change => JSON.parse(change.payload_json).document_id === id))) {
-      throw new Error('Resolve this score’s conflicting edits before opening it.');
-    }
-    await this.ensureFile(id,undefined,{priority:100,front:true});
-    const state = await this.call('read', { id });
-    const settings = JSON.parse(state.document.settings_json);
-    const score = await new Score().init(null, null, JSON.parse(state.document.metadata_json).originalFilename,
-      await state.file.arrayBuffer(), true, { ...state, settings });
-    if (anchor) {
-      let page = Number(anchor.pageIndex);
-      if (anchor.type === 'pdf' && Number.isInteger(page)) {
-        const actual = score.pgs.findIndex(pg => pg.mozPn === page + 1);
-        if (actual < 0) throw new Error('The indexed page is not present in this score view');
-        page = actual;
-      }
-      if (Number.isInteger(page) && page >= 0 && page < score.pgs.length) await window._Layout_.activeLayout.pgGoTo(page + 1);
-    }
-    return score;
-  }
-  async ensureWorker() {
-    if (this.workerStarting) return this.workerStarting;
-    this.workerStarting = (async () => {
-      if (this.storage === undefined) this.storage = await window.RostrumLibraryHost.loadSelection() || {};
-      if (await window.RostrumLibraryHost.queryStoragePermission(this.storage) !== 'granted') {
-        this.setPermissionRequired(true);
-        throw new DOMException('Allow access to the remembered library folder to continue.', 'NotAllowedError');
-      }
-      this.setPermissionRequired(false);
-      let url = new URL('bookshelf-worker.js', location.href).href;
-      if (location.protocol === 'file:') {
-        this.hostStorage = await window.RostrumLibraryHost.openHostStorage(this.storage || {});
-        const runtime = window._bookshelfRuntime_;
-        if (!runtime) throw new Error('This build does not contain the library runtime.');
-        const decode = value => new Uint8Array([...atob(value)].map(char => char.charCodeAt(0)));
-        const workerText = await new Response(new Blob([decode(runtime.worker)]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
-        const script = `globalThis.rostrumLibraryWasm = new Uint8Array(await new Response(new Blob([Uint8Array.from(atob(${JSON.stringify(runtime.wasm)}), c=>c.charCodeAt(0))]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());\n` + workerText;
-        const bytes = new TextEncoder().encode(script);
-        let binary = ''; for (let i = 0; i < bytes.length; i += 32768) binary += String.fromCharCode(...bytes.subarray(i, i + 32768));
-        url = 'data:text/javascript;base64,' + btoa(binary);
-      }
-      this.worker = new Worker(url, { type: 'module' });
-      let readyResolve, readyReject;
-      const ready = new Promise((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
-      const startupTimeout = setTimeout(() => readyReject(new Error('Library worker did not finish starting.')), 20000);
-      this.worker.onmessage = async ({ data }) => {
-        if (data.hostRequest) {
-          const methods = {
-            readDatabase: () => this.hostStorage.readDatabase(), writeDatabase: bytes => this.hostStorage.writeDatabase(bytes), close: () => this.hostStorage.close(), clear: () => this.hostStorage.clear(),
-            read: path => this.hostStorage.files.read(path), write: (path, bytes) => this.hostStorage.files.write(path, bytes), remove: path => this.hostStorage.files.remove(path),
-          };
-          try {
-            if (!Object.hasOwn(methods, data.method)) throw new Error('Unknown storage operation');
-            const value = await methods[data.method](...data.args);
-            this.worker?.postMessage({ hostReply: data.hostRequest, value });
-          } catch (error) { this.worker?.postMessage({ hostReply: data.hostRequest, error: error.message, errorName: error.name }); }
-          return;
-        }
-        if (data.ready) { clearTimeout(startupTimeout); readyResolve(); return; }
-        const pending = this.pending.get(data.id);
-        if (!pending) return;
-        this.pending.delete(data.id);
-        data.error ? pending.reject(Object.assign(new Error(data.error), { name: data.errorName || 'Error', persistenceFailed: data.persistenceFailed,
-          committedValue:data.committedValue })) : pending.resolve(data.value);
-      };
-      this.worker.onerror = () => {
-        clearTimeout(startupTimeout); readyReject(new Error('Could not start library storage.'));
-        for (const pending of this.pending.values()) pending.reject(new Error('Could not start library storage.'));
-        this.pending.clear(); this.worker.terminate(); this.worker = null;
-        this.hostStorage?.close(); this.hostStorage = null;
-        this.workerStarting = null;
-      };
-      await ready;
-      await this.send('open', { storage: location.protocol === 'file:' ? { kind: 'host' } : this.storage || {} });
-      return this.worker;
-    })().catch(error => {
-      this.worker?.terminate(); this.hostStorage?.close(); this.hostStorage = null;
-      this.worker = this.workerStarting = null; throw error;
-    });
-    return this.workerStarting;
-  }
-  send(action, args) {
-    return new Promise((resolve, reject) => {
-      const id = ++this.sequence;
-      this.pending.set(id, { resolve, reject });
-      try { this.worker.postMessage({ id, action, args }); }
-      catch (error) { this.pending.delete(id); reject(error); }
-    });
-  }
-  async call(action, args = {}) {
-    if (this.storageDeleted) throw new Error('Library deletion was incomplete. Choose its storage location again before continuing.');
-    if (this.deletingStorage && !['destroyStorage','open','saveState'].includes(action)) throw new Error('Wait for library data deletion.');
-    const shared = ['importFile','rememberOriginalLocation','update','link','moveItem','reindex','editSongs','saveState','resolveConflict','useVersion','importBackup'].includes(action);
-    const writing = shared || ['mergeDelta','installFile','releaseFile','pinFile'].includes(action);
-    if (writing) { this.localSaving++; this.notifyStatus(); }
-    try {
-      await this.ensureWorker(); const value = await this.send(action,args);
-      if (!['backup','export'].includes(action)) this.localError = null;
-      if (shared) {
-        this.libraryGeneration++;
-        this.cloudPending = true;
-        const needs = this.syncNeeds;
-        if (needs?.checkedAt) {
-          const status = await this.send('syncStatus',{destination:needs.destination});
-          if (this.syncNeeds === needs) {
-            needs.pending = !!needs.unknown || status.pending > 0 || !status.verified;
-            this.cloudPending = needs.pending;
-          }
-        }
-        this.autoSync?.request();
-      }
-      if (writing || action === 'remoteInventory') this.notifyData();
-      return value;
-    }
-    catch (error) {
-      if (this.storage?.kind === 'directory' && ['NotAllowedError', 'SecurityError'].includes(error.name)) this.setPermissionRequired(true);
-      if (error.persistenceFailed) this.localError = error;
-      throw error;
-    } finally { if (writing) { this.localSaving--; this.notifyStatus(); } }
-  }
-  async analyze(file, previewScore = null) {
-    if (!/\.(pdf|mscz|mxl|musicxml|xml)$/i.test(file.name)) throw new Error('Unsupported score format');
-    const entries = [];
-    if (/\.pdf$/i.test(file.name)) {
-      const analysis = previewScore || await new Score().init(null, null, file.name, await file.arrayBuffer(), false);
-      const pdf = analysis.mozDoc;
-      try {
-        const walk = async (items, parent_id = null) => {
-          for (const item of items || []) {
-            let dest = item.dest;
-            if (typeof dest === 'string') dest = await pdf.getDestination(dest);
-            let pageIndex = null;
-            if (Array.isArray(dest)) pageIndex = typeof dest[0] === 'number' ? dest[0] : await pdf.getPageIndex(dest[0]);
-            const id = crypto.randomUUID();
-            const validPage = Number.isInteger(pageIndex) && pageIndex >= 0 && pageIndex < pdf.numPages;
-            if (validPage) entries.push({ id, parent_id, anchor: { type: 'pdf', pageIndex }, metadata: { title: item.title,
-              source: { type: 'pdf-outline', key: JSON.stringify([item.title, pageIndex]) } } });
-            await walk(item.items, validPage ? id : parent_id);
-          }
-        };
-        await walk(await pdf.getOutline());
-        if (!entries.length) entries.push({ id: crypto.randomUUID(), anchor: { type: 'pdf', pageIndex: 0 }, metadata: {
-          title: analysis.pdfInfo?.Title || file.name.replace(/\.[^.]+$/, ''), composer: '',
-          source: { type: 'file-title', key: 'root' } } });
-      } finally { if (!previewScore) await analysis.dispose(); }
-    }
-    if (!entries.length) {
-      let title = file.name.replace(/\.[^.]+$/, ''), composer = '', source = 'filename';
-      if (!/\.pdf$/i.test(file.name)) {
-        const files = await this.call('musicMetadataFiles', { file });
-        let names = Object.keys(files).filter(name => !name.startsWith('META-INF/'));
-        if (files['META-INF/container.xml']) {
-          const container = new DOMParser().parseFromString(files['META-INF/container.xml'], 'application/xml');
-          const main = container.querySelector('rootfile')?.getAttribute('full-path');
-          if (main && files[main]) names = [main];
-        }
-        names.sort((a,b) => a.split('/').length - b.split('/').length);
-        for (const name of names) {
-          const xml = new DOMParser().parseFromString(files[name], 'application/xml');
-          if (xml.querySelector('parsererror')) continue;
-          if (xml.documentElement.tagName === 'museScore') {
-            const tags = Object.fromEntries([...xml.querySelectorAll('Score > metaTag')].map(tag => [tag.getAttribute('name'), tag.textContent]));
-            const titleText = [...xml.querySelectorAll('Text')].find(text => text.querySelector('style')?.textContent === 'title');
-            title = tags.workTitle || titleText?.querySelector('text')?.textContent || title;
-            composer = tags.composer || ''; source = 'music-metadata'; break;
-          }
-          if (/^score-(partwise|timewise)$/.test(xml.documentElement.tagName)) {
-            title = xml.querySelector('work-title')?.textContent || xml.querySelector('movement-title')?.textContent || title;
-            composer = xml.querySelector('creator[type="composer"]')?.textContent || ''; source = 'music-metadata'; break;
-          }
-        }
-      }
-      entries.push({ id: crypto.randomUUID(), anchor: { type: /\.pdf$/i.test(file.name) ? 'pdf' : 'music', pageIndex: 0 },
-        metadata: { title, composer, source: { type: source, key: 'root' } } });
-    }
-    return entries;
-  }
-  async import(file, options = {}) {
-    const existing = await this.call('findImportedFile', { file });
-    if (existing) return options.originalLocation ? {...await this.call('rememberOriginalLocation',{id:existing.id,location:options.originalLocation}),alreadyImported:true} : existing;
-    // importFile checks again in the serial Worker queue for concurrent imports.
-    return this.call('importFile', { file, entries: await this.analyze(file), ...options });
-  }
-  async importReviewed(file, options = {}) {
-    if (this.reviewPending) throw new Error('Finish the current score import review first.');
-    this.reviewPending = true;
-    let preview;
-    try {
-      const existing = await this.call('findImportedFile', { file });
-      if (existing) return options.originalLocation ? {...await this.call('rememberOriginalLocation',{id:existing.id,location:options.originalLocation}),alreadyImported:true} : existing;
-      preview = await new Score().init(null, null, file.name, await file.arrayBuffer(), false);
-      const entries = await this.analyze(file, preview);
-      return await reviewScoreImport(file, entries, preview, draft => this.call('importFile', { file, ...draft, ...options }),
-        this.storage?.kind === 'directory' ? () => this.reauthorizeStorage() : null);
-    } finally { try { await preview?.dispose(); } finally { this.reviewPending = false; } }
-  }
-  async reindex(id) {
-    await this.ensureFile(id);
-    const { document: doc, file } = await this.call('read', { id });
-    const named = new File([file], JSON.parse(doc.metadata_json).originalFilename);
-    return this.call('reindex', { documentId: id, entries: await this.analyze(named) });
-  }
-  async editSongs(id) {
-    if (this.reviewPending || this.syncPending) throw new Error('Finish the current library operation before editing songs.');
-    this.reviewPending = true;
-    let preview;
-    try {
-      if (Score.activeScore?.libraryDocumentId) await this.flush(Score.activeScore);
-      await this.ensureFile(id);
-      const state = await this.call('songState', { id });
-      let expectedRevisionId = state.document.revision_id;
-      let expectedEntries = state.entries.map(row => ({ id:row.id, revision_id:row.revision_id }));
-      const records = state.entries.filter(row => !row.deleted_at);
-      const metadata = JSON.parse(state.document.metadata_json);
-      const file = new File([state.file], metadata.originalFilename);
-      preview = await new Score().init(null, null, file.name, await file.arrayBuffer(), false);
-      const entries = records.map(row => ({ id:row.id, parent_id:row.parent_id,
-        anchor:JSON.parse(row.anchor_json), metadata:JSON.parse(row.metadata_json) }));
-      // Keep hierarchy visible even if sync inserted children before parents.
-      const byId = new Map(entries.map(entry => [entry.id,entry])), seen = new Set(), ordered = [];
-      const visit = entry => {
-        if (seen.has(entry.id)) return;
-        seen.add(entry.id);
-        if (byId.has(entry.parent_id)) visit(byId.get(entry.parent_id));
-        ordered.push(entry);
-      };
-      entries.sort((a,b) => a.anchor.pageIndex - b.anchor.pageIndex || a.id.localeCompare(b.id)).forEach(visit);
-      const commit = async draft => {
-        try {
-          const result = await this.call('editSongs', { documentId:id, expectedRevisionId, expectedEntries, ...draft });
-          return result.document;
-        } catch (error) {
-          // Snapshot backends may commit SQLite before persistence fails. Keep
-          // the resulting revisions so a retry can save further draft edits.
-          if (error.persistenceFailed && error.committedValue?.document) {
-            expectedRevisionId = error.committedValue.document.revision_id;
-            expectedEntries = error.committedValue.entries;
-          }
-          throw error;
-        }
-      };
-      return await reviewScoreImport(file, ordered, preview, commit, this.storage?.kind === 'directory' ? () => this.reauthorizeStorage() : null,
-      { editing:true, displayName:metadata.displayName });
-    } finally { try { await preview?.dispose(); } finally { this.reviewPending = false; } }
-  }
-  async exportBackup() {
-    this.emergencyBackup = false;
-    if (Score.activeScore?.libraryDocumentId) {
-      try { await this.flush(Score.activeScore); }
-      catch (error) {
-        if (!error.persistenceFailed) throw error;
-        this.emergencyBackup = true;
-      }
-    }
-    if (!this.emergencyBackup) for (const doc of (await this.call('syncData')).documents) await this.ensureFile(doc.id);
-    return this.call('backup');
-  }
-  async importBackup(file) {
-    if (Score.activeScore?.libraryDocumentId) {
-      await this.flush(Score.activeScore); await Score.activeScore.dispose();
-    }
-    return this.call('importBackup', { file });
-  }
-}
-const bookshelfStore = new BookshelfStore();
+});
+bookshelfStore.inBackground = document.hidden;
+window.addEventListener('online',() => bookshelfStore.autoSync?.request(0));
+window.addEventListener('offline',() => bookshelfStore.notifyStatus());
 window._bookshelf_ = bookshelfStore;
 document.addEventListener('visibilitychange', () => {
+  bookshelfStore.inBackground = document.hidden;
+  if (!document.hidden) bookshelfStore.autoSync?.request(0);
   const score = Score.activeScore;
   if (document.visibilityState === 'hidden' && score?.libraryDocumentId) bookshelfStore.flush(score).catch(error => {
     score.librarySaveError = error; toast('Library save failed: ' + error.message);
@@ -825,7 +244,8 @@ class BookshelfView {
     }
   `);
 
-  constructor(panel) {
+  constructor(panel, model = bookshelfStore) {
+    this.model = model;
     this.panel = panel;
     this.elm = document.createElement('div');
     this.elm.className = 'Bookshelf';
@@ -841,7 +261,7 @@ class BookshelfView {
     const status = document.createElement('div'); status.setAttribute('role', 'status');
     const deviceStatus = document.createElement('div'); deviceStatus.setAttribute('aria-label','Device save status');
     const cloudStatus = document.createElement('div'); cloudStatus.setAttribute('aria-label','Cloud sync status');
-    const updateStatus = () => { deviceStatus.textContent = bookshelfStore.deviceStatus(); cloudStatus.textContent = bookshelfStore.cloudStatus() + (bookshelfStore.autoSettings?.enabled === false ? ' · Automatic sync off' : ''); };
+    const updateStatus = () => { deviceStatus.textContent = this.model.deviceStatus(); cloudStatus.textContent = this.model.cloudStatus() + (this.model.autoSettings?.enabled === false ? ' · Automatic sync off' : ''); };
     const permission = document.createElement('div'); permission.hidden = true;
     const permissionMessage = document.createElement('div');
     const allowAccess = document.createElement('button'); allowAccess.textContent = 'Allow library folder access';
@@ -851,7 +271,7 @@ class BookshelfView {
     const tagMatch = document.createElement('select'); tagMatch.setAttribute('aria-label', 'Tag matching');
     tagMatch.add(new Option('Any selected tag', 'any')); tagMatch.add(new Option('All selected tags', 'all'));
     this.elm.append(input, search, status, deviceStatus, cloudStatus, permission, results);
-    panel.listeners.push(listen(bookshelfStore,'statuschange',updateStatus)); updateStatus();
+    panel.listeners.push(listen(this.model,'statuschange',updateStatus)); updateStatus();
     let refreshTimer;
     const refreshAfterChange = () => {
       if (!this.elm.isConnected || !this.elm.getClientRects().length) return;
@@ -864,16 +284,16 @@ class BookshelfView {
         this.refresh?.();
       },50);
     };
-    panel.listeners.push(listen(bookshelfStore,'datachange',refreshAfterChange));
+    panel.listeners.push(listen(this.model,'datachange',refreshAfterChange));
     panel.listeners.push(listen(this.elm,'focusout',() => { if (this.refreshNeeded) { this.refreshNeeded = false; refreshAfterChange(); } }));
     panel.listeners.push(listen(document,'selectionchange',() => {
       if (this.refreshNeeded && window.getSelection().isCollapsed) { this.refreshNeeded = false; refreshAfterChange(); }
     }));
     const updatePermission = () => {
-      permission.hidden = !bookshelfStore.permissionRequired;
-      permissionMessage.textContent = 'Access is required for library folder: ' + (bookshelfStore.storage?.directory?.name || '');
+      permission.hidden = !this.model.permissionRequired;
+      permissionMessage.textContent = 'Access is required for library folder: ' + (this.model.storage?.directory?.name || '');
     };
-    panel.listeners.push(listen(bookshelfStore, 'permissionchange', updatePermission));
+    panel.listeners.push(listen(this.model, 'permissionchange', updatePermission));
     updatePermission();
     const importCurrent = document.createElement('button'); importCurrent.textContent = 'Import current score';
     this.elm.insertBefore(importCurrent, results);
@@ -894,7 +314,7 @@ class BookshelfView {
     };
     allowAccess.onclick = () => run(async () => {
       allowAccess.disabled = true;
-      try { await bookshelfStore.reauthorizeStorage(); await this.refresh(); status.textContent = 'Library folder access restored'; }
+      try { await this.model.reauthorizeStorage(); await this.refresh(); status.textContent = 'Library folder access restored'; }
       finally { allowAccess.disabled = false; }
     });
     const transfers = document.createElement('details');
@@ -941,8 +361,8 @@ class BookshelfView {
     }
     let storageCapabilities = {};
     const updateStorageControls = () => {
-      const active = bookshelfStore.storage?.kind || 'opfs';
-      const busy = bookshelfStore.deletingStorage || bookshelfStore.syncPending || bookshelfStore.cloudConnecting || bookshelfStore.checkingCloud || bookshelfStore.fullSyncRunning || bookshelfStore.transfers.size || bookshelfStore.opening || bookshelfStore.reviewPending;
+      const active = this.model.storage?.kind || 'opfs';
+      const busy = this.model.operationBlock('storage');
       for (const [kind,row] of storageRows) {
         row.row.dataset.active = String(active === kind);
         if (active === kind) row.row.setAttribute('aria-current','true'); else row.row.removeAttribute('aria-current');
@@ -950,24 +370,24 @@ class BookshelfView {
         row.choose.disabled = !storageCapabilities[kind] || !!busy;
         row.unavailable.textContent = !storageCapabilities[kind] ? 'Unavailable in this browser or context.' : '';
         row.unavailable.hidden = !!storageCapabilities[kind];
-        row.remove.disabled = active !== kind || !!busy || !!bookshelfStore.storageDeleted;
+        row.remove.disabled = active !== kind || !!busy || !!this.model.storageDeleted;
       }
-      location.textContent = active === 'directory' ? bookshelfStore.storage?.directory?.name || '' : '';
+      location.textContent = active === 'directory' ? this.model.storage?.directory?.name || '' : '';
       location.hidden = !location.textContent;
     };
-    window.RostrumLibraryHost.storageCapabilities().then(capabilities => { storageCapabilities = capabilities; updateStorageControls(); });
-    panel.listeners.push(listen(bookshelfStore,'statuschange',updateStorageControls));
+    this.model.storageCapabilities().then(capabilities => { storageCapabilities = capabilities; updateStorageControls(); });
+    panel.listeners.push(listen(this.model,'statuschange',updateStorageControls));
     updateStorageControls();
     for (const [kind,row] of storageRows) row.remove.onclick = () => run(async () => {
-      if ((bookshelfStore.storage?.kind || 'opfs') !== kind) return;
-      const info = await bookshelfStore.deletionSummary();
-      const target = kind === 'directory' ? 'Local directory: ' + bookshelfStore.storage.directory.name : kind === 'opfs' ? 'OPFS' : 'IndexedDB';
+      if ((this.model.storage?.kind || 'opfs') !== kind) return;
+      const info = await this.model.deletionSummary();
+      const target = kind === 'directory' ? 'Local directory: ' + this.model.storage.directory.name : kind === 'opfs' ? 'OPFS' : 'IndexedDB';
       const message = `Delete library data from ${target}?\n\n${info.scores} score records and all managed local files will be removed. Other files and the folder itself remain. Cloud data, original files and sync settings will not be deleted.\n\n` +
-        (!bookshelfStore.hasSyncDestination() ? 'Warning: cloud sync is not configured. This data cannot be restored from library cloud sync.\n\n' : info.pending || info.localOnly || info.unverified ? `Warning: ${info.pending} changes not confirmed as synced; ${info.localOnly} local files not confirmed in the cloud. Unsynced data will be lost.\n\n` : 'The last sync confirmed the cloud copy. Restore requires access to that cloud.\n\n') +
-        (bookshelfStore.hasSyncDestination() && bookshelfStore.autoSettings?.enabled !== false ? 'This storage location stays selected. Automatic sync will restore the cloud library; score files download when opened.' : 'This storage location stays selected with an empty library. Automatic restore is off. Use Apply and sync to restore when a cloud destination is configured.');
+        (!this.model.hasSyncDestination() ? 'Warning: cloud sync is not configured. This data cannot be restored from library cloud sync.\n\n' : info.pending || info.localOnly || info.unverified ? `Warning: ${info.pending} changes not confirmed as synced; ${info.localOnly} local files not confirmed in the cloud. Unsynced data will be lost.\n\n` : 'The last sync confirmed the cloud copy. Restore requires access to that cloud.\n\n') +
+        (this.model.hasSyncDestination() && this.model.autoSettings?.enabled !== false ? 'This storage location stays selected. Automatic sync will restore the cloud library; score files download when opened.' : 'This storage location stays selected with an empty library. Automatic restore is off. Use Apply and sync to restore when a cloud destination is configured.');
       if (!window.confirm(message)) return;
-      await bookshelfStore.deleteStorage(); await this.refresh();
-      status.textContent = 'Library data deleted from ' + target + '. ' + (bookshelfStore.hasSyncDestination() && bookshelfStore.autoSettings?.enabled !== false ? 'Automatic cloud restore requested.' : 'The library is empty. Automatic restore is off.');
+      await this.model.deleteStorage(); await this.refresh();
+      status.textContent = 'Library data deleted from ' + target + '. ' + (this.model.hasSyncDestination() && this.model.autoSettings?.enabled !== false ? 'Automatic cloud restore requested.' : 'The library is empty. Automatic restore is off.');
     });
     const cloud = document.createElement('select'); cloud.setAttribute('aria-label', 'Library cloud service'); cloud.add(new Option('Choose cloud service', ''));
     for (const source of [Score.sources.gdrive, Score.sources.dbx, Score.sources.odrive, Score.sources.pcloud]) cloud.add(new Option(source, source));
@@ -976,9 +396,9 @@ class BookshelfView {
     const chooseCloudFolder = document.createElement('button'); chooseCloudFolder.type = 'button'; chooseCloudFolder.textContent = 'Choose sync folder…'; chooseCloudFolder.setAttribute('aria-label','Choose sync folder');
     const cloudInfo = document.createElement('div'); cloudInfo.textContent = 'Choose a dedicated cloud folder, then Apply and sync. Use the same folder on each device. Changes sync automatically; scores download when opened or kept offline.';
     const autoLabel = document.createElement('label'); autoLabel.textContent = 'Automatic library sync';
-    const auto = document.createElement('input'); auto.type = 'checkbox'; auto.setAttribute('aria-label','Automatic library sync'); auto.checked = bookshelfStore.autoSettings?.enabled !== false; autoLabel.append(auto);
-    auto.onchange = () => run(async () => { await bookshelfStore.setAutoSync(auto.checked); });
-    panel.listeners.push(listen(bookshelfStore,'statuschange',() => { auto.checked = bookshelfStore.autoSettings?.enabled !== false; }));
+    const auto = document.createElement('input'); auto.type = 'checkbox'; auto.setAttribute('aria-label','Automatic library sync'); auto.checked = this.model.autoSettings?.enabled !== false; autoLabel.append(auto);
+    auto.onchange = () => run(async () => { await this.model.setAutoSync(auto.checked); });
+    panel.listeners.push(listen(this.model,'statuschange',() => { auto.checked = this.model.autoSettings?.enabled !== false; }));
     const sync = document.createElement('button'); sync.textContent = 'Sync library now';
     const applySync = document.createElement('button'); applySync.textContent = 'Apply and sync'; applySync.onclick = () => sync.click();
     const checkSync = document.createElement('button'); checkSync.textContent = 'Check sync status';
@@ -992,23 +412,23 @@ class BookshelfView {
       const chosen = draftCloud && draftCloud.source === cloud.value;
       const path = chosen ? draftCloud.path.replace(/^\/+|\/+$/g,'') : '';
       const destination = chosen ? draftCloud.source + ':' + (path ? '/' + path : '') : '';
-      const applied = chosen && bookshelfStore.cloudSelection?.source === draftCloud.source && bookshelfStore.cloudSelection?.path === draftCloud.path;
-      const needs = bookshelfStore.syncNeeds?.destination === destination ? bookshelfStore.syncNeeds : null;
+      const applied = chosen && this.model.cloudSelection?.source === draftCloud.source && this.model.cloudSelection?.path === draftCloud.path;
+      const needs = this.model.syncNeeds?.destination === destination ? this.model.syncNeeds : null;
       const known = needs?.checkedAt && !needs.error;
-      const busy = pickingCloudFolder || applyingCloud || bookshelfStore.syncPending || bookshelfStore.cloudConnecting || bookshelfStore.fullSyncRunning || bookshelfStore.deletingStorage;
+      const busy = pickingCloudFolder || applyingCloud || this.model.operationBlock('sync');
       cloudPath.textContent = chosen ? draftCloud.path || '/' : 'No folder selected';
-      chooseCloudFolder.disabled = !cloud.value || busy || !!bookshelfStore.transfers.size;
-      sync.disabled = applySync.disabled = !chosen || busy || !!bookshelfStore.checkingCloud || applied && (!known || !needs.pending && !needs.uploads);
-      allSync.disabled = !chosen || busy || !!bookshelfStore.checkingCloud || applied && (!known || !needs.pending && !needs.uploads && !needs.downloads);
-      checkSync.disabled = !chosen || busy || !!bookshelfStore.checkingCloud;
-      syncCounts.textContent = bookshelfStore.checkingCloud ? 'Checking cloud status…' : known
+      chooseCloudFolder.disabled = !cloud.value || busy || !!this.model.transferState.size;
+      sync.disabled = applySync.disabled = !chosen || busy || !!this.model.checkingCloud || applied && (!known || !needs.pending && !needs.uploads);
+      allSync.disabled = !chosen || busy || !!this.model.checkingCloud || applied && (!known || !needs.pending && !needs.uploads && !needs.downloads);
+      checkSync.disabled = !chosen || busy || !!this.model.checkingCloud;
+      syncCounts.textContent = this.model.checkingCloud ? 'Checking cloud status…' : known
         ? `Upload pending: ${needs.uploads} files · Download pending: ${needs.downloads} files` + (needs.pending ? ' · Library changes pending; file counts update after sync.' : '')
         : needs?.error ? 'Could not check cloud status: ' + needs.error : chosen ? 'Check sync status to count pending files.' : 'Choose a sync folder first.';
-      cloud.disabled = busy || !!bookshelfStore.transfers.size;
+      cloud.disabled = busy || !!this.model.transferState.size;
     };
     const checkCloudStatus = async (interactive = false) => {
-      if (!draftCloud || bookshelfStore.syncPending || bookshelfStore.deletingStorage) return;
-      try { await bookshelfStore.checkSyncNeeds(bookshelfStore.makeCloudTransport(draftCloud.source,draftCloud.path),{interactive}); }
+      if (!draftCloud || this.model.syncPending || this.model.deletingStorage) return;
+      try { await this.model.checkCloudSelection(draftCloud.source,draftCloud.path,{interactive}); }
       catch { /* The state and retry button remain visible in this panel. */ }
       updateCloudControls();
     };
@@ -1016,7 +436,7 @@ class BookshelfView {
     syncSettings.addEventListener('toggle',() => { if (syncSettings.open) checkCloudStatus(); });
     const preloadCloud = () => { if (cloud.value === Score.sources.gdrive) FileSrc.get(cloud.value).preloadGIS?.(); };
     cloud.onchange = () => { cloudTouched = true; draftCloud = null; preloadCloud(); updateCloudControls(); };
-    window.RostrumLibraryHost.loadCloudSelection().then(saved => {
+    this.model.savedCloudSelection().then(saved => {
       if (!cloudTouched && saved && typeof saved.path === 'string') {
         cloud.value = saved.source;
         if (cloud.value) draftCloud = {source:saved.source,path:saved.path};
@@ -1043,47 +463,47 @@ class BookshelfView {
       if (!draftCloud || draftCloud.source !== cloud.value) throw new Error('Choose a cloud folder first.');
       const selected = {...draftCloud}; applyingCloud = true; updateCloudControls(); status.textContent = 'Syncing library';
       try {
-        const result = await bookshelfStore.syncCloud(selected.source,selected.path); await this.refresh();
+        const result = await this.model.syncCloud(selected.source,selected.path); await this.refresh();
         status.textContent = `Synced library; ${result.conflicts} conflicting items to review.`;
       } finally { applyingCloud = false; updateCloudControls(); }
     });
     allSync.onclick = () => run(async () => {
       if (!draftCloud) return;
       const selected = {...draftCloud};
-      const result = await bookshelfStore.syncAllScores(selected.source,selected.path);
+      const result = await this.model.syncAllScores(selected.source,selected.path);
       await this.refresh();
       status.textContent = result.failed ? `Full sync finished with ${result.failed} failed files. Retry to download the remaining files.`
         : result.phase === 'cancelled' ? 'Full sync stopped. Finished files remain on this device.' : 'All current library scores are on this device.';
     });
     updateCloudControls();
-    panel.listeners.push(listen(bookshelfStore,'statuschange',updateCloudControls));
+    panel.listeners.push(listen(this.model,'statuschange',updateCloudControls));
     folder.onclick = () => run(async () => {
       const directory = await window.showDirectoryPicker({ mode: 'readwrite' });
-      await bookshelfStore.configure({ kind: 'directory', directory });
+      await this.model.configure({ kind: 'directory', directory });
       await this.refresh();
     });
     defaultLibrary.onclick = () => run(async () => {
-      await bookshelfStore.configure({}); await this.refresh();
+      await this.model.configure({}); await this.refresh();
     });
     browserLibrary.onclick = () => run(async () => {
-      await bookshelfStore.configure({ kind: 'indexeddb' }); await this.refresh();
+      await this.model.configure({ kind: 'indexeddb' }); await this.refresh();
     });
     backup.onclick = () => run(async () => {
-      const bytes = await bookshelfStore.exportBackup();
+      const bytes = await this.model.exportBackup();
       await window._localFs_.fileSaveLegacy(new Blob([bytes], { type: 'application/zip' }), { fileName: 'rostrum-library-' + new Date().toISOString().slice(0,10) + '.zip' });
-      status.textContent = bookshelfStore.emergencyBackup ? 'Emergency backup exported; library storage could not be updated.' : 'Library exported';
+      status.textContent = this.model.emergencyBackup ? 'Emergency backup exported; library storage could not be updated.' : 'Library exported';
     });
     restore.onchange = () => run(async () => {
       if (!restore.files[0]) return;
       restore.disabled = true;
       try {
-        const result = await bookshelfStore.importBackup(restore.files[0]);
+        const result = await this.model.importBackup(restore.files[0]);
         await this.refresh();
         status.textContent = `Imported ${result.importedFiles} scores; ${result.conflicts} conflicting items to review.`;
       } finally { restore.disabled = false; restore.value = ''; }
     });
     review.onclick = () => run(async () => {
-      const conflicts = await bookshelfStore.call('conflicts'); conflictResults.replaceChildren();
+      const conflicts = await this.model.conflicts(); conflictResults.replaceChildren();
       if (!conflicts.length) { conflictResults.textContent = 'No conflicting edits'; return; }
       for (const conflict of conflicts) {
         const section = document.createElement('div');
@@ -1097,7 +517,7 @@ class BookshelfView {
           details.append(summary, values);
           const choose = document.createElement('button'); choose.textContent = 'Use this version';
           choose.onclick = () => run(async () => {
-            await bookshelfStore.call('resolveConflict', { table: conflict.table, id: conflict.id, revisionId: change.id,
+            await this.model.resolveConflict({ table: conflict.table, id: conflict.id, revisionId: change.id,
               expectedRevisionIds: conflict.alternatives.map(option => option.id) });
             conflictResults.replaceChildren(); await this.refresh(); review.click();
           });
@@ -1106,9 +526,7 @@ class BookshelfView {
         conflictResults.append(section);
       }
     });
-    const records = (table, parent, id) => bookshelfStore.call('records', { table, parent, id });
-    let revisions = new Map();
-    const update = (table, values) => bookshelfStore.call('update', { table, values, expectedRevisionId:revisions.get(table + ':' + values.id) });
+    const records = (table, parent, id) => this.model.records(table,parent,id);
     const label = row => row.name || JSON.parse(row.metadata_json).title || JSON.parse(row.metadata_json).displayName || JSON.parse(row.metadata_json).name;
     const button = (container, text, task) => {
       const b = document.createElement('button'); b.textContent = text;
@@ -1125,7 +543,7 @@ class BookshelfView {
     };
     let generation = 0;
     this.refresh = () => run(async () => {
-      if (bookshelfStore.storageDeleted) {
+      if (this.model.storageDeleted) {
         results.replaceChildren(); const message = document.createElement('p');
         message.textContent = 'Library deletion was incomplete. Choose its storage location again in Library settings.'; results.append(message);
         this.rowViews?.clear(); this.closeRecord(); updateStatus(); return;
@@ -1135,8 +553,6 @@ class BookshelfView {
       const referenceRows = await Promise.all(referenceTables.map(table => records(table)));
       if (current !== generation) return;
       references = Object.fromEntries(referenceTables.map((table, i) => [table, referenceRows[i]]));
-      const nextRevisions = new Map();
-      for (const table of referenceTables) for (const row of references[table]) nextRevisions.set(table + ':' + row.id,row.revision_id);
       updateStorageControls();
       const selectedTags = [...tagFilter.selectedOptions].map(option => option.value);
       tagFilter.replaceChildren();
@@ -1150,42 +566,13 @@ class BookshelfView {
       collection.replaceChildren(); collection.add(new Option('Choose collection', ''));
       for (const group of groups) collection.add(new Option(label(group), group.id));
       collection.value = groups.some(g => g.id === selected) ? selected : '';
-      let rows;
-      let memberships = [];
-      const filters = { query: search.value, tagIds: selectedTags, matchAll: tagMatch.value === 'all' };
-      search.placeholder = ['documents', 'bookshelves'].includes(mode.value) ? 'Search scores' : 'Search songs';
-      if (['bookshelves', 'playlists'].includes(mode.value) && !collection.value) {
-        rows = [];
-      } else if (mode.value === 'history') {
-        rows = await bookshelfStore.call('history');
-      } else if (mode.value === 'bookshelves' && collection.value) {
-        memberships = await records('bookshelf_documents', 'bookshelf_id', collection.value);
-        const documents = await bookshelfStore.call('list', filters);
-        rows = memberships.sort((a,b) => a.order_key.localeCompare(b.order_key) || a.id.localeCompare(b.id)).flatMap(link => {
-          const doc = documents.find(d => d.id === link.document_id); return doc ? [{ ...doc, membership: link }] : [];
-        });
-      } else if (mode.value === 'playlists' && collection.value) {
-        memberships = await records('playlist_items', 'playlist_id', collection.value);
-        const entries = await records('entries');
-        const documents = await records('documents');
-        rows = memberships.sort((a,b) => a.order_key.localeCompare(b.order_key) || a.id.localeCompare(b.id)).map(link => {
-          const entry = entries.find(e => e.id === link.entry_id);
-          const doc = entry && documents.find(d => d.id === entry.document_id);
-          return entry ? { ...entry, membership: link, unavailable: !doc, document_metadata: doc?.metadata_json, previousVersion: !!doc?.replaced_by_id }
-            : { id: link.entry_id, metadata_json: '{"title":"Unavailable song"}', membership: link, unavailable: true };
-        });
-      } else if (mode.value === 'entries' || mode.value === 'tags') {
-        rows = await bookshelfStore.call('search', { query: search.value,
-          tagIds: [...new Set([...selectedTags, ...(mode.value === 'tags' && collection.value ? [collection.value] : [])])], matchAll: tagMatch.value === 'all' });
-      } else rows = await bookshelfStore.call('list', filters);
+      const filters = {query:search.value,tagIds:selectedTags,matchAll:tagMatch.value === 'all'};
+      search.placeholder = ['documents','bookshelves'].includes(mode.value) ? 'Search scores' : 'Search songs';
+      const rows = await this.model.query({mode:mode.value,collection:collection.value,filters});
       if (current !== generation) return;
-      const availability = new Map((await bookshelfStore.call('availability',{ destination:bookshelfStore.destinationId() })).map(state => [state.id,state]));
-      const syncState = await bookshelfStore.call('syncStatus',{ destination:bookshelfStore.destinationId() });
-      bookshelfStore.cloudPending = syncState.pending > 0 || !syncState.verified; updateStatus();
+      const availability = await this.model.availability();
+      updateStatus();
       if (current !== generation) return;
-      for (const row of rows) nextRevisions.set((row.document_id ? 'entries' : 'documents') + ':' + row.id,row.revision_id);
-      for (const row of rows) if (row.membership) nextRevisions.set((row.document_id ? 'playlist_items' : 'bookshelf_documents') + ':' + row.membership.id,row.membership.revision_id);
-      revisions = nextRevisions;
       const expanded = new Set([...this.elm.querySelectorAll('details[open][data-record]')].map(elm => elm.dataset.record));
       const selection = window.getSelection();
       if (!selection.isCollapsed && results.contains(selection.anchorNode)) { this.refreshNeeded = true; return; }
@@ -1195,11 +582,11 @@ class BookshelfView {
       if (grouped && collection.value) {
         const group = groups.find(g => g.id === collection.value);
         const edit = document.createElement('input'); edit.value = label(group); edit.setAttribute('aria-label', 'Collection name'); results.append(edit);
-        button(results, 'Rename collection', () => update(mode.value, { id: group.id, ...(mode.value === 'tags' ? { name: edit.value.trim() } : { metadata_json: JSON.stringify({ ...JSON.parse(group.metadata_json), name: edit.value.trim() }) }) }));
-        button(results, 'Delete collection', () => update(mode.value, { id: group.id, deleted_at: new Date().toISOString() }));
+        button(results, 'Rename collection', () => this.model.rename(mode.value,group,edit.value.trim()));
+        button(results, 'Delete collection', () => this.model.remove(mode.value,group));
         if (['bookshelves','playlists'].includes(mode.value)) button(results,'Keep collection offline',async () => {
-          const ids = await bookshelfStore.call('collectionDocuments',{ table:mode.value,id:collection.value });
-          await bookshelfStore.keepOffline(ids);
+          const ids = await this.model.collectionDocuments(mode.value,collection.value);
+          await this.model.keepOffline(ids);
         });
       }
       for (const row of rows) {
@@ -1218,11 +605,11 @@ class BookshelfView {
           : documentMetadata.originalFilename || '';
         openButton.textContent = metadata.title || metadata.displayName;
         openButton.className = 'Bookshelf__open';
-        openButton.disabled = !!row.unavailable || bookshelfStore.opening?.id === (row.document_id || row.id);
+        openButton.disabled = !!row.unavailable || this.model.opening?.id === (row.document_id || row.id);
         if (row.deleted_at) openButton.disabled = true;
         const openRecord = () => run(async () => {
           if (!await checkUnsaved()) return;
-          await bookshelfStore.openDocument(row.document_id || row.id, row.anchor_json && JSON.parse(row.anchor_json));
+          await this.model.openDocument(row.document_id || row.id, row.anchor_json && JSON.parse(row.anchor_json));
           panel.hide();
         });
         const recordKey = (row.document_id ? 'entries:' : 'documents:') + row.id;
@@ -1241,30 +628,30 @@ class BookshelfView {
         const local = availability.get(row.document_id || row.id);
         if (local) {
           const id = row.document_id || row.id;
-          const transfer = bookshelfStore.transfers.jobs.get(bookshelfStore.transferKey(id));
+          const transfer = this.model.downloadState(id);
           const state = document.createElement('div');
           state.setAttribute('aria-label','Local file status');
-          state.textContent = [transfer ? transfer.state === 'running' ? 'Downloading' : 'Download queued' : local.present ? 'On this device' : local.remote ? 'Cloud only' : 'Not on this device',
+          state.textContent = [transfer.state ? transfer.state === 'running' ? 'Downloading' : 'Download queued' : local.present ? 'On this device' : local.remote ? 'Cloud only' : 'Not on this device',
             local.pinned && (local.present ? 'Kept offline' : 'Offline download requested'),
-            bookshelfStore.hasSyncDestination() ? local.remote ? local.pending ? 'Cloud changes pending' : 'File uploaded' : 'File upload pending' : '', bookshelfStore.fileErrors.get(row.document_id || row.id)].filter(Boolean).join(' · ');
+            this.model.hasSyncDestination() ? local.remote ? local.pending ? 'Cloud changes pending' : 'File uploaded' : 'File upload pending' : '', transfer.error].filter(Boolean).join(' · ');
           card.append(state);
           if (!local.present && !row.unavailable) {
             const download = document.createElement('button'); download.type = 'button'; download.className = 'Bookshelf__download';
-            download.textContent = transfer?.state === 'running' ? 'Downloading…' : transfer ? 'Download next' : bookshelfStore.fileErrors.has(id) ? 'Retry download' : 'Download to this device';
-            download.disabled = transfer?.state === 'running' || navigator.onLine === false || !bookshelfStore.hasSyncDestination();
-            download.onclick = () => run(async () => { await bookshelfStore.ensureFile(id,undefined,{priority:50,front:true}); });
+            download.textContent = transfer?.state === 'running' ? 'Downloading…' : transfer?.state ? 'Download next' : transfer.error ? 'Retry download' : 'Download to this device';
+            download.disabled = transfer?.state === 'running' || navigator.onLine === false || !this.model.hasSyncDestination();
+            download.onclick = () => run(async () => { await this.model.download(id); });
             downloadButton = download;
             card.append(download);
           }
         }
         if (mode.value === 'history') {
           const info = document.createElement('div'); info.textContent = row.deleted_at ? 'Deleted score' : row.replaced_by_id ? 'Previous version' : 'Current version'; card.append(info);
-          if (row.deleted_at || row.replaced_by_id) button(card, 'Use this version', () => bookshelfStore.call('useVersion', { id: row.id }));
+          if (row.deleted_at || row.replaced_by_id) button(card, 'Use this version', () => this.model.useVersion(row.id));
           if (row.deleted_at) continue;
         }
         if (row.unavailable) {
           const unavailable = document.createElement('div'); unavailable.textContent = 'This song or score was deleted.'; card.append(unavailable);
-          if (row.membership) button(card, 'Remove from collection', () => update('playlist_items', { id: row.membership.id, deleted_at: new Date().toISOString() }));
+          if (row.membership) button(card, 'Remove from collection', () => this.model.remove('playlist_items',row.membership));
           continue;
         }
         const isEntry = !!row.document_id;
@@ -1309,34 +696,30 @@ class BookshelfView {
         }
         const table = isEntry ? 'entries' : 'documents';
         const title = document.createElement('input'); title.value = label(row); title.setAttribute('aria-label', isEntry ? 'Song title' : 'Score name'); card.append(title);
-        button(card, 'Rename', () => update(table, { id: row.id, metadata_json: JSON.stringify({ ...metadata, [isEntry ? 'title' : 'displayName']: title.value, userEditedFields: [...new Set([...(metadata.userEditedFields || []), isEntry ? 'title' : 'displayName'])] }) }));
-        button(card, 'Delete', () => {
-          if (!isEntry && Score.activeScore?.libraryDocumentId === row.id) throw new Error('Close this score before deleting it');
-          return update(table, { id: row.id, deleted_at: new Date().toISOString() });
-        });
+        button(card, 'Rename', () => this.model.rename(table,row,title.value));
+        button(card, 'Delete', () => this.model.remove(table,row));
         const deleteButton = card.lastElementChild;
         recordSection('Tags and collections');
-        choose(card, 'tags', 'Add tag', tag_id => bookshelfStore.call('link', { table: isEntry ? 'entry_tags' : 'document_tags', values: { [isEntry ? 'entry_id' : 'document_id']: row.id, tag_id } }));
+        choose(card, 'tags', 'Add tag', tag_id => this.model.addTag(table,row.id,tag_id));
         const tagLinks = references[isEntry ? 'entry_tags' : 'document_tags'].filter(link => link[isEntry ? 'entry_id' : 'document_id'] === row.id);
         const tags = references.tags;
         for (const link of tagLinks) {
           const tag = tags.find(t => t.id === link.tag_id);
-          if (tag) button(card, 'Remove tag: ' + tag.name, () => update(isEntry ? 'entry_tags' : 'document_tags', { id: link.id, deleted_at: new Date().toISOString() }));
+          if (tag) button(card, 'Remove tag: ' + tag.name, () => this.model.remove(isEntry ? 'entry_tags' : 'document_tags',link));
         }
         if (isEntry) {
           const inherited = references.document_tags.filter(link => link.document_id === row.document_id)
             .map(link => tags.find(tag => tag.id === link.tag_id)?.name).filter(Boolean);
           if (inherited.length) { const info = document.createElement('div'); info.textContent = 'Tags from score: ' + inherited.join(', '); card.append(info); }
         }
-        choose(card, isEntry ? 'playlists' : 'bookshelves', isEntry ? 'Add to playlist' : 'Add to bookshelf', id => bookshelfStore.call('link', {
-          table: isEntry ? 'playlist_items' : 'bookshelf_documents', values: { [isEntry ? 'playlist_id' : 'bookshelf_id']: id, [isEntry ? 'entry_id' : 'document_id']: row.id, order_key: String(Date.now()) } }));
+        choose(card, isEntry ? 'playlists' : 'bookshelves', isEntry ? 'Add to playlist' : 'Add to bookshelf', id => this.model.addToCollection(table,row.id,id));
         if (row.membership) {
           const membershipTable = isEntry ? 'playlist_items' : 'bookshelf_documents';
-          button(card, 'Remove from collection', () => update(membershipTable, { id: row.membership.id, deleted_at: new Date().toISOString() }));
+          button(card, 'Remove from collection', () => this.model.remove(membershipTable,row.membership));
           const note = document.createElement('input'); note.placeholder = 'Item note'; note.value = JSON.parse(row.membership.metadata_json).note || ''; card.append(note);
-          button(card, 'Save note', () => update(membershipTable, { id: row.membership.id, metadata_json: JSON.stringify({ note: note.value }) }));
-          button(card, 'Move up', () => bookshelfStore.call('moveItem', { table: membershipTable, id: row.membership.id, direction: -1 }));
-          button(card, 'Move down', () => bookshelfStore.call('moveItem', { table: membershipTable, id: row.membership.id, direction: 1 }));
+          button(card, 'Save note', () => this.model.saveItemNote(membershipTable,row.membership,note.value));
+          button(card, 'Move up', () => this.model.moveItem(membershipTable,row.membership.id,-1));
+          button(card, 'Move down', () => this.model.moveItem(membershipTable,row.membership.id,1));
         }
         if (isEntry) {
           card = controls.firstElementChild;
@@ -1344,30 +727,19 @@ class BookshelfView {
           const aliases = document.createElement('input'); aliases.value = (metadata.aliases || []).join('; '); aliases.setAttribute('aria-label', 'Aliases');
           const page = document.createElement('input'); page.type = 'number'; page.min = '1'; page.value = JSON.parse(row.anchor_json).pageIndex + 1; page.setAttribute('aria-label', 'Start page');
           card.append(composer, aliases, page);
-          button(card, 'Save song details', () => {
-            const pageIndex = Number(page.value) - 1;
-            if (!Number.isInteger(pageIndex) || pageIndex < 0) throw new Error('Enter a valid start page');
-            return update('entries', { id: row.id, anchor_json: JSON.stringify({ ...JSON.parse(row.anchor_json), pageIndex }),
-              metadata_json: JSON.stringify({ ...metadata, composer: composer.value, aliases: aliases.value.split(';').map(s => s.trim()).filter(Boolean),
-                userEditedFields: [...new Set([...(metadata.userEditedFields || []), 'composer', 'aliases', 'anchor'])] }) });
-          });
+          button(card, 'Save song details', () => this.model.saveSong(row,{composer:composer.value,aliases:aliases.value,pageIndex:Number(page.value) - 1}));
         } else {
           recordSection('Offline storage');
-          if (local?.pinned) button(card,'Stop keeping offline',() => bookshelfStore.call('pinFile',{ id:row.id,pinned:false }));
-          else button(card,'Keep offline',() => bookshelfStore.keepOffline([row.id]));
-          if (local?.present) button(card,'Release download',() => bookshelfStore.releaseDownload(row.id)).disabled = !!local.pinned;
+          if (local?.pinned) button(card,'Stop keeping offline',() => this.model.pinFile(row.id,false));
+          else button(card,'Keep offline',() => this.model.keepOffline([row.id]));
+          if (local?.present) button(card,'Release download',() => this.model.releaseDownload(row.id)).disabled = !!local.pinned;
           recordSection('Songs');
-          button(card, 'Edit songs', () => bookshelfStore.editSongs(row.id));
-          button(card, 'Rebuild song index', () => bookshelfStore.reindex(row.id));
+          button(card, 'Edit songs', () => this.model.editSongs(row.id));
+          button(card, 'Rebuild song index', () => this.model.reindex(row.id));
           const songTitle = document.createElement('input'); songTitle.placeholder = 'New song title'; songTitle.setAttribute('aria-label', 'New song title');
           const startPage = document.createElement('input'); startPage.type = 'number'; startPage.min = '1'; startPage.value = '1'; startPage.setAttribute('aria-label', 'New song start page');
           card.append(songTitle, startPage);
-          button(card, 'Add song', () => {
-            const pageIndex = Number(startPage.value) - 1;
-            if (!songTitle.value.trim() || !Number.isInteger(pageIndex) || pageIndex < 0) throw new Error('Enter a title and valid start page');
-            return update('entries', { id: crypto.randomUUID(), document_id: row.id, anchor_json: JSON.stringify({ type: /\.pdf$/i.test(metadata.originalFilename) ? 'pdf' : 'music', pageIndex }),
-              metadata_json: JSON.stringify({ title: songTitle.value.trim(), source: { type: 'manual' }, userEditedFields: ['title', 'anchor'] }) });
-          });
+          button(card, 'Add song', () => this.model.addSong(row,songTitle.value,Number(startPage.value) - 1));
           recordSection('Replace file');
           const replacement = document.createElement('input'); replacement.type = 'file'; replacement.accept = input.accept; replacement.setAttribute('aria-label', 'Replace score file');
           replacement.onchange = () => run(async () => {
@@ -1375,7 +747,7 @@ class BookshelfView {
             try {
               if (!await checkUnsaved()) return;
               replacement.disabled = true;
-              const imported = await bookshelfStore.importReviewed(replacement.files[0], { replacesId: row.id }); await this.refresh();
+              const imported = await this.model.importReviewed(replacement.files[0], { replacesId: row.id }); await this.refresh();
               if (imported?.alreadyImported) status.textContent = 'Score already imported; replacement skipped. Previous or deleted scores remain in history.';
             } finally { replacement.value = ''; replacement.disabled = false; }
           });
@@ -1399,7 +771,7 @@ class BookshelfView {
       let imported = 0, skipped = 0, cancelled = 0;
       try { for (const file of input.files) {
         status.textContent = 'Importing ' + file.name;
-        const result = await bookshelfStore.importReviewed(file,{originalLocation:{source:Score.sources.local,path:null,name:file.name}});
+        const result = await this.model.importReviewed(file,{originalLocation:{source:Score.sources.local,path:null,name:file.name}});
         if (!result) cancelled++;
         else if (result.alreadyImported) skipped++;
         else imported++;
@@ -1415,7 +787,7 @@ class BookshelfView {
     collection.onchange = () => this.refresh();
     create.onclick = () => run(async () => {
       const name = createName.value.trim(); if (!name) return;
-      await update(mode.value, { id: crypto.randomUUID(), ...(mode.value === 'tags' ? { name } : { metadata_json: JSON.stringify({ name }) }) });
+      await this.model.createCollection(mode.value,name);
       createName.value = ''; await this.refresh();
     });
     const updateCurrent = () => { importCurrent.disabled = !window._score_; };
@@ -1428,7 +800,7 @@ class BookshelfView {
         const name = _score_.saveName;
         const originalLocation = _score_.libraryDocumentId ? null : {source:_score_.source || Score.sources.local,path:_score_.source === Score.sources.local ? null : _score_.path ?? null,name:_score_.name || name};
         const bytes = await _score_.toFile();
-        const imported = await bookshelfStore.importReviewed(new File([bytes], name),{originalLocation});
+        const imported = await this.model.importReviewed(new File([bytes], name),{originalLocation});
         await this.refresh();
         if (imported?.alreadyImported) status.textContent = 'Score already imported; skipped. Previous or deleted scores remain in history.';
       } finally { importCurrent.disabled = false; }
@@ -1481,15 +853,15 @@ class BookshelfView {
     const transferProgress = element('div','Bookshelf__transfer-progress'); transferProgress.setAttribute('aria-label','Library transfer progress');
     const transferText = element('div'); transferText.setAttribute('role','status');
     const progress = document.createElement('progress'); progress.setAttribute('aria-label','File transfer progress');
-    const stop = element('button','','Stop remaining downloads'); stop.type = 'button'; stop.onclick = () => bookshelfStore.cancelFullSync();
+    const stop = element('button','','Stop remaining downloads'); stop.type = 'button'; stop.onclick = () => this.model.cancelFullSync();
     transferProgress.append(transferText,progress,stop);
     const updateProgress = () => {
-      const queue = bookshelfStore.transfers, full = bookshelfStore.fullSyncState;
+      const queue = this.model.transferState, full = this.model.fullSyncState;
       transferProgress.hidden = !queue.size && !full;
       const current = queue.active ? (queue.active.direction === 'upload' ? 'Uploading ' : 'Downloading ') + queue.active.label : '';
-      if (bookshelfStore.fullSyncRunning && full.phase === 'sync') {
+      if (this.model.fullSyncRunning && full.phase === 'sync') {
         transferText.textContent = 'Syncing library information and files… ' + current; progress.removeAttribute('value');
-      } else if (full && (bookshelfStore.fullSyncRunning || !queue.size)) {
+      } else if (full && (this.model.fullSyncRunning || !queue.size)) {
         progress.max = Math.max(1,full.total); progress.value = full.completed;
         transferText.textContent = `${full.phase === 'done' ? 'Complete' : full.phase === 'cancelled' ? 'Stopped' : full.phase === 'failed' ? 'Some transfers failed' : 'Downloading scores'}: ${full.completed} / ${full.total} files` + (full.failed ? ` · ${full.failed} failed` : '') + (full.error ? ' · ' + full.error : '') + (current ? ' · ' + current : '');
         if (full.phase === 'done' && !full.total) { progress.value = progress.max; transferText.textContent = 'All current library scores are on this device.'; }
@@ -1497,9 +869,9 @@ class BookshelfView {
         progress.max = queue.completed + queue.failed + queue.size; progress.value = queue.completed;
         transferText.textContent = `${queue.completed} / ${progress.max} files · ${Math.max(0,queue.size - (queue.active ? 1 : 0))} waiting` + (current ? ' · ' + current : '');
       }
-      stop.hidden = !bookshelfStore.fullSyncRunning; stop.disabled = !!bookshelfStore.fullSyncCancelled;
+      stop.hidden = !this.model.fullSyncRunning; stop.disabled = !!this.model.fullSyncCancelled;
     };
-    this.panel.listeners.push(listen(bookshelfStore,'statuschange',updateProgress)); updateProgress();
+    this.panel.listeners.push(listen(this.model,'statuschange',updateProgress)); updateProgress();
     this.sync.className = 'Bookshelf__sync'; this.sync.setAttribute('aria-label','Sync library now'); this.sync.textContent = '↻ Sync';
     footer.append(saveState,this.sync,transferProgress);
     this.footer = footer; this.resizeObserver.observe(footer);
@@ -1527,10 +899,9 @@ class BookshelfView {
         const location = await picker.show(); this.cloudFolderPicker = null;
         if (!location || this.panel.closing) return;
         this.status.textContent = 'Downloading ' + location.name;
-        const result = await FileSrc.get(location.source).getFile(location.path,location.name);
+        const file = await this.model.readOriginalFile(location);
         if (this.panel.closing) return;
-        const file = new File([result.data],location.name);
-        const imported = await bookshelfStore.importReviewed(file,{originalLocation:location});
+        const imported = await this.model.importReviewed(file,{originalLocation:location});
         await this.refresh();
         this.status.textContent = imported ? imported.alreadyImported ? 'Score already imported; original file location recorded.' : 'Imported ' + location.name : 'Import cancelled.';
       } catch (error) { this.status.textContent = error.message; }

@@ -75,9 +75,6 @@ async function exchangeLibraryChanges(store, transport) {
 class LibraryAutoSync {
   constructor(store, { delay = 3000, interval = 30000 } = {}) {
     this.store = store; this.delay = delay; this.interval = interval; this.enabled = true;
-    window.addEventListener('online',() => this.request(0));
-    window.addEventListener('offline',() => store.notifyStatus());
-    document.addEventListener('visibilitychange',() => { if (!document.hidden) this.request(0); });
   }
   setEnabled(enabled) {
     this.enabled = !!enabled; clearTimeout(this.timer); this.timer = null;
@@ -90,7 +87,7 @@ class LibraryAutoSync {
   }
   async run() {
     if (!this.enabled || this.running || !this.store.hasSyncDestination()) return;
-    if (document.hidden || navigator.onLine === false || this.store.storageDeleted || this.store.deletingStorage || this.store.fullSyncRunning || this.store.reviewPending || this.store.syncPending || this.store.cloudConnecting) { this.request(this.interval); return; }
+    if (this.store.inBackground || navigator.onLine === false || this.store.operationBlock('sync') || this.store.fullSyncRunning) { this.request(this.interval); return; }
     this.running = true; this.again = false;
     try { await this.store.syncAutomatically(); }
     catch { /* Store exposes a persistent, non-modal sync error. */ }

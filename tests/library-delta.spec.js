@@ -297,8 +297,8 @@ test('cloud provider publishes readable score files before immutable JSON batche
     return providerCloud.calls.filter(call => call.kind === 'publish');
   });
   const scores = result.filter(item => item.name !== 'library-format.json');
-  expect(scores[0]).toMatchObject({ path:'/My library/rostrum-library-v2/scores' }); expect(scores[0].name).toContain('__Readable name.pdf');
-  expect(scores[1].path).toMatch(/^\/My library\/rostrum-library-v2\/changes\//); expect(scores[1].name).toMatch(/\.json$/);
+  expect(scores[0]).toMatchObject({ path:'/My library/rostrum-library-v3/scores' }); expect(scores[0].name).toMatch(/^[a-f0-9]{64}$/);
+  expect(scores[1].path).toMatch(/^\/My library\/rostrum-library-v3\/changes\//); expect(scores[1].name).toMatch(/\.json$/);
 });
 
 test('overlapping silent transfers restore foreground authentication after the last transfer', async ({ page }) => {
@@ -366,4 +366,85 @@ test('standalone file URL sync downloads on demand and cached scores reopen afte
   await page.reload(); await page.waitForFunction(() => !!window._bookshelf_ && !!window._menu_);
   expect(await page.evaluate(async id => (await _bookshelf_.openDocument(id)).pgs.length,id)).toBe(1);
   await context.setOffline(false);
+});
+
+
+test('independent imports and identical shelf additions converge across devices',async ({page}) => {
+  await installDeltaCloud(page);
+  const result = await page.evaluate(async () => {
+    const pdf = await PDFLib.PDFDocument.create(); pdf.setTitle('Same song'); pdf.addPage([300,400]);
+    const bytes = await pdf.save(), file = () => new File([bytes],'same.pdf');
+    const a = {kind:'indexeddb',name:'identity-a'}, b = {kind:'indexeddb',name:'identity-b'};
+    await _bookshelf_.configure(a);
+    const docA = await _bookshelf_.import(file(),{originalLocation:{source:'pCloud',path:'/A',name:'same.pdf'}});
+    const songA = (await _bookshelf_.records('entries'))[0];
+    const shelf = await _bookshelf_.createCollection('bookshelves','Shelf');
+    await _bookshelf_.sync(deltaCloud.transport);
+    await _bookshelf_.configure(b);
+    const docB = await _bookshelf_.import(file(),{originalLocation:{source:'pCloud',path:'/B',name:'same.pdf'}});
+    const songB = (await _bookshelf_.records('entries'))[0];
+    await _bookshelf_.sync(deltaCloud.transport);
+    await _bookshelf_.addToCollection('documents',docB.id,shelf.id);
+    await _bookshelf_.configure(a);
+    await _bookshelf_.addToCollection('documents',docA.id,shelf.id);
+    await _bookshelf_.sync(deltaCloud.transport);
+    await _bookshelf_.configure(b); await _bookshelf_.sync(deltaCloud.transport);
+    const links = await _bookshelf_.records('bookshelf_documents');
+    const conflicts = await _bookshelf_.conflicts();
+    await _bookshelf_.addSong(docB,'Manual one',0); await _bookshelf_.addSong(docB,'Manual two',0);
+    return {sameDocument:docA.id === docB.id,sameSong:songA.id === songB.id,id:docA.id,
+      origins:JSON.parse((await _bookshelf_.records('documents'))[0].metadata_json).originalLocations.length,
+      links:links.length,conflicts:conflicts.length,songs:(await _bookshelf_.records('entries')).length};
+  });
+  expect(result).toMatchObject({sameDocument:true,sameSong:true,links:1,conflicts:0,songs:3,origins:2});
+  expect(result.id).toMatch(/^[a-f0-9]{64}$/);
+});
+
+
+test('resolving grouped equal edits acknowledges every branch and stays resolved after sync',async ({page}) => {
+ await installDeltaCloud(page);
+ const result = await page.evaluate(async () => {
+  const a = {kind:'indexeddb',name:'grouped-conflict-a'}, b = {kind:'indexeddb',name:'grouped-conflict-b'};
+  await _bookshelf_.configure(a);
+  const change = (id,name) => ({id,device_id:id,entity_type:'tags',entity_id:'tag',parent_revision_ids_json:'[]',
+   payload_json:JSON.stringify({id:'tag',revision_id:id,deleted_at:null,metadata_json:'{}',name}),
+   created_at:'2026-11-16T00:00:00Z',record_version:3});
+  await _bookshelf_.call('mergeDelta',{changes:[change('a','Same'),change('b','Same'),change('c','Different')]});
+  const conflict = (await _bookshelf_.conflicts())[0];
+  const expected = conflict.alternatives.map(c=>c.id);
+  await _bookshelf_.resolveConflict({table:'tags',id:'tag',revisionId:'c',expectedRevisionIds:expected});
+  const localConflicts = (await _bookshelf_.conflicts()).length;
+  await _bookshelf_.sync(deltaCloud.transport);
+  await _bookshelf_.configure(b);await _bookshelf_.sync(deltaCloud.transport);
+  await _bookshelf_.sync(deltaCloud.transport);
+  return {alternatives:expected.length,localConflicts,remoteConflicts:(await _bookshelf_.conflicts()).length,
+   name:(await _bookshelf_.records('tags'))[0].name};
+ });
+ expect(result).toEqual({alternatives:2,localConflicts:0,remoteConflicts:0,name:'Different'});
+});
+
+test('choosing a conflicting document name keeps all distinct origins across sync and reimport',async ({page}) => {
+ await installDeltaCloud(page);
+ const result = await page.evaluate(async () => {
+  const pdf = await PDFLib.PDFDocument.create();pdf.setTitle('Shared title');pdf.addPage([300,400]);
+  const bytes = await pdf.save();
+  const a = {kind:'indexeddb',name:'origin-conflict-a'}, b = {kind:'indexeddb',name:'origin-conflict-b'};
+  const originA = {source:'pCloud',path:'/A',name:'A.pdf'}, originB = {source:'pCloud',path:'/B',name:'B.pdf'};
+  await _bookshelf_.configure(a);
+  const doc = await _bookshelf_.import(new File([bytes],'A.pdf'),{originalLocation:originA});
+  await _bookshelf_.sync(deltaCloud.transport);
+  await _bookshelf_.configure(b);
+  await _bookshelf_.import(new File([bytes],'B.pdf'),{originalLocation:originB});
+  await _bookshelf_.sync(deltaCloud.transport);
+  const conflict = (await _bookshelf_.conflicts()).find(c=>c.table === 'documents');
+  const chosen = conflict.alternatives.find(c=>JSON.parse(JSON.parse(c.payload_json).metadata_json).displayName === 'B.pdf');
+  await _bookshelf_.resolveConflict({table:'documents',id:doc.id,revisionId:chosen.id,expectedRevisionIds:conflict.alternatives.map(c=>c.id)});
+  await _bookshelf_.sync(deltaCloud.transport);
+  await _bookshelf_.configure(a);await _bookshelf_.sync(deltaCloud.transport);
+  await _bookshelf_.import(new File([bytes],'A.pdf'),{originalLocation:originA});
+  const row = (await _bookshelf_.records('documents'))[0], metadata = JSON.parse(row.metadata_json);
+  return {name:metadata.displayName,origins:metadata.originalLocations,conflicts:(await _bookshelf_.conflicts()).length};
+ });
+ expect(result.name).toBe('B.pdf');expect(result.conflicts).toBe(0);
+ expect(result.origins).toEqual([{source:'pCloud',path:'/A',name:'A.pdf'},{source:'pCloud',path:'/B',name:'B.pdf'}]);
 });

@@ -99,7 +99,7 @@ test('sync buttons and exact file counts reflect pending work, with a separate s
  await expect(all).toBeEnabled();await expect(apply).toBeDisabled();await expect(counts).toContainText('Download pending: 1 files');
  await page.evaluate(()=>{
   const read=providerCloud.source.getFileSrc;
-  providerCloud.source.getFileSrc=async function(path,name){if(name.endsWith('Pending.pdf')&&!window.pausedProvider){window.pausedProvider=true;await new Promise(r=>window.resumeProvider=r);}return read.call(this,path,name);};
+  providerCloud.source.getFileSrc=async function(path,name){if(/^[a-f0-9]{64}$/.test(name)&&!window.pausedProvider){window.pausedProvider=true;await new Promise(r=>window.resumeProvider=r);}return read.call(this,path,name);};
  });
  await page.setViewportSize({width:390,height:844});
  await all.click();
