@@ -10,7 +10,7 @@ class BookshelfStore extends EventTarget {
   constructor(services) {
     super(); this.services = services; this.scores = services.scores; this.pending = new Map(); this.sequence = 0; this.localSaving = 0; this.cloudFacts = null; this.downloads = new Map(); this.releases = new Set(); this.fileErrors = new Map();
     this.transfers = new LibraryTransferQueue();
-    this.libraryGeneration = 0;
+    this.libraryGeneration = 0; this.pendingUploads = new Set();
     this.transfers.addEventListener('change',() => this.notifyStatus());
     this.ready = Promise.resolve().then(() => this.initializeSync()).catch(error => { this.syncError = error; this.notifyStatus(); });
   }
@@ -143,6 +143,7 @@ class BookshelfStore extends EventTarget {
     const documentId = previous?.libraryDocumentId;
     const index = Math.max(0, Number(previous?.numbers?.pn || 1) - 1);
     const anchor = previous && { type: previous.music ? 'music' : 'pdf', pageIndex: previous.pgs[index]?.mozPn ? previous.pgs[index].mozPn - 1 : index };
+    this.transfers.beginBatch();
     this.syncPending = true; this.manualSync = !automatic; this.transport = transport; this.syncError = null; this.notifyStatus();
     try {
       if (previous?.libraryDocumentId) await this.flush(previous);
@@ -156,7 +157,8 @@ class BookshelfStore extends EventTarget {
         try { await this.openDocument(documentId, anchor, true); }
         catch (error) { this.warn('Review the synced library before reopening this score: ' + error.message); }
       }
-      this.syncPending = false; this.manualSync = false;
+      this.transfers.cancelled += this.pendingUploads.size; this.pendingUploads.clear();
+      this.syncPending = false; this.manualSync = false; this.transfers.endBatch();
       this.notifyStatus();
       if (!automatic) this.autoSync?.request(this.autoSync.interval);
     }
@@ -198,9 +200,16 @@ class BookshelfStore extends EventTarget {
     }
   }
   transferKey(id,direction = 'download',transport = this.transport) { return direction + ':' + (transport?.id || this.destinationId()) + ':' + id; }
+  planUploads(documents) {
+    this.pendingUploads = new Set(documents.map(doc => doc.id)); this.notifyStatus();
+  }
   uploadFile(document,file,transport) {
-    return this.transfers.enqueue(this.transferKey(document.id,'upload',transport),() => transport.writeScore(document,file),
-      {label:JSON.parse(document.metadata_json).originalFilename,direction:'upload'});
+    this.pendingUploads.delete(document.id);
+    return this.transfers.enqueue(this.transferKey(document.id,'upload',transport),async () => {
+      if (!file) file = (await this.call('fileInfo',{id:document.id,verify:true})).file;
+      if (!file) throw new Error('A score is missing from both this device and the cloud: ' + document.storage_path);
+      return transport.writeScore(document,file);
+    },{label:JSON.parse(document.metadata_json).originalFilename,direction:'upload'});
   }
   async refreshSyncNeeds(transport = this.transport) {
     if (!transport) return;
@@ -264,7 +273,7 @@ class BookshelfStore extends EventTarget {
   async keepOffline(ids) {
     for (const id of ids) await this.call('pinFile',{ id,pinned:true });
     let failed;
-    for (const id of ids) try { await this.ensureFile(id); } catch (error) { failed ||= error; }
+    await Promise.all(ids.map(async id => { try { await this.ensureFile(id); } catch (error) { failed ||= error; } }));
     this.autoSync?.request(); if (failed) throw failed;
   }
   async syncAllScores(source,path) {
@@ -295,10 +304,10 @@ class BookshelfStore extends EventTarget {
     const states = await this.call('availability',{ destination:transport.id });
     const docs = (await this.call('syncData')).documents;
     let downloadFailures = 0;
-    for (const state of states) if (state.pinned && !state.present && docs.some(doc => doc.id === state.id && !doc.deleted_at)) {
+    await Promise.all(states.filter(state => state.pinned && !state.present && docs.some(doc => doc.id === state.id && !doc.deleted_at)).map(async state => {
       try { await this.ensureFile(state.id,transport); }
-      catch { downloadFailures++; } // Keep the request and expose its device error; metadata is already synced.
-    }
+      catch { downloadFailures++; } // Metadata remains synced; the file error stays visible.
+    }));
     return downloadFailures;
   }
   async releaseDownload(id) {
@@ -510,9 +519,13 @@ class BookshelfStore extends EventTarget {
   async savedCloudSelection() { await this.ready; return this.cloudSelection; }
   get transferState() {
     const queue = this.transfers;
-    return {size:queue.size,completed:queue.completed,failed:queue.failed,
+    const waiting = {upload:this.pendingUploads.size,download:0};
+    for (const job of queue.jobs.values()) if (job.state === 'queued') waiting[job.direction]++;
+    return {size:queue.size,completed:queue.completed,failed:queue.failed,cancelled:queue.cancelled,
+      total:queue.completed + queue.failed + queue.cancelled + queue.size + this.pendingUploads.size,waiting,
       active:queue.active && {direction:queue.active.direction,label:queue.active.label}};
   }
+
   downloadState(id) {
     const job = this.transfers.jobs.get(this.transferKey(id));
     return {state:job?.state,error:this.fileErrors.get(id)};

@@ -859,20 +859,29 @@ class BookshelfView {
     const transferText = element('div'); transferText.setAttribute('role','status');
     const progress = document.createElement('progress'); progress.setAttribute('aria-label','File transfer progress');
     const stop = element('button','','Stop remaining downloads'); stop.type = 'button'; stop.onclick = () => this.model.cancelFullSync();
-    transferProgress.append(transferText,progress,stop);
+    const waitingText = element('div'); waitingText.setAttribute('aria-label','Pending file transfers');
+    transferProgress.append(transferText,progress,waitingText,stop);
     const updateProgress = () => {
       const queue = this.model.transferState, full = this.model.fullSyncState;
-      transferProgress.hidden = !queue.size && !full;
-      const current = queue.active ? (queue.active.direction === 'upload' ? 'Uploading ' : 'Downloading ') + queue.active.label : '';
-      if (this.model.fullSyncRunning && full.phase === 'sync') {
-        transferText.textContent = 'Syncing library information and files… ' + current; progress.removeAttribute('value');
-      } else if (full && (this.model.fullSyncRunning || !queue.size)) {
+      const checking = this.model.syncPending || this.model.cloudConnecting || this.model.checkingCloud || this.model.autoSync?.running;
+      transferProgress.hidden = !queue.total && !full && !checking;
+      waitingText.textContent = `Upload waiting: ${queue.waiting.upload} files · Download waiting: ${queue.waiting.download} files`;
+      const current = queue.active ? (queue.active.direction === 'upload' ? 'Uploading: ' : 'Downloading: ') + queue.active.label : '';
+      if (queue.active || queue.size || queue.waiting.upload) {
+        progress.max = Math.max(1,queue.total); progress.value = queue.completed;
+        transferText.textContent = `${current || 'Preparing file transfers'} · ${queue.completed} / ${queue.total} files completed` +
+          (queue.failed ? ` · ${queue.failed} failed` : '') + (queue.cancelled ? ` · ${queue.cancelled} stopped` : '');
+      } else if (checking) {
+        transferText.textContent = this.model.syncError ? 'Sync failed: ' + this.model.syncError.message : 'Checking and syncing library information…';
+        progress.removeAttribute('value');
+      } else if (full && (this.model.fullSyncRunning || !queue.total)) {
         progress.max = Math.max(1,full.total); progress.value = full.completed;
-        transferText.textContent = `${full.phase === 'done' ? 'Complete' : full.phase === 'cancelled' ? 'Stopped' : full.phase === 'failed' ? 'Some transfers failed' : 'Downloading scores'}: ${full.completed} / ${full.total} files` + (full.failed ? ` · ${full.failed} failed` : '') + (full.error ? ' · ' + full.error : '') + (current ? ' · ' + current : '');
+        transferText.textContent = `${full.phase === 'done' ? 'Complete' : full.phase === 'cancelled' ? 'Stopped' : full.phase === 'failed' ? 'Some transfers failed' : 'Downloading scores'}: ${full.completed} / ${full.total} files` + (full.failed ? ` · ${full.failed} failed` : '') + (full.error ? ' · ' + full.error : '');
         if (full.phase === 'done' && !full.total) { progress.value = progress.max; transferText.textContent = 'All current library scores are on this device.'; }
       } else {
-        progress.max = queue.completed + queue.failed + queue.size; progress.value = queue.completed;
-        transferText.textContent = `${queue.completed} / ${progress.max} files · ${Math.max(0,queue.size - (queue.active ? 1 : 0))} waiting` + (current ? ' · ' + current : '');
+        progress.max = Math.max(1,queue.total); progress.value = queue.completed;
+        transferText.textContent = `${queue.failed ? 'Some transfers failed' : queue.cancelled ? 'Stopped' : 'Transfer complete'}: ${queue.completed} / ${queue.total} files completed` +
+          (queue.failed ? ` · ${queue.failed} failed` : '') + (queue.cancelled ? ` · ${queue.cancelled} stopped` : '');
       }
       stop.hidden = !this.model.fullSyncRunning; stop.disabled = !!this.model.fullSyncCancelled;
     };

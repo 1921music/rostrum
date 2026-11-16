@@ -42,13 +42,16 @@ async function exchangeLibraryChanges(store, transport) {
   const required = new Set(pending.filter(change => change.entity_type === 'documents').map(change => change.entity_id));
   // Repair externally removed score files when a local copy is available.
   for (const doc of snapshot.documents) if (!paths.has(doc.storage_path)) required.add(doc.id);
+  store.planUploads?.([...required].map(id => documents.get(id)).filter(doc => doc && !paths.has(doc.storage_path)));
   for (const id of required) {
     const doc = documents.get(id); if (!doc) throw new Error('Missing score identity');
     if (paths.has(doc.storage_path)) continue;
-    const info = await store.call('fileInfo',{ id,verify:true });
-    if (!info.file) throw new Error('A score is missing from both this device and the cloud: ' + doc.storage_path);
-    if (store.uploadFile) await store.uploadFile(doc,info.file,transport);
-    else await transport.writeScore(doc,info.file);
+    if (store.uploadFile) await store.uploadFile(doc,null,transport);
+    else {
+      const info = await store.call('fileInfo',{ id,verify:true });
+      if (!info.file) throw new Error('A score is missing from both this device and the cloud: ' + doc.storage_path);
+      await transport.writeScore(doc,info.file);
+    }
     paths.add(doc.storage_path); uploadedFiles++;
   }
   const batches = []; let group = [], size = 0;

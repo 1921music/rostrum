@@ -157,3 +157,53 @@ test('every category shows local availability and can download the shared score 
  await selectLibraryView(page,'documents');await expect(page.getByLabel('Local file status',{exact:true})).toContainText('On this device');
  expect(await page.evaluate(()=>deltaCloud.calls.filter(c=>c.kind==='readScore').length)).toBe(1);
 });
+
+
+test('automatic upload reports the full file plan, failure and successful retry',async ({page}) => {
+ await seed(page,3);
+ await page.evaluate(async()=>{
+  await _bookshelf_.configure({kind:'indexeddb',name:'transfer-a'});
+  deltaCloud.scores.clear();
+  const write=deltaCloud.transport.writeScore;
+  deltaCloud.transport.writeScore=async(doc,file)=>{
+   await new Promise(resolve=>window.resumeUpload=resolve);
+   throw new Error('Expected upload failure');
+  };
+  window.retryWrite=write;
+  window.uploadJob=_bookshelf_.syncAutomatically().catch(()=>{});
+ });
+ await expect.poll(()=>page.evaluate(()=>!!window.resumeUpload)).toBe(true);
+ const panel=page.getByLabel('Library transfer progress',{exact:true});
+ await expect(panel).toContainText('Uploading: Score 0.pdf');
+ await expect(panel).toContainText('0 / 3 files completed');
+ await expect(page.getByLabel('Pending file transfers')).toHaveText('Upload waiting: 2 files · Download waiting: 0 files');
+ await expect(page.getByLabel('File transfer progress',{exact:true})).toHaveAttribute('max','3');
+ await expect(page.getByLabel('Search songs',{exact:true})).toBeEnabled();
+ await page.evaluate(async()=>{resumeUpload();await uploadJob;});
+ await expect(panel).toContainText('1 failed');
+ await expect(page.getByLabel('Pending file transfers')).toHaveText('Upload waiting: 0 files · Download waiting: 0 files');
+ await page.evaluate(async()=>{deltaCloud.transport.writeScore=retryWrite;await _bookshelf_.syncAutomatically();});
+ await expect(panel).toContainText('Transfer complete: 3 / 3 files completed');
+ await expect(panel).not.toContainText('failed');
+});
+
+test('download progress counts requests once and excludes cloud-only files not requested',async ({page}) => {
+ await page.setViewportSize({width:390,height:844});
+ await seed(page,3);
+ await page.evaluate(()=>{
+  const read=deltaCloud.transport.readScore;
+  deltaCloud.transport.readScore=async doc=>{
+   if(!window.pausedDownload){window.pausedDownload=true;await new Promise(resolve=>window.resumeRequestedDownload=resolve);}
+   return read.call(deltaCloud.transport,doc);
+  };
+  window.requestedDownloads=Promise.all([_bookshelf_.download(ids[0]),_bookshelf_.download(ids[1]),_bookshelf_.download(ids[1])]);
+ });
+ await expect.poll(()=>page.evaluate(()=>_bookshelf_.transferState.size)).toBe(2);
+ const panel=page.getByLabel('Library transfer progress',{exact:true});
+ await expect(panel).toContainText('Downloading: Score 0.pdf');
+ await expect(panel).toContainText('0 / 2 files completed');
+ await expect(page.getByLabel('Pending file transfers')).toHaveText('Upload waiting: 0 files · Download waiting: 1 files');
+ await page.evaluate(async()=>{resumeRequestedDownload();await requestedDownloads;});
+ await expect(panel).toContainText('Transfer complete: 2 / 2 files completed');
+ expect(await page.evaluate(()=>deltaCloud.calls.filter(c=>c.kind==='readScore').length)).toBe(2);
+});
