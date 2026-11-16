@@ -2,9 +2,8 @@ import { openLibraryStorage } from './bookshelf-storage.js';
 import { openConfiguredLibraryStorage } from './bookshelf-storage-policy.js';
 import { unzipSync } from 'fflate';
 import { exportLibraryPackage, readLibraryPackage, hashBytes, scorePath } from './bookshelf-transfer.js';
-import { LIBRARY_SCHEMA_VERSION, LIBRARY_RECORD_VERSION, createScorePath, decodeLibraryRecord } from './bookshelf-format.js';
-import { migrateLibrarySchema, migrateLibraryRecords, migrateLibraryStorage, versionedLibraryFiles } from './bookshelf-migrations.js';
-import { createLibrarySchemaV2, libraryTables } from './bookshelf-schema.js';
+import { LIBRARY_SCHEMA_VERSION, LIBRARY_RECORD_VERSION, createScorePath, scoreStoragePath, checkRecordVersion } from './bookshelf-format.js';
+import { initializeLibrarySchema, libraryTables } from './bookshelf-schema.js';
 
 // All database and file mutations run serially in this worker. A second tab
 // must fail explicitly rather than silently switching to temporary storage.
@@ -80,7 +79,7 @@ function save(table, values, parents = null) {
   return row;
 }
 let deviceId;
-const decodeChange = change => decodeLibraryRecord(change.entity_type,JSON.parse(change.payload_json),change.record_version);
+const decodeChange = change => { checkRecordVersion(change.record_version); return JSON.parse(change.payload_json); };
 function validateTransfer(manifest) {
   const schemas = Object.fromEntries(Object.keys(tables).map(table => [table, sql(`PRAGMA table_info(${table})`)]));
   const normalize = (table, row) => {
@@ -190,10 +189,12 @@ async function open() {
   if (!db) ({ database: db, files:rawFiles } = await openLibraryStorage(() => openConfiguredLibraryStorage(storageOptions)));
   sql('PRAGMA foreign_keys=ON');
   sql('PRAGMA trusted_schema=OFF');
-  await migrateLibrarySchema(db,{create:() => createLibrarySchemaV2(db)});
-  await migrateLibraryRecords(db,Object.keys(tables));
-  const storageVersion = await migrateLibraryStorage(db,rawFiles);
-  files = versionedLibraryFiles(rawFiles,storageVersion);
+  await initializeLibrarySchema(db);
+  files = {
+    read:path => rawFiles.read(scoreStoragePath(path)),
+    write:(path,bytes) => rawFiles.write(scoreStoragePath(path),bytes),
+    remove:path => rawFiles.remove(scoreStoragePath(path)),
+  };
   deviceId = sql("SELECT value FROM local_state WHERE key='device'")[0]?.value || crypto.randomUUID();
   sql("INSERT OR IGNORE INTO local_state VALUES ('device', ?)", [deviceId]);
   initialized = true;
@@ -209,7 +210,7 @@ const withOriginalLocation = (metadata, location) => {
   return {...metadata,originalLocations:[...locations,clean]};
 };
 const actions = {
-  formatInfo() { return {schemaVersion:sql('PRAGMA user_version')[0].user_version,...sql('SELECT * FROM library_info WHERE id=1')[0],migrations:sql('SELECT * FROM library_migrations')}; },
+  formatInfo() { return {schemaVersion:sql('PRAGMA user_version')[0].user_version,...sql('SELECT * FROM library_info WHERE id=1')[0]}; },
   destroyStorage() {},
   rememberOriginalLocation({id,location}) {
     return transaction(() => {

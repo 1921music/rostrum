@@ -3,8 +3,8 @@
   "private": true,
   "version": "1.0.0",
   "scripts": {
-    "pretest": "node build_browser_fs.mjs && python build.py --font && node --test tests/unit/library-migrations.mjs",
-    "test:library-migrations": "node --test tests/unit/library-migrations.mjs",
+    "pretest": "node build_browser_fs.mjs && python build.py --font && node --test tests/unit/library-schema.mjs",
+    "test:library-schema": "node --test tests/unit/library-schema.mjs",
     "test": "playwright test",
     "test:headed": "playwright test --headed",
     "test:extension": "python build.py --extension && playwright test tests/extension-score.spec.js",

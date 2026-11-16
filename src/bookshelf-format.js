@@ -2,8 +2,7 @@
 export { LIBRARY_NAMESPACE, LIBRARY_APPLICATION_ID, LIBRARY_SCHEMA_VERSION, LIBRARY_STORAGE_VERSION,
   LIBRARY_RECORD_VERSION, LIBRARY_SYNC_VERSION, LIBRARY_BACKUP_VERSION, LibraryFormatError,
   libraryFormat, validateLibraryFormat, scorePath, createScorePath, scoreStoragePath,
-  storageLayouts, listStoredScores, isManagedScoreName, decodeLibraryRecord, recordUpgrades, hashLibraryBytes,
-  upgradeLibraryEnvelope, backupUpgrades, syncUpgrades };
+  listStoredScores, isManagedScoreName, checkRecordVersion, hashLibraryBytes, checkLibraryEnvelope };
 // -skip
 
 // This namespace is a permanent generation boundary, NOT a schema version.
@@ -11,7 +10,7 @@ export { LIBRARY_NAMESPACE, LIBRARY_APPLICATION_ID, LIBRARY_SCHEMA_VERSION, LIBR
 // the parent directory and cannot damage files or batches inside this namespace.
 const LIBRARY_NAMESPACE = 'rostrum-library-v2';
 const LIBRARY_APPLICATION_ID = 0x5253544d;
-const LIBRARY_SCHEMA_VERSION = 2;
+const LIBRARY_SCHEMA_VERSION = 3;
 const LIBRARY_STORAGE_VERSION = 1;
 const LIBRARY_RECORD_VERSION = 2;
 const LIBRARY_SYNC_VERSION = 2;
@@ -44,51 +43,20 @@ function createScorePath(id,name) {
   const stem = extension ? normalized.slice(0,-extension.length) : normalized;
   return scorePath(`scores/${id}__${([...stem].slice(0,100).join('').replace(/[ .]+$/,'') || 'score') + extension}`);
 }
-const storageLayouts = new Map([[1,{
-  resolve:path => scorePath(path),
-  async list({directory}) {
-    const dir = await directory('scores');
-    return dir ? Object.keys(dir.files).filter(isManagedScoreName).map(name => ({path:'scores/' + name,size:dir.files[name].size})) : [];
-  }
-}]]);
-function scoreStoragePath(path,version = LIBRARY_STORAGE_VERSION,layouts = storageLayouts) {
-  scorePath(path);
-  if (!layouts.has(version)) throw new LibraryFormatError('Unsupported score storage version. Update Rostrum before accessing these files.');
-  const layout = layouts.get(version);
-  const resolved = (typeof layout === 'function' ? layout : layout.resolve)(path);
-  if (typeof resolved !== 'string' || !resolved.startsWith('scores/') || resolved.split('/').some(part => !part || part === '.' || part === '..' || /[\\\x00]/.test(part))) throw new Error('Invalid physical score path');
-  return resolved;
+function scoreStoragePath(path,version = LIBRARY_STORAGE_VERSION) {
+  if (version !== LIBRARY_STORAGE_VERSION) throw new LibraryFormatError('Unsupported score storage version. Update Rostrum.');
+  return scorePath(path);
 }
 function isManagedScoreName(name) { return /^[0-9a-f-]{36}__[^/\\\x00]+$/i.test(name); }
-function listStoredScores(context,version = LIBRARY_STORAGE_VERSION) {
-  const layout = storageLayouts.get(version);
-  if (!layout?.list) throw new LibraryFormatError('Unsupported score listing format. Update Rostrum.');
-  return layout.list(context);
+async function listStoredScores({directory},version = LIBRARY_STORAGE_VERSION) {
+  if (version !== LIBRARY_STORAGE_VERSION) throw new LibraryFormatError('Unsupported score storage version. Update Rostrum.');
+  const dir = await directory('scores');
+  return dir ? Object.keys(dir.files).filter(isManagedScoreName).map(name => ({path:'scores/' + name,size:dir.files[name].size})) : [];
 }
-const backupUpgrades = new Map(),syncUpgrades = new Map();
-function upgradeLibraryEnvelope(value,kind,target,steps) {
-  if (!value || value.format !== kind || !Number.isSafeInteger(value.version) || value.version < 2 || value.version > target) throw new LibraryFormatError('Unsupported library package or sync version. Update Rostrum; pre-versioned data is not imported.');
-  if (value.version === target) return value;
-  let result = structuredClone(value);
-  while (result.version < target) {
-    const step = steps.get(result.version);
-    if (!step) throw new LibraryFormatError('Missing library format upgrade. Update Rostrum.');
-    const previous = result.version,next = step(result);
-    if (!next || next.version !== previous + 1 || next.format !== kind) throw new Error('Invalid library envelope upgrade.');
-    result = next;
-  }
-  return result;
+function checkLibraryEnvelope(value,kind,version) {
+  if (!value || value.format !== kind || value.version !== version) throw new LibraryFormatError('Unsupported library package or sync version. Update Rostrum; pre-versioned data is not imported.');
+  return value;
 }
-// Each future record-format step supplies a pure decoder. Raw change payloads
-// remain immutable and can still be validated/compared byte-for-byte.
-const recordUpgrades = new Map();
-function decodeLibraryRecord(table,payload,version,target = LIBRARY_RECORD_VERSION,upgrades = recordUpgrades) {
-  if (!Number.isSafeInteger(version) || version < 2 || version > target) throw new LibraryFormatError('Unsupported library record version. Update Rostrum.');
-  let row = structuredClone(payload);
-  while (version < target) {
-    const upgrade = upgrades.get(version);
-    if (!upgrade) throw new LibraryFormatError('Missing library record migration. Update Rostrum.');
-    row = upgrade(table,row); version++;
-  }
-  return row;
+function checkRecordVersion(version) {
+  if (version !== LIBRARY_RECORD_VERSION) throw new LibraryFormatError('Unsupported library record version. Update Rostrum.');
 }

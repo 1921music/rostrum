@@ -136,8 +136,8 @@ Replacing a file creates a new document and marks the previous document as
 replaced; old song/playlist references are retained. Rebuilding the song index
 preserves identified entries and manual edits/deletions.
 
-The versioned baseline and future migration procedure are documented in
-[Library format and migrations](doc/library-format-migrations.md). SQLite schema,
+The version information and future-change boundaries are documented in
+[Library format](doc/library-format.md). SQLite schema,
 shared record representation, score layout, sync and backup versions are separate.
 Pre-versioned libraries are left in place; new local/cloud libraries use the
 reserved `rostrum-library-v2` directory (default IndexedDB: `rostrum-bookshelf-v2`).

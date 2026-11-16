@@ -1,5 +1,5 @@
 import { Zip, ZipDeflate, ZipPassThrough, Unzip, UnzipInflate, strToU8 } from 'fflate';
-import { LIBRARY_BACKUP_VERSION, LIBRARY_SCHEMA_VERSION, LIBRARY_STORAGE_VERSION, LIBRARY_RECORD_VERSION, scorePath, hashLibraryBytes as hashBytes, LibraryFormatError, upgradeLibraryEnvelope, backupUpgrades } from './bookshelf-format.js';
+import { LIBRARY_BACKUP_VERSION, LIBRARY_SCHEMA_VERSION, LIBRARY_STORAGE_VERSION, LIBRARY_RECORD_VERSION, scorePath, hashLibraryBytes as hashBytes, LibraryFormatError, checkLibraryEnvelope } from './bookshelf-format.js';
 export { scorePath, hashBytes };
 
 export async function exportLibraryPackage({ db, files, tables }) {
@@ -74,8 +74,10 @@ export async function readLibraryPackage(input, tables) {
   } catch (error) { await reader.cancel().catch(() => {}); throw error; }
   finally { reader.releaseLock(); }
   if (!archive['library.json']) throw new Error('Invalid library package');
-  const manifest = upgradeLibraryEnvelope(JSON.parse(await archive['library.json'].text()),'rostrum-library',LIBRARY_BACKUP_VERSION,backupUpgrades);
-  if (manifest.format !== 'rostrum-library' || manifest.version !== LIBRARY_BACKUP_VERSION || manifest.schemaVersion !== LIBRARY_SCHEMA_VERSION || manifest.storageFormatVersion !== LIBRARY_STORAGE_VERSION || manifest.recordFormatVersion !== LIBRARY_RECORD_VERSION || !Array.isArray(manifest.changes)) throw new LibraryFormatError('Unsupported library package version. Update Rostrum; pre-versioned backups are not imported.');
+  const manifest = checkLibraryEnvelope(JSON.parse(await archive['library.json'].text()),'rostrum-library',LIBRARY_BACKUP_VERSION);
+  // Only portable records are imported, so an index/local-table schema change
+  // does not invalidate backups with the same record and storage formats.
+  if (manifest.storageFormatVersion !== LIBRARY_STORAGE_VERSION || manifest.recordFormatVersion !== LIBRARY_RECORD_VERSION || !Array.isArray(manifest.changes)) throw new LibraryFormatError('Unsupported library package version. Update Rostrum; pre-versioned backups are not imported.');
   if (!manifest.records || Object.keys(manifest.records).some(table => !Object.hasOwn(tables, table))) throw new Error('Unknown library record type');
   for (const table of Object.keys(tables)) if (!Array.isArray(manifest.records[table])) throw new Error('Incomplete library package');
   const paths = new Set();

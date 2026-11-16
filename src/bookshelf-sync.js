@@ -1,5 +1,5 @@
 // +skip
-import { LIBRARY_SYNC_VERSION, LIBRARY_RECORD_VERSION, upgradeLibraryEnvelope, syncUpgrades } from './bookshelf-format.js';
+import { LIBRARY_SYNC_VERSION, LIBRARY_RECORD_VERSION, checkLibraryEnvelope } from './bookshelf-format.js';
 export { exchangeLibraryChanges, LibraryAutoSync };
 // -skip
 
@@ -18,7 +18,7 @@ async function exchangeLibraryChanges(store, transport) {
     if (Object.hasOwn(cache,item.id)) { for (const id of cache[item.id]) remoteIds.add(id); continue; }
     const blob = await transport.readChanges(item.id);
     if (!(blob instanceof Blob) || blob.size > 64 * 1024 * 1024) throw new Error('Change batch exceeds the supported 64 MiB size');
-    const batch = upgradeLibraryEnvelope(JSON.parse(await blob.text()),'rostrum-library-changes',LIBRARY_SYNC_VERSION,syncUpgrades);
+    const batch = checkLibraryEnvelope(JSON.parse(await blob.text()),'rostrum-library-changes',LIBRARY_SYNC_VERSION);
     if (batch.format !== 'rostrum-library-changes' || batch.version !== LIBRARY_SYNC_VERSION || !Number.isSafeInteger(batch.recordFormatVersion) || batch.recordFormatVersion < 2 || batch.recordFormatVersion > LIBRARY_RECORD_VERSION || !Array.isArray(batch.changes)
       || item.id !== batch.deviceId + '/' + batch.batchId) throw new Error('Invalid change batch');
     const changeIds = [];
