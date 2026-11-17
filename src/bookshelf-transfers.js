@@ -10,6 +10,7 @@ class LibraryTransferQueue extends EventTarget {
   resetProgress() { this.completed = this.failed = this.cancelled = 0; }
   beginBatch() { if (!this.batches && !this.size) this.resetProgress(); this.batches++; this.changed(); }
   endBatch() { this.batches--; this.changed(); }
+  get waiting() { return [...this.jobs.values()].filter(job => job.state === 'queued').sort((a,b) => b.priority - a.priority || a.order - b.order); }
   get size() { return this.jobs.size; }
   changed() { this.dispatchEvent(new Event('change')); }
   enqueue(key, run, {priority = 0,front = false,label = '',direction = 'download',group = ''} = {}) {
@@ -35,7 +36,7 @@ class LibraryTransferQueue extends EventTarget {
   }
   async pump() {
     if (this.active) return;
-    const job = [...this.jobs.values()].sort((a,b) => b.priority - a.priority || a.order - b.order)[0];
+    const job = this.waiting[0];
     if (!job) return;
     this.active = job; job.state = 'running'; this.changed();
     try { const value = await job.run(); this.completed++; job.resolve(value); }

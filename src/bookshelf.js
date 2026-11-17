@@ -154,6 +154,10 @@ class BookshelfView {
     .Bookshelf__footer { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:56px; padding:10px 24px; border-top:1px solid var(--library-line); background:var(--library-bg); flex:none; }
     .Bookshelf__footer { flex-wrap:wrap; }
     .Bookshelf__transfer-progress { width:100%; font-size:13px; overflow-wrap:anywhere; }
+    .Bookshelf__waiting-files { margin-top:8px; padding:12px; border:1px solid var(--library-line); border-radius:8px; }
+    .Bookshelf__waiting-files h3 { margin:0 0 8px; font-size:14px; }
+    .Bookshelf__waiting-files ol { max-height:22dvh; overflow:auto; margin:8px 0; padding-left:24px; }
+    .Bookshelf__waiting-files li { padding:4px; overflow-wrap:anywhere; }
     .Bookshelf__transfer-progress progress { display:block; width:100%; height:8px; margin:8px 0; accent-color:var(--library-brand); }
     .Bookshelf__download { grid-column:2; justify-self:start; }
     .Bookshelf__save-state { display:flex; gap:16px; flex-wrap:wrap; color:var(--library-muted); font-size:12px; }
@@ -860,12 +864,40 @@ class BookshelfView {
     const progress = document.createElement('progress'); progress.setAttribute('aria-label','File transfer progress');
     const stop = element('button','','Stop remaining downloads'); stop.type = 'button'; stop.onclick = () => this.model.cancelFullSync();
     const waitingText = element('div'); waitingText.setAttribute('aria-label','Pending file transfers');
-    transferProgress.append(transferText,progress,waitingText,stop);
+    let waitingDirection = null;
+    const waitingButtons = {};
+    const waitingFiles = element('section','Bookshelf__waiting-files'); waitingFiles.hidden = true;
+    waitingFiles.setAttribute('role','region');
+    const waitingHeading = element('h3'), waitingList = element('ol'), waitingEmpty = element('p');
+    const closeWaiting = element('button','','Close waiting files'); closeWaiting.type = 'button';
+    closeWaiting.onclick = () => {
+      const previous = waitingDirection; waitingDirection = null; updateProgress(); waitingButtons[previous]?.focus();
+    };
+    waitingFiles.append(waitingHeading,waitingList,waitingEmpty,closeWaiting);
+    for (const direction of ['upload','download']) {
+      const button = waitingButtons[direction] = element('button'); button.type = 'button';
+      button.onclick = () => { waitingDirection = waitingDirection === direction ? null : direction; updateProgress(); };
+      if (direction === 'download') waitingText.append(document.createTextNode(' · '));
+      waitingText.append(button);
+    }
+    transferProgress.append(transferText,progress,waitingText,stop,waitingFiles);
     const updateProgress = () => {
       const queue = this.model.transferState, full = this.model.fullSyncState;
       const checking = this.model.syncPending || this.model.cloudConnecting || this.model.checkingCloud || this.model.autoSync?.running;
       transferProgress.hidden = !queue.total && !full && !checking;
-      waitingText.textContent = `Upload waiting: ${queue.waiting.upload} files · Download waiting: ${queue.waiting.download} files`;
+      for (const direction of ['upload','download']) {
+        waitingButtons[direction].textContent = `${direction === 'upload' ? 'Upload' : 'Download'} waiting: ${queue.waiting[direction]} files`;
+        waitingButtons[direction].setAttribute('aria-expanded',String(waitingDirection === direction));
+      }
+      waitingFiles.hidden = !waitingDirection;
+      if (waitingDirection) {
+        const title = `Files waiting to ${waitingDirection}`;
+        waitingFiles.setAttribute('aria-label',title); waitingHeading.textContent = title;
+        const labels = queue.waitingFiles[waitingDirection];
+        waitingList.replaceChildren(...labels.map(label => element('li','',label)));
+        waitingEmpty.textContent = `No files waiting to ${waitingDirection}.`;
+        waitingEmpty.hidden = !!labels.length; waitingList.hidden = !labels.length;
+      }
       const current = queue.active ? (queue.active.direction === 'upload' ? 'Uploading: ' : 'Downloading: ') + queue.active.label : '';
       if (queue.active || queue.size || queue.waiting.upload) {
         progress.max = Math.max(1,queue.total); progress.value = queue.completed;

@@ -10,7 +10,7 @@ class BookshelfStore extends EventTarget {
   constructor(services) {
     super(); this.services = services; this.scores = services.scores; this.pending = new Map(); this.sequence = 0; this.localSaving = 0; this.cloudFacts = null; this.downloads = new Map(); this.releases = new Set(); this.fileErrors = new Map();
     this.transfers = new LibraryTransferQueue();
-    this.libraryGeneration = 0; this.pendingUploads = new Set();
+    this.libraryGeneration = 0; this.pendingUploads = new Map();
     this.transfers.addEventListener('change',() => this.notifyStatus());
     this.ready = Promise.resolve().then(() => this.initializeSync()).catch(error => { this.syncError = error; this.notifyStatus(); });
   }
@@ -201,7 +201,7 @@ class BookshelfStore extends EventTarget {
   }
   transferKey(id,direction = 'download',transport = this.transport) { return direction + ':' + (transport?.id || this.destinationId()) + ':' + id; }
   planUploads(documents) {
-    this.pendingUploads = new Set(documents.map(doc => doc.id)); this.notifyStatus();
+    this.pendingUploads = new Map(documents.map(doc => [doc.id,JSON.parse(doc.metadata_json).originalFilename])); this.notifyStatus();
   }
   uploadFile(document,file,transport) {
     this.pendingUploads.delete(document.id);
@@ -519,10 +519,12 @@ class BookshelfStore extends EventTarget {
   async savedCloudSelection() { await this.ready; return this.cloudSelection; }
   get transferState() {
     const queue = this.transfers;
-    const waiting = {upload:this.pendingUploads.size,download:0};
-    for (const job of queue.jobs.values()) if (job.state === 'queued') waiting[job.direction]++;
+    const waitingFiles = {upload:[],download:[]};
+    for (const job of queue.waiting) waitingFiles[job.direction].push(job.label);
+    waitingFiles.upload.push(...this.pendingUploads.values());
+    const waiting = {upload:waitingFiles.upload.length,download:waitingFiles.download.length};
     return {size:queue.size,completed:queue.completed,failed:queue.failed,cancelled:queue.cancelled,
-      total:queue.completed + queue.failed + queue.cancelled + queue.size + this.pendingUploads.size,waiting,
+      total:queue.completed + queue.failed + queue.cancelled + queue.size + this.pendingUploads.size,waiting,waitingFiles,
       active:queue.active && {direction:queue.active.direction,label:queue.active.label}};
   }
 
