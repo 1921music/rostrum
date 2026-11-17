@@ -1,6 +1,6 @@
 import { holdLibraryLock } from './bookshelf-storage-lock.js';
 
-export async function openIndexedDbBytes({ name = 'rostrum-bookshelf-v3' } = {}) {
+export async function openIndexedDbBytes({ name = 'rostrum-bookshelf-v4' } = {}) {
   const release = await holdLibraryLock('rostrum-library-idb:' + name);
   let connection;
   try {
@@ -21,6 +21,15 @@ export async function openIndexedDbBytes({ name = 'rostrum-bookshelf-v3' } = {})
       return path;
     };
     const files = {
+      async list(path = '') {
+        const prefix = path ? validate(path) + '/' : '', keys = await access('readonly',store => store.getAllKeys());
+        const entries = new Map();
+        for (const key of keys) if (typeof key === 'string' && key.startsWith(prefix)) {
+          const parts = key.slice(prefix.length).split('/');
+          entries.set(parts[0],{name:parts[0],kind:parts.length > 1 ? 'directory' : 'file'});
+        }
+        return [...entries.values()];
+      },
       async read(path) {
         const value = await access('readonly', store => store.get(validate(path)));
         if (!value) throw new DOMException('Library file not found', 'NotFoundError');

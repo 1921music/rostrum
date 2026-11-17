@@ -24,7 +24,10 @@ async function setup(page,url='/pod.html'){
    async getFileSrc(path,name){return make(path).files.get(name).bytes;},
    async putFile(path,name,bytes){mock.calls.push({kind:'write',service,path,name});make(path).files.set(name,{bytes,size:bytes.size});},
    async renameFile(path,name,next){const d=make(path);d.files.set(next,d.files.get(name));d.files.delete(name);},
-   async trashFile(path,name){make(path).files.delete(name);}
+   async trashFile(path,name){make(path).files.delete(name);},
+   async listLibrarySnapshots(path){const file=make(path).files.get('library.sqlite');return file?[{id:file.id,token:file.id,size:file.size,current:true}]:[];},
+   async readLibrarySnapshot(path){return make(path).files.get('library.sqlite').bytes;},
+   async publishLibrarySnapshot(path,bytes,expected,id){mock.calls.push({kind:'write',service,path,name:'library.sqlite'});make(path).files.set('library.sqlite',{id,bytes,size:bytes.size});return true;}
   };
   _FileSrc_.get=ref=>services[ref]||original.call(_FileSrc_,ref);
  });

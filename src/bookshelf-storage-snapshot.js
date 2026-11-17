@@ -10,6 +10,7 @@ export async function openSnapshotDatabase({ read, write, release = () => {}, de
   if (bytes) sqlite.capi.sqlite3_js_posix_create_file(filename, new Uint8Array(bytes));
   const db = new sqlite.oo1.DB(filename, 'c');
   let dirty = false;
+  const close = () => { db.close(); sqlite.wasm.xWrap('sqlite3__wasm_vfs_unlink','int',['sqlite3_vfs*','string'])(sqlite.capi.sqlite3_vfs_find(0),filename); };
   return {
     exec(statement, bind = []) {
       const rows = db.exec({ sql: statement, bind, rowMode: 'object', returnValue: 'resultRows' });
@@ -23,10 +24,10 @@ export async function openSnapshotDatabase({ read, write, release = () => {}, de
       if (!dirty) return;
       await write(sqlite.capi.sqlite3_js_db_export(db)); dirty = false;
     },
-    async close() { try { db.close(); } finally { await release(); } },
+    async close() { try { close(); } finally { await release(); } },
     async destroy() {
       if (!destroy) throw new Error('This storage cannot delete library data.');
-      try { db.close(); await destroy(); } finally { await release(); }
+      try { close(); await destroy(); } finally { await release(); }
     },
   };
 }

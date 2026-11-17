@@ -1,53 +1,44 @@
 # Library format
 
-The library has 13 tables: ten shared entity tables, `changes`, `local_state`,
-and `library_info`. There are no migration history or file-move journal tables.
+SQLite contains twelve shared tables: `documents`, `entries`, `annotations`,
+`tags`, `document_tags`, `entry_tags`, `bookshelves`, `bookshelf_documents`,
+`playlists`, `playlist_items`, `changes`, and `library_info`.
 
-## Information kept for future changes
+`changes` preserves record revisions, parents and tombstones for merging and
+explicit conflict resolution. `library_info` holds storage/record versions,
+the publication identity, its ancestors and the current replacement generation.
+There is no migration journal or device-state table.
 
-- SQLite `PRAGMA user_version` identifies the DB schema (currently 6).
-- `library_info` identifies record representation (4) and score storage format (2).
-- Sync batches and backups identify their formats (both 2). Individual changes
-  retain their record version so old history remains distinguishable later.
-- Score IDs and references are independent of display names. `storage_path` is
-  the stable file key. Naming, validation and path resolution are centralized in
-  `bookshelf-format.js`.
-- Unknown formats are rejected before application data is changed or published.
+- SQLite `PRAGMA application_id` identifies Rostrum; `user_version` is schema 7.
+- Record format: 4. Score storage format: 3. Backup format: 2.
+- Unknown schemas/formats are rejected. This development reset does not migrate
+  previous databases. The default compatibility DB is `rostrum-bookshelf-v4`.
 
-The `rostrum-library-v3` directory/default IndexedDB name `rostrum-bookshelf-v3`
-start a fresh library for the content-addressed identity design. Existing data is not migrated in this development reset. Future changes must retain this namespace and migrate data when needed.
+The selected folder itself is the library root, containing `library.sqlite`,
+`scores/` and an English `README.md`. It has no version-named wrapper directory.
+Published manual replacements also use `_sync/generations/`; user-provided
+requests live under `restore/<unique-name>/`. See [library-sync.md](library-sync.md).
 
-## When a change is actually needed
+Device IDs, file presence/offline flags, local fallback paths, cloud inventory,
+acknowledged provider versions and the last synchronized SQLite are stored in
+browser IndexedDB, separately for each storage location. Folder handles are
+compared by filesystem identity. Selection, cloud destination and automatic
+sync preferences also stay in browser IndexedDB. Reader view preferences and
+library category/search stay in existing browser-local preferences.
 
-`bookshelf-schema.js` creates the current schema. Add a concrete old-to-new SQL
-transaction there when a real schema change is made, updating `user_version`
-only when it succeeds. No old-format conversion is included in this reset.
+Document IDs are SHA-256 hashes of exact file bytes. Shared `storage_path` names
+are `scores/<8 hash digits>_<original filename>`; a colliding hash prefix grows
+by one digit until unique. Local folders, cloud files and backups use the same
+names. Editing a display title does not rename the stored file or its ID.
+PDF outline song IDs hash the document ID and original outline tree position;
+manual songs retain independent random IDs. Song edits preserve their IDs.
+Shelf/tag memberships derive IDs from endpoints; playlist occurrences are separate.
 
-Implement record or file conversion for the specific change when it is known.
-Keep score IDs/references and raw change history intact. If a future file move
-needs restart tracking, add only the tracking needed for that move at that time.
-There is no generic migration runner, registry or speculative conversion now.
+When an actual future schema change is needed, implement its concrete SQL
+transaction in `bookshelf-schema.js`, updating `user_version` only on success.
+Implement file/record conversion for that specific change then. Preserve content
+IDs, references and history; no speculative migration framework is installed.
 
-Backups import portable JSON, not the SQLite recovery image. A local-only DB
-schema change does not invalidate a backup with compatible record/storage formats.
-
-Checks: `mise exec -- npm run test:library-schema` and the browser tests in
-`tests/library-format.spec.js`, `tests/bookshelf.spec.js`, `tests/library-delta.spec.js`.
-
-## Identities
-
-Document IDs are SHA-256 hashes of the exact file bytes. Physical score keys are
-`scores/<hash>`; names and formats belong to document metadata. PDF outline song
-IDs hash the document identity and original outline tree position. Root entries
-use a fixed root identity; manual entries retain random IDs. Song edits never
-change their identities. Shelf/tag memberships derive IDs from their endpoints;
-playlist occurrences retain independent IDs.
-
-Local score filenames use `<hash prefix>_<original filename>`, starting with eight
-hash digits and extending the prefix when another document shares it. The exact
-local path is stored in the existing device-only file state. The immutable
-`scores/<full hash>` key remains unchanged in shared records, cloud storage and
-portable backups. Schema 6 guards clients that understand this local mapping;
-opening schema 5 only updates the client guard and does not rewrite score files.
-New imports and downloads use readable names; existing hash-only files remain
-readable and are renamed when saved again.
+ZIP backups include shared SQLite, portable records/history and score files.
+ZIP import validates portable records rather than executing the included SQLite.
+Cloud sync and directory replacement validate an isolated, read-only SQLite image.

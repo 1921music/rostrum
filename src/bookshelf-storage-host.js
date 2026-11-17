@@ -3,7 +3,7 @@ import { openDirectoryBytes } from './bookshelf-storage-bytes-directory.js';
 
 export async function storageCapabilities() {
   let opfs = false;
-  if (location.protocol !== 'file:' && navigator.storage?.getDirectory) {
+  if (location.protocol !== 'file:' && navigator.storage?.getDirectory && navigator.locks) {
     try { await navigator.storage.getDirectory(); opfs = true; } catch {}
   }
   return {directory:typeof window.showDirectoryPicker === 'function' && !!navigator.locks,opfs,
@@ -52,3 +52,16 @@ export function loadCloudSelection() { return selectionStore('readonly', store =
 export function saveCloudSelection(options) { return selectionStore('readwrite', store => store.put(options, 'cloud')); }
 export function loadSyncSettings() { return selectionStore('readonly', store => store.get('sync-settings')); }
 export function saveSyncSettings(options) { return selectionStore('readwrite', store => store.put(options, 'sync-settings')); }
+
+// Handles are compared by identity, never by their (non-unique) display names.
+export async function deviceStateKey(options = {}) {
+  if (options.kind !== 'directory') return 'device:' + (options.kind || 'opfs') + ':' + (options.name || 'default');
+  const folders = await selectionStore('readonly',store => store.get('device-folders')) || [];
+  for (const item of folders) if (await options.directory.isSameEntry(item.directory)) return item.key;
+  const key = 'device:folder:' + crypto.randomUUID();
+  folders.push({key,directory:options.directory});
+  await selectionStore('readwrite',store => store.put(folders,'device-folders'));
+  return key;
+}
+export function loadDeviceState(key) { return selectionStore('readonly',store => store.get(key)); }
+export function saveDeviceState(key,state) { return selectionStore('readwrite',store => store.put(state,key)); }

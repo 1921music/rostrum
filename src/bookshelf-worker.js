@@ -1,8 +1,11 @@
+import { request as hostRequest } from './bookshelf-storage-bridge.js';
+import { openSnapshotDatabase } from './bookshelf-storage-snapshot.js';
+import { LIBRARY_README } from './bookshelf-readme.js';
 import { openLibraryStorage } from './bookshelf-storage.js';
 import { openConfiguredLibraryStorage } from './bookshelf-storage-policy.js';
 import { unzipSync } from 'fflate';
 import { exportLibraryPackage, readLibraryPackage, hashBytes, scorePath } from './bookshelf-transfer.js';
-import { LIBRARY_SCHEMA_VERSION, LIBRARY_RECORD_VERSION, createScorePath, createLocalScorePath, scoreStoragePath, checkRecordVersion, libraryEntityId } from './bookshelf-format.js';
+import { LIBRARY_SCHEMA_VERSION, LIBRARY_RECORD_VERSION, createScorePath, checkRecordVersion, libraryEntityId } from './bookshelf-format.js';
 import { initializeLibrarySchema, libraryTables } from './bookshelf-schema.js';
 
 // All database and file mutations run serially in this worker. A second tab
@@ -64,13 +67,17 @@ function validateRelations() {
     }
   }
 }
+function invalidateSnapshot() {
+  const info = sql('SELECT snapshot_id,ancestors_json FROM library_info')[0];
+  if (info.snapshot_id) sql('UPDATE library_info SET snapshot_id=NULL,ancestors_json=? WHERE id=1',[JSON.stringify([...new Set([...JSON.parse(info.ancestors_json),info.snapshot_id])].sort())]);
+}
 function save(table, values, parents = null) {
   if (!Object.hasOwn(tables, table)) throw new Error('Unknown library record type');
   if (typeof values.id !== 'string' || !values.id) throw new Error('Record identity is required');
   const previous = sql(`SELECT * FROM ${table} WHERE id = ?`, [values.id])[0];
   if (!parents && heads(table, values.id).length > 1) throw new Error('Resolve the conflicting edits before changing this item.');
   if (previous && table === 'documents') {
-    for (const key of ['storage_path', 'content_hash', 'size_bytes']) {
+    for (const key of ['content_hash', 'size_bytes']) {
       if (Object.hasOwn(values, key) && values[key] !== previous[key]) throw new Error('Import a new document to replace score contents');
     }
   }
@@ -83,6 +90,7 @@ function save(table, values, parents = null) {
   for (const [key, value] of Object.entries(row)) {
     if (key.endsWith('_json')) validateJsonField(value);
   }
+  invalidateSnapshot();
   writeRow(table, row);
   sql('INSERT INTO changes VALUES (?,?,?,?,?,?,?,?)', [revision, deviceId, table, row.id,
     JSON.stringify(parents || revisionHeads(table,row.id).map(change => change.id)), JSON.stringify(row), new Date().toISOString(),LIBRARY_RECORD_VERSION]);
@@ -90,8 +98,7 @@ function save(table, values, parents = null) {
 }
 let deviceId;
 const decodeChange = change => { checkRecordVersion(change.record_version); return JSON.parse(change.payload_json); };
-function validateTransfer(manifest) {
-  const schemas = Object.fromEntries(Object.keys(tables).map(table => [table, sql(`PRAGMA table_info(${table})`)]));
+function validateTransfer(manifest, schemas = Object.fromEntries(Object.keys(tables).map(table => [table, sql(`PRAGMA table_info(${table})`)]))) {
   const normalize = (table, row) => {
     if (!Object.hasOwn(schemas, table) || !row || typeof row !== 'object' || Array.isArray(row)) throw new Error('Invalid library record');
     const schema = schemas[table];
@@ -151,13 +158,14 @@ function validateTransfer(manifest) {
   const documents = new Map(manifest.records.documents.map(doc => [doc.id, doc]));
   for (const doc of documents.values()) {
     scorePath(doc.storage_path);
-    if (doc.id !== doc.content_hash || doc.storage_path !== createScorePath(doc.id) || !/^[a-f0-9]{64}$/.test(doc.content_hash) || !Number.isSafeInteger(doc.size_bytes) || doc.size_bytes < 0) throw new Error('Invalid score identity');
+    const prefix = doc.storage_path.match(/^scores\/([a-f0-9]{8,64})_/)?.[1];
+    if (!prefix || typeof doc.id !== 'string' || !doc.id.startsWith(prefix) || doc.id !== doc.content_hash || !/^[a-f0-9]{64}$/.test(doc.content_hash) || !Number.isSafeInteger(doc.size_bytes) || doc.size_bytes < 0) throw new Error('Invalid score identity');
   }
   for (const change of incoming.values()) if (change.entity_type === 'documents') {
     const row = decodeChange(change), doc = documents.get(row.id);
-    if (!doc || ['storage_path', 'content_hash', 'size_bytes'].some(key => row[key] !== doc[key])) throw new Error('A document identity has different file contents');
-    const local = sql('SELECT * FROM documents WHERE id=? OR storage_path=?', [doc.id, doc.storage_path])[0];
-    if (local && (local.id !== doc.id || ['storage_path', 'content_hash', 'size_bytes'].some(key => local[key] !== doc[key]))) throw new Error('The package would overwrite a different score');
+    if (!doc || ['content_hash', 'size_bytes'].some(key => row[key] !== doc[key])) throw new Error('A document identity has different file contents');
+    const local = sql('SELECT * FROM documents WHERE id=?', [doc.id])[0];
+    if (local && (local.id !== doc.id || ['content_hash', 'size_bytes'].some(key => local[key] !== doc[key]))) throw new Error('The package would overwrite a different score');
   }
   return { incoming, normalize, known };
 }
@@ -192,16 +200,16 @@ function mergeRecords(manifest) {
         save(table,row,revisions.map(change => change.id));
       } else writeRow(table,normalize(table,decodeChange(chosen)));
     }
+    if ([...incoming.keys()].some(id => !known.has(id))) invalidateSnapshot();
     validateRelations();
     if (sql('PRAGMA foreign_key_check').length) throw new Error('The changes contain broken library references');
   });
   return { addedChanges:[...incoming.keys()].filter(id => !known.has(id)).length, conflicts:actions.conflicts().length };
 }
-function getLocal(key, fallback = null) { const row = sql('SELECT value FROM local_state WHERE key=?',[key])[0]; return row ? JSON.parse(row.value) : fallback; }
-function setLocal(key,value) {
-  const text = JSON.stringify(value);
-  if (sql('SELECT value FROM local_state WHERE key=?',[key])[0]?.value !== text) sql('INSERT INTO local_state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',[key,text]);
-}
+let deviceState = {};
+function getLocal(key, fallback = null) { return Object.hasOwn(deviceState,key) ? deviceState[key] : fallback; }
+function setLocal(key,value) { Object.defineProperty(deviceState,key,{value,enumerable:true,writable:true,configurable:true}); }
+async function flushDeviceState() { await hostRequest('saveDeviceState',[deviceState]); }
 function fileState(id) { return getLocal('file:' + id); }
 function setFileState(id, values) { const state = { present:false, pinned:false, ...fileState(id), ...values }; setLocal('file:' + id,state); return state; }
 async function localFile(doc) {
@@ -220,31 +228,26 @@ async function open() {
   sql('PRAGMA foreign_keys=ON');
   sql('PRAGMA trusted_schema=OFF');
   await initializeLibrarySchema(db);
-  const localPath = path => {
-    const logical = scoreStoragePath(path), id = logical.slice('scores/'.length);
-    return fileState(id)?.localPath ? scorePath(fileState(id).localPath) : logical;
-  };
+  const documentAt = path => sql('SELECT * FROM documents WHERE storage_path=?',[path])[0];
   files = {
-    read:path => rawFiles.read(localPath(path)),
-    async write(path,bytes,name) {
-      const logical = scoreStoragePath(path), id = logical.slice('scores/'.length);
-      let target = fileState(id)?.localPath;
-      if (!target) {
-        name ||= JSON.parse(sql('SELECT metadata_json FROM documents WHERE id=?',[id])[0]?.metadata_json || '{}').originalFilename;
-        const ids = sql('SELECT id FROM documents').map(row => row.id);
-        ids.push(...sql("SELECT key FROM local_state WHERE key LIKE 'file:%'").map(row => row.key.slice(5)));
-        target = createLocalScorePath(id,name,ids);
+    async read(path) {
+      path = scorePath(path);
+      try { return await rawFiles.read(path); }
+      catch (error) {
+        if (error.name !== 'NotFoundError') throw error;
+        const doc = documentAt(path), previous = doc && fileState(doc.id)?.localPath;
+        if (!previous || previous === path) throw error;
+        const file = await rawFiles.read(scorePath(previous));
+        await rawFiles.write(path,file); setFileState(doc.id,{localPath:path});
+        return file;
       }
-      await rawFiles.write(scorePath(target),bytes);
-      setFileState(id,{localPath:target});
-      // Re-saving an older hash-only file must not leave a second local copy.
-      if (target !== logical) try { await rawFiles.remove(logical); }
-      catch (error) { if (error.name !== 'NotFoundError') throw error; }
     },
-    remove:path => rawFiles.remove(localPath(path)),
+    write:(path,bytes) => rawFiles.write(scorePath(path),bytes),
+    remove:path => rawFiles.remove(scorePath(path)),
   };
-  deviceId = sql("SELECT value FROM local_state WHERE key='device'")[0]?.value || crypto.randomUUID();
-  sql("INSERT OR IGNORE INTO local_state VALUES ('device', ?)", [deviceId]);
+  deviceId = getLocal('device') || crypto.randomUUID();
+  setLocal('device',deviceId);
+  await rawFiles.write('README.md',new Blob([LIBRARY_README],{type:'text/markdown'}));
   initialized = true;
 }
 const importedDocument = hash => sql('SELECT * FROM documents WHERE content_hash=? ORDER BY deleted_at IS NOT NULL, replaced_by_id IS NOT NULL, id LIMIT 1', [hash])[0];
@@ -258,7 +261,62 @@ const withOriginalLocation = (metadata, location) => {
   return {...metadata,originalLocations:[...locations,clean]};
 };
 const relationId = (table,values) => libraryEntityId(table,Object.entries(values).filter(([key]) => !['order_key','id','revision_id','deleted_at','metadata_json'].includes(key)).sort());
+async function readSnapshot(file) {
+  if (!(file instanceof Blob) || file.size > 256 * 1024 * 1024) throw new Error('Invalid or excessive SQLite snapshot');
+  const reader = await openSnapshotDatabase({read:() => file.arrayBuffer(),write:() => { throw new Error('A remote snapshot is read-only'); }});
+  const current = db;
+  const schemas = Object.fromEntries(Object.keys(tables).map(table => [table,sql(`PRAGMA table_info(${table})`)]));
+  try {
+    reader.exec('PRAGMA trusted_schema=OFF'); reader.exec('PRAGMA query_only=ON');
+    if (reader.exec('PRAGMA user_version')[0].user_version !== LIBRARY_SCHEMA_VERSION) throw new Error('Unsupported library snapshot version');
+    await initializeLibrarySchema(reader);
+    if (reader.exec('PRAGMA quick_check')[0].quick_check !== 'ok' || reader.exec('PRAGMA foreign_key_check').length) throw new Error('Damaged library snapshot');
+    const records = Object.fromEntries(Object.keys(tables).map(table => [table,reader.exec(`SELECT * FROM ${table}`)]));
+    const changes = reader.exec('SELECT * FROM changes'), info = reader.exec('SELECT * FROM library_info WHERE id=1')[0];
+    const names = reader.exec("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'").map(row => row.name);
+    if (names.length !== libraryTables.length + 2 || names.some(name => ![...libraryTables,'changes','library_info'].includes(name))) throw new Error('Unexpected tables in a shared library snapshot');
+    db = reader; validateTransfer({records,changes},schemas); validateRelations();
+    for (const change of changes) if (!records[change.entity_type].some(row => row.id === change.entity_id)) throw new Error('A snapshot record is missing from its history');
+    for (const [table,rows] of Object.entries(records)) for (const row of rows) if (!revisionHeads(table,row.id).some(change => change.id === row.revision_id)) throw new Error('A snapshot record is not a current revision');
+    const generation = JSON.parse(info.generation_json), ancestors = JSON.parse(info.ancestors_json);
+    if (typeof generation.id !== 'string' || !generation.id || !Array.isArray(generation.ancestors) || generation.ancestors.some(id => typeof id !== 'string' || id === generation.id) || !Array.isArray(ancestors) || ancestors.some(id => typeof id !== 'string' || id === info.snapshot_id) || info.snapshot_id !== null && typeof info.snapshot_id !== 'string') throw new Error('Invalid snapshot ancestry');
+    return {records,changes,documents:records.documents,info,generation,ancestors,id:info.snapshot_id,tableNames:reader.exec("SELECT name FROM sqlite_schema WHERE type='table'").map(row => row.name)};
+  } finally { db = current; await reader.close(); }
+}
 const actions = {
+  listManaged:({path}) => rawFiles.list(path),
+  async prepareSnapshot({file,id,generation}) {
+    await readSnapshot(file);
+    const editor = await openSnapshotDatabase({read:() => file.arrayBuffer(),write:() => {}});
+    try {
+      editor.exec('UPDATE library_info SET snapshot_id=?,ancestors_json=?,generation_json=? WHERE id=1',[id,'[]',JSON.stringify(generation)]);
+      return new Blob([await editor.export()],{type:'application/vnd.sqlite3'});
+    } finally { await editor.close(); }
+  },
+  inspectSnapshot:({file}) => readSnapshot(file),
+  async captureSnapshot({id,ancestors,generation} = {}) {
+    if (id) sql('UPDATE library_info SET snapshot_id=?, ancestors_json=?, generation_json=? WHERE id=1',[id,JSON.stringify([...new Set(ancestors)].sort()),JSON.stringify(generation)]);
+    return {file:new Blob([await db.export()],{type:'application/vnd.sqlite3'}),...actions.syncData(),info:sql('SELECT * FROM library_info')[0]};
+  },
+  async replaceSnapshot({file,generation}) {
+    const snapshot = await readSnapshot(file);
+    transaction(() => {
+      sql('PRAGMA defer_foreign_keys=ON');
+      for (const table of Object.keys(tables).reverse()) sql(`DELETE FROM ${table}`);
+      sql('DELETE FROM changes');
+      for (const [table,rows] of Object.entries(snapshot.records)) for (const row of rows) writeRow(table,row);
+      for (const change of snapshot.changes) sql('INSERT INTO changes VALUES (?,?,?,?,?,?,?,?)',[change.id,change.device_id,change.entity_type,change.entity_id,change.parent_revision_ids_json,change.payload_json,change.created_at,change.record_version]);
+      sql('UPDATE library_info SET snapshot_id=?,ancestors_json=?,generation_json=? WHERE id=1',[snapshot.id,JSON.stringify(snapshot.ancestors),JSON.stringify(generation || snapshot.generation)]);
+    });
+    deviceState = {device:deviceId};
+    for (const doc of snapshot.documents) await localFile(doc);
+    return true;
+  },
+  rememberSnapshot({destination,file,versions,changeIds,coveredVersions}) {
+    setLocal('base:' + destination,{file,versions,changeIds,coveredVersions});
+  },
+  readManaged:({path}) => rawFiles.read(path),
+  writeManaged:({path,file}) => rawFiles.write(path,file),
   formatInfo() { return {schemaVersion:sql('PRAGMA user_version')[0].user_version,...sql('SELECT * FROM library_info WHERE id=1')[0]}; },
   destroyStorage() {},
   rememberOriginalLocation({id,location}) {
@@ -288,6 +346,18 @@ const actions = {
     if (file && verify && (file.size !== document.size_bytes || await hashBytes(await file.arrayBuffer()) !== document.content_hash)) throw new Error('Local score contents do not match the imported file');
     return { document, file };
   },
+  async relocateFile({id,otherIds}) {
+    const doc = sql('SELECT * FROM documents WHERE id=?',[id])[0];
+    if (!doc) throw new Error('Score not found');
+    const path = createScorePath(id,JSON.parse(doc.metadata_json).originalFilename,[...sql('SELECT id FROM documents').map(row => row.id),...otherIds]);
+    if (path === doc.storage_path) throw new Error('Could not resolve a stored filename collision');
+    const {file} = await actions.fileInfo({id,verify:true});
+    if (file) await rawFiles.write(path,file);
+    const updated = transaction(() => save('documents',{id,storage_path:path}));
+    setFileState(id,{present:!!file,localPath:path});
+    if (file) try { await rawFiles.remove(doc.storage_path); } catch (error) { if (error.name !== 'NotFoundError') throw error; }
+    return updated;
+  },
   async installFile({ id, file }) {
     await actions.verifyFile({ id,file });
     const doc = sql('SELECT * FROM documents WHERE id=?',[id])[0];
@@ -313,8 +383,8 @@ const actions = {
     if (table === 'playlists') return sql('SELECT DISTINCT d.id FROM playlist_items m JOIN entries e ON e.id=m.entry_id JOIN documents d ON d.id=e.document_id WHERE m.playlist_id=? AND m.deleted_at IS NULL AND e.deleted_at IS NULL AND d.deleted_at IS NULL',[id]).map(row => row.id);
     throw new Error('Choose a bookshelf or playlist');
   },
-  syncData() { return { deviceId, changes:sql('SELECT * FROM changes'), documents:sql('SELECT * FROM documents'), batches:getLocal('delta-batches',{}) }; },
-  mergeDelta({ changes }) {
+  syncData({destination = ''} = {}) { return { deviceId, changes:sql('SELECT * FROM changes'), documents:sql('SELECT * FROM documents'), base:getLocal('base:' + destination), info:sql('SELECT * FROM library_info')[0] }; },
+  async mergeDelta({ changes }) {
     if (!Array.isArray(changes)) throw new Error('Invalid changes');
     const records = Object.fromEntries(Object.keys(tables).map(table => [table,[]]));
     const selected = new Map();
@@ -323,17 +393,16 @@ const actions = {
       selected.set(change.entity_type + ':' + change.entity_id,change);
     }
     for (const change of selected.values()) records[change.entity_type].push(decodeChange(change));
+    validateTransfer({records,changes});
+    for (const doc of records.documents) {
+      const collision = sql('SELECT id FROM documents WHERE storage_path=? AND id<>?',[doc.storage_path,doc.id])[0];
+      if (collision) await actions.relocateFile({id:collision.id,otherIds:[doc.id]});
+    }
     const existing = new Set(sql('SELECT id FROM documents').map(doc => doc.id));
     const result = mergeRecords({ records, changes });
     // Remote-only documents must not be mistaken for locally imported files.
     for (const doc of records.documents) if (!existing.has(doc.id)) setFileState(doc.id,{ present:false });
     return result;
-  },
-  rememberBatch({ destination, id, changeIds }) {
-    const batches = getLocal('delta-batches',{});
-    if (!Object.hasOwn(batches,destination)) Object.defineProperty(batches,destination,{ value:{},enumerable:true,configurable:true,writable:true });
-    Object.defineProperty(batches[destination],id,{ value:changeIds, enumerable:true, configurable:true, writable:true });
-    setLocal('delta-batches',batches);
   },
   remoteInventory({ destination, changeIds, paths, unknown = false }) {
     if (!Array.isArray(changeIds) || !Array.isArray(paths) || [...changeIds,...paths].some(value => typeof value !== 'string')) throw new Error('Invalid remote inventory');
@@ -349,7 +418,7 @@ const actions = {
   async syncSummary({destination}) {
     const states = await actions.availability({destination}), status = actions.syncStatus({destination});
     const active = new Set(sql('SELECT id FROM documents WHERE deleted_at IS NULL AND replaced_by_id IS NULL').map(row => row.id));
-    return {...status,uploads:states.filter(state => !state.remote).length,
+    return {...status,uploads:states.filter(state => active.has(state.id) && !state.remote).length,
       downloads:states.filter(state => active.has(state.id) && !state.present).length};
   },
   async findImportedFile({ file }) {
@@ -430,7 +499,7 @@ const actions = {
     }
     if (/\.pdf$/i.test(file.name) && ![maxWidth,maxHeight].every(value => Number.isFinite(value) && value > 0))
       throw new Error('PDF maximum dimensions are required for import');
-    const path = createScorePath(id,file.name);
+    const path = createScorePath(id,file.name,sql('SELECT id FROM documents').map(row => row.id));
     const inherited = [];
     if (replacesId) for (const [table,key] of [['bookshelf_documents','bookshelf_id'],['document_tags','tag_id']]) {
       for (const previous of sql(`SELECT * FROM ${table} WHERE document_id=? AND deleted_at IS NULL`,[replacesId])) {
@@ -444,7 +513,7 @@ const actions = {
       return transaction(() => {
         const document = save('documents', { id, content_hash: hash, storage_path: path, size_bytes: file.size,
           settings_json: JSON.stringify({ maxWidth, maxHeight }), metadata_json: JSON.stringify(withOriginalLocation({ displayName, originalFilename: file.name, format: file.name.split('.').pop().toLowerCase() },originalLocation)) });
-        setFileState(id,{ present:true });
+        setFileState(id,{ present:true,localPath:path });
         for (const entry of entries) save('entries', { id: entry.id, document_id: id, parent_id: entry.parent_id || null,
           anchor_json: JSON.stringify(entry.anchor), metadata_json: JSON.stringify(entry.metadata), deleted_at: entry.deleted_at || null });
         if (derivedFromId) save('documents', { id, derived_from_id: derivedFromId });
@@ -632,23 +701,23 @@ self.onmessage = ({ data }) => {
       if (!Object.hasOwn(actions, action)) throw new Error('Unknown library operation');
       if (action === 'open' && args?.storage) {
         if (db) throw new Error('Close the current library before changing storage');
-        storageOptions = args.storage;
+        storageOptions = args.storage; deviceState = args.deviceState || {};
       }
       if (action === 'close') {
-        if (db) { await db.flush(); await db.close(); }
+        if (db) { await db.flush(); await flushDeviceState(); await db.close(); }
         db = files = rawFiles = null; initialized = false;
         self.postMessage({ id, value: true }); return;
       }
       await open();
       if (action === 'destroyStorage') {
-        await db.destroy(); db = files = rawFiles = null; initialized = false;
+        await db.destroy(); deviceState = {device:deviceId}; await flushDeviceState(); db = files = rawFiles = null; initialized = false;
         self.postMessage({id,value:true}); return;
       }
       value = await actions[action](args || {});
       actionCompleted = true;
       // An emergency export must remain possible if persistence is failing.
       // SQLite has already committed the in-memory state at this point.
-      if (!['backup', 'export'].includes(action)) await db.flush();
+      if (!['backup', 'export'].includes(action)) { await db.flush(); await flushDeviceState(); }
       self.postMessage({ id, value });
     } catch (error) { self.postMessage({ id, error: error.message, errorName: error.name, persistenceFailed: actionCompleted,
       committedValue:actionCompleted ? value : undefined }); }

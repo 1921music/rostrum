@@ -163,3 +163,21 @@ for (const url of ['/pod.html', '/rostrum.html']) test('settings expose theme ch
   await expect(display).toContainText('Open a score to adjust its display.');
   expect(await page.evaluate(() => _menu_.rings.layout.cells.book.elm.classList.contains('Menu__cell-disabled'))).toBe(true);
 });
+
+for(const url of ['/pod.html','/rostrum.html'])test(`late startup cannot close a panel opened by the user (${url})`,async({page})=>{
+ await page.addInitScript(()=>{
+  const transaction=IDBDatabase.prototype.transaction;
+  IDBDatabase.prototype.transaction=function(...args){
+   const tx=transaction.apply(this,args);
+   if(this.name==='rostrum-device-view'&&args[1]==='readonly'){
+    Object.defineProperty(tx,'oncomplete',{set(listener){tx.addEventListener('complete',event=>{window.resumeStartupView=()=>listener.call(tx,event);});}});
+   }
+   return tx;
+  };
+ });
+ await page.goto(url);await page.waitForFunction(()=>!!window._menu_&&!!window.resumeStartupView);
+ await page.evaluate(()=>_menu_.notify('score/open/up'));
+ const panel=page.locator('[data-tag="OpenPanel"] .Panel__elm');await expect(panel).toBeVisible();
+ await page.evaluate(()=>resumeStartupView());await page.waitForFunction(()=>!!window._podPb_?.score);
+ await expect(panel).toBeVisible();await expect(library(page)).toHaveCount(0);
+});

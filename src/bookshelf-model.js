@@ -1,5 +1,5 @@
 // +skip
-import { exchangeLibraryChanges, LibraryAutoSync } from './bookshelf-sync.js';
+import { exchangeLibraryChanges, resolveLibraryGeneration, LibraryAutoSync } from './bookshelf-sync.js';
 import { libraryEntityId, hashLibraryBytes } from './bookshelf-format.js';
 import { LibraryTransferQueue } from './bookshelf-transfers.js';
 export { BookshelfStore };
@@ -200,6 +200,19 @@ class BookshelfStore extends EventTarget {
       this.applyingChanges = false; this.notifyStatus();
     }
   }
+  async chooseRestoreGeneration(id) {
+    this.requireOperation('sync');
+    const transport = this.transport || this.makeCloudTransport(this.cloudSelection.source,this.cloudSelection.path);
+    this.cloudConnecting = true; this.notifyStatus();
+    try { await transport.connect?.(); await resolveLibraryGeneration(this,transport,id); return await this.sync(transport); }
+    finally { this.cloudConnecting = false; this.notifyStatus(); }
+  }
+  async replaceLibrarySnapshot(file,generation) {
+    const previous = this.scores.active;
+    if (previous?.libraryDocumentId) { await this.flush(previous); await previous.dispose(); }
+    await this.call('replaceSnapshot',{file,generation});
+    this.libraryGeneration++; this.cloudFacts = null; this.notifyContent(); this.notifyData();
+  }
   transferKey(id,direction = 'download',transport = this.transport) { return direction + ':' + (transport?.id || this.destinationId()) + ':' + id; }
   planUploads(documents) {
     this.pendingUploads = new Map(documents.map(doc => [doc.id,JSON.parse(doc.metadata_json).originalFilename])); this.notifyStatus();
@@ -226,11 +239,20 @@ class BookshelfStore extends EventTarget {
     this.checkingCloud = (async () => {
       const check = async () => {
         await transport.connect?.();
-        const [remote,scores] = await Promise.all([transport.listChanges(),transport.listScores()]);
-        const data = await this.call('syncData');
-        const cache = data.batches[transport.id] || {}, remoteIds = new Set();
-        const unknown = remote.some(batch => !Object.hasOwn(cache,batch.id));
-        for (const batch of remote) for (const id of cache[batch.id] || []) remoteIds.add(id);
+        const data = await this.call('syncData',{destination:transport.id}), remoteIds = new Set();
+        const [state,scores,generations,requests,localRequests] = await Promise.all([transport.loadSyncState({coveredVersions:data.base?.coveredVersions || []}),transport.listScores(),transport.listGenerations(),transport.restoreRequests(),this.call('listManaged',{path:'restore'})]);
+        const generation = JSON.parse(data.info.generation_json);
+        let unknown = [...requests,...localRequests.filter(item => item.kind === 'directory').map(item => ({id:item.name}))].some(request => !generations.some(marker => marker.id === request.id));
+        unknown ||= generation.id !== 'initial' && !generations.some(marker => marker.id === generation.id);
+        for (const item of state.snapshots) {
+          const snapshot = await this.call('inspectSnapshot',{file:item.file});
+          if (snapshot.generation.id !== generation.id) continue;
+          for (const change of snapshot.changes) remoteIds.add(change.id);
+        }
+        if (state.snapshots.length && !remoteIds.size && data.changes.length) unknown = true;
+        if (generations.some(marker => marker.id !== generation.id && !generation.ancestors.includes(marker.id))) unknown = true;
+        const known = new Set(data.changes.map(change => change.id));
+        unknown ||= [...remoteIds].some(id => !known.has(id));
         await this.call('remoteInventory',{destination:transport.id,changeIds:[...remoteIds],paths:scores.map(file => file.path),unknown});
         this.syncNeeds = null;
         await this.refreshSyncNeeds(transport);
@@ -382,6 +404,8 @@ class BookshelfStore extends EventTarget {
         throw new DOMException('Allow access to the remembered library folder to continue.', 'NotAllowedError');
       }
       this.setPermissionRequired(false);
+      const deviceStateKey = await this.services.host.deviceStateKey(this.storage || {});
+      const deviceState = await this.services.host.loadDeviceState(deviceStateKey) || {};
       let url = new URL('bookshelf-worker.js', location.href).href;
       if (location.protocol === 'file:') {
         this.hostStorage = await this.services.host.openHostStorage(this.storage || {});
@@ -401,6 +425,8 @@ class BookshelfStore extends EventTarget {
       this.worker.onmessage = async ({ data }) => {
         if (data.hostRequest) {
           const methods = {
+            list: path => this.hostStorage.files.list(path),
+            saveDeviceState: state => this.services.host.saveDeviceState(deviceStateKey,state),
             readDatabase: () => this.hostStorage.readDatabase(), writeDatabase: bytes => this.hostStorage.writeDatabase(bytes), close: () => this.hostStorage.close(), clear: () => this.hostStorage.clear(),
             read: path => this.hostStorage.files.read(path), write: (path, bytes) => this.hostStorage.files.write(path, bytes), remove: path => this.hostStorage.files.remove(path),
           };
@@ -426,7 +452,7 @@ class BookshelfStore extends EventTarget {
         this.workerStarting = null;
       };
       await ready;
-      await this.send('open', { storage: location.protocol === 'file:' ? { kind: 'host' } : this.storage || {} });
+      await this.send('open', { deviceState, storage: location.protocol === 'file:' ? { kind: 'host' } : this.storage || {} });
       return this.worker;
     })().catch(error => {
       this.worker?.terminate(); this.hostStorage?.close(); this.hostStorage = null;
@@ -445,8 +471,8 @@ class BookshelfStore extends EventTarget {
   async call(action, args = {}) {
     if (this.storageDeleted) throw new Error('Library deletion was incomplete. Choose its storage location again before continuing.');
     if (this.deletingStorage && !['destroyStorage','open','saveState'].includes(action)) throw new Error('Wait for library data deletion.');
-    const shared = ['importFile','rememberOriginalLocation','update','link','moveItem','reindex','editSongs','saveState','resolveConflict','useVersion','importBackup'].includes(action);
-    const writing = shared || ['mergeDelta','installFile','releaseFile','pinFile'].includes(action);
+    const shared = ['importFile','rememberOriginalLocation','update','link','moveItem','reindex','editSongs','saveState','resolveConflict','useVersion','importBackup','relocateFile'].includes(action);
+    const writing = shared || ['mergeDelta','replaceSnapshot','installFile','releaseFile','pinFile'].includes(action);
     if (writing) { this.localSaving++; this.notifyStatus(); }
     try {
       await this.ensureWorker(); const value = await this.send(action,args);

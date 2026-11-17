@@ -15,11 +15,15 @@ async function library() {
   });
   await model.ready;
   assert.equal(model.syncError,undefined);
-  const data = {deviceId:'device',changes:[],documents:[],batches:{}};
+  const data = {deviceId:'device',changes:[],documents:[],info:{generation_json:JSON.stringify({id:'initial',ancestors:[]})}};
   let observation = {pending:0,verified:true,conflicts:0};
   model.call = async (action,args) => {
     switch (action) {
       case 'syncData': return data;
+      case 'listManaged': return [];
+      case 'inspectSnapshot': return {id:'existing',changes:[],ancestors:[],generation:{id:'initial',ancestors:[]}};
+      case 'rememberSnapshot': return;
+      case 'mergeDelta': return {addedChanges:0};
       case 'availability': return [];
       case 'syncSummary': return {...observation,uploads:0,downloads:0};
       case 'syncStatus': return observation;
@@ -27,11 +31,10 @@ async function library() {
       default: throw new Error('Unexpected storage operation: ' + action);
     }
   };
-  const transport = {id:'test:library',listChanges:async () => [],listScores:async () => [],
-    readChanges:async () => {throw new Error('Unexpected batch read');},
-    writeChanges:async () => {throw new Error('Unexpected batch write');},
-    readScore:async () => {throw new Error('Unexpected score download');},
-    writeScore:async () => {throw new Error('Unexpected score upload');}};
+  const transport = {id:'test:library',loadSyncState:async () => ({snapshots:[{id:'existing',file:new Blob(['snapshot'])}],expectedState:[]}),
+    listGenerations:async()=>[],restoreRequests:async()=>[],cleanup:async()=>{},listScores:async()=>[],
+    publishSnapshot:async()=>{throw new Error('Unexpected publication');},
+    readScore:async()=>{throw new Error('Unexpected download');},writeScore:async()=>{throw new Error('Unexpected upload');}};
   model.transport = transport;
   return {model,transport};
 }
@@ -54,25 +57,25 @@ test('manual and automatic sync work without a view and notify their lifecycle',
 test('sync errors remain observable and release the running state for retry',async () => {
   const {model,transport} = await library();
   const failure = new Error('Cloud unavailable');
-  transport.listChanges = async () => {throw failure;};
+  transport.loadSyncState = async () => {throw failure;};
   await assert.rejects(model.sync(transport),error => error === failure);
   assert.equal(model.syncError,failure);
   assert.equal(model.syncPending,false);
   assert.equal(model.manualSync,false);
-  transport.listChanges = async () => [];
+  transport.loadSyncState = async () => ({snapshots:[{id:'existing',file:new Blob(['snapshot'])}],expectedState:[]});
   await model.sync(transport);
   assert.equal(model.syncError,null);
 });
 
 test('refreshing local availability cannot hide unknown cloud changes',async () => {
   const {model,transport} = await library();
-  transport.listChanges = async () => [{id:'other-device/new-batch'}];
+  transport.listGenerations = async () => [{id:'other-generation',ancestors:['initial']}];
   await model.checkSyncNeeds();
   assert.equal(model.cloudPending,true);
   assert.equal(model.syncNeeds.unknown,true);
   await model.availability();
   assert.equal(model.cloudPending,true);
-  transport.listChanges = async () => [];
+  transport.listGenerations = async () => [];
   await model.checkSyncNeeds();
   assert.equal(model.cloudPending,false);
 });

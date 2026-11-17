@@ -24,9 +24,13 @@ export { checkUnsaved, escapeHtml, pathJoin, FileSrc, FileListView, FileSystemVi
 import { css, ButtonGroup, clamp, clearChildren, dataIndex, delay, Drag, getBox, helm, iconSvg, listen, dialog, noTranslate, Schedule, strToHash, toast, unlisten } from "./common.js";
 import { Score } from "./score.js";
 import { panels } from "./panel.js";
+import { hashLibraryBytes } from './bookshelf-format.js';
 // -skip
 
-let scoreFileMimeType = name => name.toLowerCase().endsWith('.zip') ? 'application/zip'
+let scoreFileMimeType = name => name.toLowerCase().endsWith('.sqlite') ? 'application/vnd.sqlite3'
+  : name.toLowerCase().endsWith('.md') ? 'text/markdown'
+  : name.toLowerCase().endsWith('.json') ? 'application/json'
+  : name.toLowerCase().endsWith('.zip') ? 'application/zip'
   : name.toLowerCase().endsWith('.mscz') ? 'application/x-musescore' : 'application/pdf';
 
 let bytesToBase64DataUrl = async (bytes, type = "application/octet-stream") => {
@@ -1246,6 +1250,55 @@ class GDriveSrc extends CachedSrc {
     if (!response.ok) err(`trashDirSrc(${path},${name},...)) failed: ${await response.text()}`);
   }
 
+  async listLibrarySnapshots(path) {
+    const dir = await this.getDir(path,true), entries = []; let pageToken;
+    do {
+      const query = new URLSearchParams({q:`'${dir.id}' in parents and name = 'library.sqlite' and trashed = false`,fields:'nextPageToken,files(id,size,version)',pageSize:'1000'});
+      if (pageToken) query.set('pageToken',pageToken);
+      const response = await fetch(this.filesUrl.replace(/\/$/,'') + '?' + query,{headers:{Authorization:'Bearer ' + this.tokens.access_token}});
+      if (!response.ok) throw new Error('Could not list Drive library versions');
+      const result = await response.json(); entries.push(...result.files.map(file => ({id:file.id,token:String(file.version),size:Number(file.size)}))); pageToken = result.nextPageToken;
+    } while (pageToken);
+    return entries;
+  }
+  async reserveLibrarySnapshot() {
+    const response = await fetch(this.filesUrl + 'generateIds?count=1&space=drive',{headers:{Authorization:'Bearer ' + this.tokens.access_token}});
+    if (!response.ok) throw new Error('Could not allocate Drive library version');
+    return (await response.json()).ids[0];
+  }
+  async readLibrarySnapshot(path,item) {
+    const response = await fetch(this.filesUrl + item.id + '?alt=media',{headers:{Authorization:'Bearer ' + this.tokens.access_token}});
+    if (response.status === 404) throw Object.assign(new Error('Drive version was removed; retry sync'),{retrySync:true});
+    if (!response.ok) throw new Error('Could not read Drive library version');
+    const file = await response.blob();
+    if (item.token) {
+      const metadata = await fetch(this.filesUrl + item.id + '?fields=version',{headers:{Authorization:'Bearer ' + this.tokens.access_token}});
+      if (metadata.status === 404) throw Object.assign(new Error('Drive version was removed'),{retrySync:true});
+      if (!metadata.ok) throw new Error('Could not verify Drive library version');
+      if (String((await metadata.json()).version) !== item.token) throw Object.assign(new Error('Drive version changed while reading'),{retrySync:true});
+    }
+    return file;
+  }
+  async publishLibrarySnapshot(path,file,expected,id) {
+    const dir = await this.getDir(path,true), boundary = 'rostrum-' + crypto.randomUUID();
+    const body = new Blob([`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n`,JSON.stringify({id,name:'library.sqlite',parents:[dir.id]}),`\r\n--${boundary}\r\nContent-Type: application/vnd.sqlite3\r\n\r\n`,file,`\r\n--${boundary}--\r\n`]);
+    try {
+      const response = await fetch(this.uploadUrl.replace(/\/$/,'') + '?uploadType=multipart',{method:'POST',headers:{Authorization:'Bearer ' + this.tokens.access_token,'Content-Type':'multipart/related; boundary=' + boundary},body});
+      if (response.ok) return true;
+      if (response.status !== 409 && response.status < 500) throw new Error('Drive library publication failed: HTTP ' + response.status);
+    } catch (error) {
+      if (!(error instanceof TypeError)) throw error;
+    }
+    // The create may have committed even when its response was lost.
+    const existing = await this.readLibrarySnapshot(path,{id});
+    if (await hashLibraryBytes(await existing.arrayBuffer()) !== await hashLibraryBytes(await file.arrayBuffer())) throw new Error('Drive publication identity has different contents');
+    return true;
+  }
+  async removeLibrarySnapshot(path,item) {
+    const response = await fetch(this.filesUrl + item.id,{method:'PATCH',headers:{Authorization:'Bearer ' + this.tokens.access_token,'Content-Type':'application/json'},body:JSON.stringify({trashed:true})});
+    if (!response.ok && response.status !== 404) throw new Error('Could not remove an old Drive library version');
+  }
+
   async getFileSrc(path, name, dir, file) {
     let url = this.filesUrl + file.id + "?q=trashed=false&alt=media";
     let fetchPromise = await fetch(url, {
@@ -1370,6 +1423,8 @@ class GDriveSrc extends CachedSrc {
 /**
 class DbxSrc (i.e. Dropbox)
 **/
+// HTTP header values must be ASCII even when stored filenames are Unicode.
+const dropboxApiArg = value => JSON.stringify(value).replace(/[\u007f-\uffff]/g,char => '\\u' + char.charCodeAt(0).toString(16).padStart(4,'0'));
 class DbxSrc extends CachedSrc {
   source = Score.sources.dbx;
   authUrl = "https://www.dropbox.com/oauth2/authorize";
@@ -1483,6 +1538,26 @@ class DbxSrc extends CachedSrc {
     if (!response.ok) err(`trashDirSrc(${path},${name},...)`, await response.text());
   }
 
+  async listLibrarySnapshots(path) {
+    const response = await fetch(this.filesUrl + 'get_metadata',{method:'POST',headers:{Authorization:'Bearer ' + this.tokens.access_token,'Content-Type':'application/json'},body:JSON.stringify({path:path + '/library.sqlite'})});
+    if (response.status === 409) {
+      const result = await response.json();
+      if (result.error_summary?.startsWith('path/not_found')) return [];
+      throw new Error('Could not inspect Dropbox library');
+    }
+    if (!response.ok) throw new Error('Could not inspect Dropbox library');
+    const file = await response.json(); return [{id:file.id,token:file.rev,size:file.size}];
+  }
+  async readLibrarySnapshot(path,item) {
+    const response = await fetch(this.contentUrl + 'download',{method:'POST',headers:{Authorization:'Bearer ' + this.tokens.access_token,'Dropbox-API-Arg':JSON.stringify({path:'rev:' + item.token})}});
+    if (!response.ok) throw Object.assign(new Error('Dropbox version is no longer available'),{retrySync:response.status === 409});
+    return response.blob();
+  }
+  async publishLibrarySnapshot(path,file,expected) {
+    try { await this.putFileSrc(path,'library.sqlite',file,null,null,{expected:expected[0]?.token || null}); return true; }
+    catch (error) { if (error.retrySync) return false; throw error; }
+  }
+
   async getFileSrc(path, name, dir, file) {
     let url = this.contentUrl + "download";
 
@@ -1490,7 +1565,7 @@ class DbxSrc extends CachedSrc {
       method: "POST",
       headers: {
         Authorization: "Bearer " + this.tokens.access_token,
-        "Dropbox-API-Arg": JSON.stringify({ path: file.id }),
+        "Dropbox-API-Arg": dropboxApiArg({ path: file.id }),
       },
     });
     let response = await fetchPromise;
@@ -1498,7 +1573,7 @@ class DbxSrc extends CachedSrc {
     return await response.arrayBuffer();
   }
 
-  async putFileSrc(path, name, data, dir, file) {
+  async putFileSrc(path, name, data, dir, file, condition = null) {
     let url = this.contentUrl + "upload_session/start";
     // get session_id
     let fetchPromise = await fetch(url, {
@@ -1526,7 +1601,7 @@ class DbxSrc extends CachedSrc {
         headers: {
           Authorization: "Bearer " + this.tokens.access_token,
           "Content-Type": "application/octet-stream",
-          "Dropbox-API-Arg": JSON.stringify({cursor: {offset:cursor, session_id:session_id}}),
+          "Dropbox-API-Arg": dropboxApiArg({cursor: {offset:cursor, session_id:session_id}}),
         },
         body: bytes.subarray(cursor, cursor + sliceLen),
       });
@@ -1543,9 +1618,10 @@ class DbxSrc extends CachedSrc {
       headers: {
         Authorization: "Bearer " + this.tokens.access_token,
         "Content-Type": "application/octet-stream",
-        "Dropbox-API-Arg": JSON.stringify({
+        "Dropbox-API-Arg": dropboxApiArg({
           commit: {
-            mode: "overwrite",
+            mode: condition ? (condition.expected ? {".tag":"update",update:condition.expected} : {".tag":"add"}) : "overwrite",
+            ...(condition ? {autorename:false,strict_conflict:true} : {}),
             path: path + "/" + name,
           },
           cursor: {
@@ -1557,6 +1633,7 @@ class DbxSrc extends CachedSrc {
       body: bytes.subarray(cursor, cursor + sliceLen),
     });
     response = await fetchPromise;
+    if (condition && response.status === 409) throw Object.assign(new Error("Dropbox library changed"),{retrySync:true});
     if (!response.ok) err(`putFileSrc(${path},${name},...)`, await response.text());
   }
 
@@ -1699,6 +1776,41 @@ class ODriveSrc extends CachedSrc {
     if (!response.ok) err(`trashDirSrc(${path},${name},...) failed: ${await response.text()}`);
   }
 
+  async listLibrarySnapshots(path) {
+    const dir = await this.getDir(path,true), parent = dir.id === 'root' ? 'root' : 'items/' + dir.id;
+    const response = await fetch(this.filesUrl + parent + ':/library.sqlite',{headers:{Authorization:'Bearer ' + this.tokens.access_token}});
+    if (response.status === 404) return [];
+    if (!response.ok) throw new Error('Could not inspect OneDrive library');
+    const file = await response.json(); return [{id:file.id,token:file.eTag,size:file.size}];
+  }
+  async readLibrarySnapshot(path,item) {
+    const bytes = await this.getFileSrc(path,'library.sqlite',null,item);
+    const current = await this.listLibrarySnapshots(path);
+    if (current[0]?.token !== item.token || current[0]?.id !== item.id) throw Object.assign(new Error('OneDrive library changed while reading'),{retrySync:true});
+    return new Blob([bytes]);
+  }
+  async publishLibrarySnapshot(path,file,expected) {
+    const dir = await this.getDir(path,true), previous = expected[0], parent = dir.id === 'root' ? 'root' : 'items/' + dir.id;
+    const headers = {Authorization:'Bearer ' + this.tokens.access_token,'Content-Type':'application/json'};
+    const response = await fetch(this.filesUrl + parent + ':/library.sqlite:/createUploadSession',{method:'POST',headers,body:JSON.stringify({deferCommit:true,item:{name:'library.sqlite','@microsoft.graph.conflictBehavior':previous ? 'replace' : 'fail'}})});
+    if (response.status === 409 || response.status === 412) return false;
+    if (!response.ok) throw new Error('Could not start OneDrive library upload');
+    const uploadUrl = (await response.json()).uploadUrl;
+    try {
+      const chunkSize = 5 * 1024 * 1024;
+      for (let offset = 0; offset < file.size; offset += chunkSize) {
+        const end = Math.min(offset + chunkSize,file.size);
+        const chunk = await fetch(uploadUrl,{method:'PUT',headers:{'Content-Range':`bytes ${offset}-${end-1}/${file.size}`},body:file.slice(offset,end)});
+        if (!chunk.ok) throw new Error('OneDrive library chunk upload failed');
+      }
+      // The condition belongs on the FINAL commit, not only session creation.
+      const committed = await fetch(this.filesUrl + parent,{method:'PUT',headers:{...headers,...(previous ? {'If-Match':previous.token} : {})},body:JSON.stringify({name:'library.sqlite','@microsoft.graph.conflictBehavior':previous ? 'replace' : 'fail','@microsoft.graph.sourceUrl':uploadUrl})});
+      if (committed.status === 409 || committed.status === 412) return false;
+      if (!committed.ok) throw new Error('OneDrive library commit failed: HTTP ' + committed.status);
+      return true;
+    } finally { await fetch(uploadUrl,{method:'DELETE'}).catch(() => {}); }
+  }
+
   async getFileSrc(path, name, dir, file) {
     let url = this.filesUrl + "items/" + file.id + "/content";
     let fetchPromise = await fetch(url, {
@@ -1715,7 +1827,7 @@ class ODriveSrc extends CachedSrc {
   async putFileSrc(path, name, data, dir, file) {
     let url = file?.id
         ? this.filesUrl + "items/" + file.id + "/createUploadSession"
-        : this.filesUrl + "items/" + dir.id + ":/" + name + ":/createUploadSession";
+        : this.filesUrl + (dir.id === "root" ? "root" : "items/" + dir.id) + ":/" + encodeURIComponent(name) + ":/createUploadSession";
     // get upload session url
     let fetchPromise = await fetch(url, {
       method: "POST",
@@ -1746,7 +1858,7 @@ class ODriveSrc extends CachedSrc {
         headers: {
           "Content-Length": sliceLen,
           "Content-Range": `bytes ${cursor}-${cursor + sliceLen - 1}/${dataLen}`,
-          "Content-Type": scoreFileMimeType(name),
+          "Content-Type": data instanceof Blob && data.type || scoreFileMimeType(name),
         },
         body: slice,
       });
@@ -2383,6 +2495,37 @@ class PCloudSrc extends CachedSrc {
      authentication mechanism rather than the platform, so the mechanism decides:
      see PCloudDirectAuth.contentAccess and PCloudOAuthAuth.contentAccess.
   **/
+  async listLibrarySnapshots(path) {
+    const dir = await this.getDir(path,true), file = dir.files['library.sqlite'];
+    if (!file) return [];
+    const result = await this.request('listrevisions',{fileid:file.id});
+    const entries = (result.revisions || []).map(revision => ({id:String(file.id) + ':' + revision.revisionid,fileId:file.id,revisionId:revision.revisionid,token:String(revision.hash),size:revision.size}));
+    entries.push({id:String(file.id) + ':current:' + result.metadata.hash,fileId:file.id,token:String(result.metadata.hash),size:result.metadata.size,current:true});
+    return entries;
+  }
+  async readLibrarySnapshot(path,item) {
+    if (item.current) {
+      const bytes = await this.getFileSrc(path,'library.sqlite',null,{id:item.fileId});
+      const latest = (await this.listLibrarySnapshots(path)).find(version => version.current);
+      if (latest?.token !== item.token) throw Object.assign(new Error('pCloud library changed while reading'),{retrySync:true});
+      return new Blob([bytes]);
+    }
+    // revisionid is a documented global parameter of copyfile. Materializing
+    // a temporary copy lets browser auth read revisions through same-origin getzip.
+    const dir = await this.getDir(path,true), name = '.rostrum-' + crypto.randomUUID() + '.pending';
+    const result = await this.request('copyfile',{fileid:item.fileId,revisionid:item.revisionId,tofolderid:dir.id,toname:name,noover:1});
+    try {
+      if (item.token !== undefined && String(result.metadata.hash) !== item.token) throw new Error('pCloud returned a different file revision. Retry synchronization.');
+      return new Blob([await this.getFileSrc(path,name,dir,{id:result.metadata.fileid})]);
+    }
+    finally { await this.request('deletefile',{fileid:result.metadata.fileid}).catch(() => {}); }
+  }
+  async publishLibrarySnapshot(path,file) {
+    const dir = await this.getDir(path,true);
+    await this.putFileSrc(path,'library.sqlite',file,dir,dir.files['library.sqlite']);
+    return true; // The engine must enumerate revisions AGAIN before acknowledging.
+  }
+
   async getFileSrc(_path, _name, _dir, file) {
     await this.authProvider.authenticate();
     return this.authProvider.contentAccess == "zip"
@@ -2411,7 +2554,7 @@ class PCloudSrc extends CachedSrc {
     // Access-Control-Allow-Headers field. A simple request works in the
     // extension too, so there is no platform branch here.
     let form = new FormData();
-    form.append("file", new Blob([data], { type: scoreFileMimeType(name) }), name);
+    form.append("file", new Blob([data], { type: data instanceof Blob && data.type || scoreFileMimeType(name) }), name);
     await this.request("uploadfile", { folderid: dir.id, nopartial: 1 }, {
       method: "POST",
       body: form,

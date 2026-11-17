@@ -9,7 +9,7 @@ self.addEventListener('message', ({ data }) => {
   if (data.error) request.reject(Object.assign(new Error(data.error), { name: data.errorName }));
   else request.resolve(data.value);
 });
-function request(method, args = []) {
+export function request(method, args = []) {
   return new Promise((resolve, reject) => {
     const hostRequest = ++sequence; pending.set(hostRequest, { resolve, reject });
     self.postMessage({ hostRequest, method, args });
@@ -18,6 +18,7 @@ function request(method, args = []) {
 export async function openBridgedLibraryStorage() {
   const database = await openSnapshotDatabase({ read: () => request('readDatabase'), write: bytes => request('writeDatabase', [bytes]), release: () => request('close'), destroy:() => request('clear') });
   return { database, files: {
+    list:path => request('list',[path]),
     read: path => request('read', [path]), write: (path, bytes) => request('write', [path, bytes]), remove: path => request('remove', [path]),
   } };
 }

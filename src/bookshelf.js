@@ -426,11 +426,27 @@ class BookshelfView {
     const checkSync = document.createElement('button'); checkSync.textContent = 'Check sync status';
     const allSync = document.createElement('button'); allSync.textContent = 'Sync and download all scores';
     const syncCounts = document.createElement('p'); syncCounts.setAttribute('aria-label','File sync counts');
-    syncSettings.append(cloud,cloudPath,chooseCloudFolder,cloudInfo,autoLabel,checkSync,applySync,syncCounts,allSync);
+    const restoreChoices = document.createElement('div'); restoreChoices.setAttribute('aria-label','Conflicting library replacements');
+    syncSettings.append(cloud,cloudPath,chooseCloudFolder,cloudInfo,autoLabel,checkSync,applySync,syncCounts,allSync,restoreChoices);
     this.elm.insertBefore(sync, transfers);
     const backupInfo = document.createElement('div'); backupInfo.textContent = 'A complete ZIP backup downloads any missing score files first.'; backupSettings.append(backupInfo);
     let cloudTouched = false, draftCloud = null, pickingCloudFolder = false, applyingCloud = false;
     const updateCloudControls = () => {
+      restoreChoices.replaceChildren();
+      const choices = this.model.syncError?.restoreChoices || [];
+      restoreChoices.hidden = !choices.length;
+      if (choices.length) {
+        const message = document.createElement('p'); message.textContent = 'Choose the replacement to keep. Other generations and their unsynced edits will be discarded.'; restoreChoices.append(message);
+        for (const id of choices) {
+          const choose = document.createElement('button'); choose.textContent = 'Keep replacement: ' + id;
+          choose.style.cssText = 'max-width:100%;overflow-wrap:anywhere;margin:4px 4px 4px 0;';
+          choose.disabled = !!this.model.operationBlock('sync');
+          choose.onclick = () => run(async () => {
+            if (!window.confirm('Use replacement ' + id + '? Edits from the other generations will be discarded.')) return;
+            await this.model.chooseRestoreGeneration(id); await this.refresh();
+          }); restoreChoices.append(choose);
+        }
+      }
       const chosen = draftCloud && draftCloud.source === cloud.value;
       const path = chosen ? draftCloud.path.replace(/^\/+|\/+$/g,'') : '';
       const destination = chosen ? draftCloud.source + ':' + (path ? '/' + path : '') : '';

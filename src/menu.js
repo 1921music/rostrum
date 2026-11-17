@@ -979,6 +979,7 @@ class Menu {
   showPanel(cell) {
     const panel = panels[cell.panel || cell.name + 'Panel']?.get(cell);
     if (!panel) return;
+    this.hasOpenedPanel = true;
     panel.show();
     if (cell.key === 'library') return panel;
     panel.setPosition(this.grip);
@@ -1578,6 +1579,7 @@ class Menu {
     // then moves ths panel's header to pointer location (this.op.e)
     let panel = panels[cell.panel || cell.name + "Panel"]?.get(cell);
     if (!panel) return;
+    this.hasOpenedPanel = true;
     if (!panel.elm.isConnected) {
       panel.elm.style.visibility = "hidden"; // prevent flash at default top:0 before positioning
       _body_.append(panel.elm);

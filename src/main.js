@@ -354,7 +354,9 @@ async function main() {
       let { loadPdfFromUrl } = await import("./ext.js");
       await loadPdfFromUrl();
     }
-    if (!_score_) {
+    // Initialization can finish after the user has already chosen Open/View.
+    // Do not close that panel by presenting the startup library afterwards.
+    if (!_score_ && !_menu_.hasOpenedPanel) {
       _menu_.showLibrary();
       _menu_.park();
       // Keep the library entry parked, but retain the user's circular-menu size.

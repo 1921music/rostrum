@@ -24,7 +24,7 @@ for(const kind of ['opfs','directory','indexeddb'])test(`delete managed data in 
   const pdf=await PDFLib.PDFDocument.create();pdf.addPage([300,400]);await _bookshelf_.import(new File([await pdf.save()],'Owned.pdf'));
   if(kind!=='indexeddb'){
    const foreign=await testStorageRoot.getFileHandle('My own file.txt',{create:true});const writer=await foreign.createWritable();await writer.write('keep');await writer.close();
-   const managed=await testStorageRoot.getDirectoryHandle('rostrum-library-v3');const scores=await managed.getDirectoryHandle('scores');const orphan=await scores.getFileHandle('0000000000000000000000000000000000000000000000000000000000000000',{create:true});await(await orphan.createWritable()).close();
+   const managed=testStorageRoot;const scores=await managed.getDirectoryHandle('scores');const orphan=await scores.getFileHandle('0000000000000000000000000000000000000000000000000000000000000000',{create:true});await(await orphan.createWritable()).close();
   }
   await RostrumLibraryHost.saveCloudSelection({source:'pCloud',path:'/Saved sync'});
   await _panels_.library.view.refresh();
@@ -44,12 +44,12 @@ for(const kind of ['opfs','directory','indexeddb'])test(`delete managed data in 
  expect(await page.evaluate(()=>RostrumLibraryHost.loadCloudSelection())).toEqual({source:'pCloud',path:'/Saved sync'});
  const physical=await page.evaluate(async kind=>{
   if(kind==='indexeddb')return new Promise((resolve,reject)=>{const r=indexedDB.open('deletion-test');r.onsuccess=()=>{const db=r.result;const t=db.transaction('files');const q=t.objectStore('files').count();t.oncomplete=()=>{resolve(q.result);db.close();};};r.onerror=()=>reject(r.error);});
-  const names=[],managed=await testStorageRoot.getDirectoryHandle('rostrum-library-v3');try{const scores=await managed.getDirectoryHandle('scores');for await(const name of scores.keys())names.push(name);}catch(e){if(e.name!=='NotFoundError')throw e;}
+  const names=[],managed=testStorageRoot;try{const scores=await managed.getDirectoryHandle('scores');for await(const name of scores.keys())names.push(name);}catch(e){if(e.name!=='NotFoundError')throw e;}
   const keep=await(await testStorageRoot.getFileHandle('My own file.txt')).getFile();
-  let database=false;try{kind==='opfs'?await managed.getDirectoryHandle('.rostrum-library-db'):await managed.getFileHandle('library.sqlite');database=true;}catch(e){if(e.name!=='NotFoundError')throw e;}
+  let database=false;try{await managed.getFileHandle('library.sqlite');database=true;}catch(e){if(e.name!=='NotFoundError')throw e;}
   return{names,keep:await keep.text(),database};
  },kind);
- expect(physical).toEqual(kind==='indexeddb'?1:{names:[],keep:'keep',database:true});
+ expect(physical).toEqual(kind==='indexeddb'?2:{names:[],keep:'keep',database:true});
  await page.reload();await expect.poll(()=>page.evaluate(()=>_bookshelf_.storage?.kind)).toBe(kind);
  await settings(page);
  await page.getByRole('button',{name:'Use IndexedDB',exact:true}).click();await expect.poll(()=>page.evaluate(()=>_bookshelf_.storage?.kind)).toBe('indexeddb');
@@ -101,7 +101,7 @@ test('directory deletion refuses a database replaced outside this session',async
  const result=await page.evaluate(async()=>{
   const root=await(await navigator.storage.getDirectory()).getDirectoryHandle('external-delete',{create:true});
   await _bookshelf_.configure({kind:'directory',directory:root});
-  const handle=await(await root.getDirectoryHandle('rostrum-library-v3')).getFileHandle('library.sqlite'),writer=await handle.createWritable();await writer.write('external database');await writer.close();
+  const handle=await root.getFileHandle('library.sqlite'),writer=await handle.createWritable();await writer.write('external database');await writer.close();
   let error='';try{await _bookshelf_.deleteStorage();}catch(e){error=e.message;}
   return {error,contents:await(await handle.getFile()).text()};
  });
@@ -114,11 +114,12 @@ for (const fails of [false,true]) test(`storage choices unlock after automatic s
  const choose = page.getByRole('button',{name:'Use IndexedDB',exact:true});
  await expect(choose).toBeEnabled();
  await page.evaluate(async fails => {
-  const transport = {id:'mock-storage-sync',listChanges:async()=>{
-    await new Promise(resolve => {window.resumeStorageSync=resolve;});
-    if(fails)throw new Error('Mock sync failure');return [];
-   },listScores:async()=>[],readChanges:async()=>{throw new Error('Unexpected read');},
-   writeChanges:async()=>{throw new Error('Unexpected write');},readScore:async()=>{throw new Error('Unexpected read');},writeScore:async()=>{throw new Error('Unexpected write');}};
+  const file=(await _bookshelf_.call('captureSnapshot')).file;
+  const transport={id:'mock-storage-sync',loadSyncState:async()=>{
+    await new Promise(resolve=>{window.resumeStorageSync=resolve;});
+    if(fails)throw new Error('Mock sync failure');return {snapshots:[{id:'existing',file}],expectedState:[]};
+   },listGenerations:async()=>[],restoreRequests:async()=>[],listScores:async()=>[],
+   publishSnapshot:async()=>true,cleanup:async()=>{},readScore:async()=>{throw new Error('Unexpected read');},writeScore:async()=>{throw new Error('Unexpected write');}};
   _bookshelf_.transport=transport;_bookshelf_.autoSync.setEnabled(true);
  },fails);
  await expect.poll(()=>page.evaluate(()=>!!window.resumeStorageSync)).toBe(true);

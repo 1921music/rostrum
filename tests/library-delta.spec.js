@@ -42,13 +42,13 @@ test('sync receives searchable metadata only, sends one changed record and opens
     await _bookshelf_.configure(deviceA);
     await _bookshelf_.call('update',{ table:'entries',values:{ id:entry.id,metadata_json:JSON.stringify({ ...JSON.parse(entry.metadata_json),title:'Updated song' }) } });
     const sent = await _bookshelf_.sync(transport);
-    const packet = JSON.parse(await [...deltaCloud.batches.values()].at(-1).text());
+    const packet = await _bookshelf_.call('inspectSnapshot',{file:[...deltaCloud.batches.values()].at(-1)});
     await _bookshelf_.configure(deviceB); await _bookshelf_.sync(transport);
     const found = await _bookshelf_.call('search',{ query:'Updated song' });
     const score = await _bookshelf_.openDocument(id);
     const status = await _bookshelf_.call('syncStatus',{ destination:transport.id });
     return { before,readsBefore,received:received.uploadedChanges,sent:sent.uploadedChanges,found:found.length,
-      changes:packet.changes.map(row => row.entity_type),fileUploads:deltaCloud.calls.filter(call => call.kind === 'writeScore').length,
+      changes:packet.changes.filter(row=>JSON.parse(row.payload_json).metadata_json?.includes('Updated song')).map(row => row.entity_type),fileUploads:deltaCloud.calls.filter(call => call.kind === 'writeScore').length,
       fileReads:deltaCloud.calls.filter(call => call.kind === 'readScore').length,pages:score.pgs.length,pending:status.pending };
   },id);
   expect(result).toMatchObject({ before:{ present:false,remote:true,pinned:false },readsBefore:0,received:0,sent:1,found:1,
@@ -178,7 +178,7 @@ test('out-of-order changes merge and offline competing edits remain conflicts un
   expect(result).toEqual({ alternatives:2,title:'From A',conflicts:0,fileUploads:1 });
 });
 
-test('a missing ancestor is not acknowledged, and a later complete inventory can be retried', async ({ page }) => {
+test('a self-contained SQLite snapshot stays readable after its ancestor file is removed', async ({ page }) => {
   await devices(page);
   const result = await page.evaluate(async () => {
     const parent = [...deltaCloud.batches.entries()][0];
@@ -191,7 +191,7 @@ test('a missing ancestor is not acknowledged, and a later complete inventory can
     deltaCloud.batches.set(...parent); deltaCloud.reverse = true; await _bookshelf_.sync(deltaCloud.transport);
     return { failed,empty,title:JSON.parse((await _bookshelf_.call('search'))[0].metadata_json).title };
   });
-  expect(result).toEqual({ failed:true,empty:0,title:'Child revision' });
+  expect(result).toEqual({ failed:false,empty:1,title:'Child revision' });
 });
 
 test('complete backup explicitly fetches cloud-only files while normal sync does not', async ({ page }) => {
@@ -288,7 +288,7 @@ test('automatic receiving reloads an affected score only, preserving received in
   await page.evaluate(() => _bookshelf_.setAutoSync(false));
 });
 
-test('cloud provider publishes readable score files before immutable JSON batches and ignores pending names', async ({ page }) => {
+test('cloud provider publishes readable score files before SQLite snapshots and ignores pending names', async ({ page }) => {
   await installProviderCloud(page);
   const result = await page.evaluate(async () => {
     const pdf = await PDFLib.PDFDocument.create(); pdf.addPage([300,400]);
@@ -296,9 +296,9 @@ test('cloud provider publishes readable score files before immutable JSON batche
     await _bookshelf_.syncCloud('pCloud','My library');
     return providerCloud.calls.filter(call => call.kind === 'publish');
   });
-  const scores = result.filter(item => item.name !== 'library-format.json');
-  expect(scores[0]).toMatchObject({ path:'/My library/rostrum-library-v3/scores' }); expect(scores[0].name).toMatch(/^[a-f0-9]{64}$/);
-  expect(scores[1].path).toMatch(/^\/My library\/rostrum-library-v3\/changes\//); expect(scores[1].name).toMatch(/\.json$/);
+  const scores = result.filter(item => item.name !== 'README.md');
+  expect(scores[0]).toMatchObject({ path:'/My library/scores' }); expect(scores[0].name).toMatch(/^[a-f0-9]{8,64}_/);
+  expect(scores[1]).toMatchObject({path:'/My library',name:'library.sqlite'});
 });
 
 test('overlapping silent transfers restore foreground authentication after the last transfer', async ({ page }) => {
