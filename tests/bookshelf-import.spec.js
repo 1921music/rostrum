@@ -17,6 +17,35 @@ test.beforeEach(async ({ page }) => {
 test.afterEach(async ({ page }) => expect(page.external).toEqual([]));
 
 const review = page => page.getByRole('dialog', { name:'Review score import' });
+
+for (const url of ['/pod.html','/rostrum.html']) test(`MSCZ default work titles fall back to visible title or filename (${url})`,async ({page}) => {
+  await page.goto(url); await page.waitForFunction(() => !!window._bookshelf_ && !!window._menu_);
+  const cases = [
+    ['無題のスコア','Close To You','Close To You'],
+    ['Untitled score','Close To You','Close To You'],
+    ['無題のスコア','','Filename'],
+    ['Untitled score','','Filename'],
+    ['Named work','Visible title','Named work'],
+    ['Untitled score for piano','Visible title','Untitled score for piano'],
+  ];
+  const inputs = cases.map(([workTitle,visible]) => [...zipSync({'score.mscx':Buffer.from(
+    `<museScore><Score><metaTag name="workTitle">${workTitle}</metaTag><metaTag name="composer">Composer</metaTag><Text><style>title</style><text>${visible}</text></Text></Score></museScore>`
+  )})]);
+  const results = await page.evaluate(async inputs => {
+    const titles = [];
+    for (const bytes of inputs) {
+      const file = new File([new Uint8Array(bytes)],'Filename.mscz');
+      titles.push((await _bookshelf_.analyze(file))[0].metadata);
+    }
+    const xml = '<score-partwise><work><work-title>Untitled score</work-title></work></score-partwise>';
+    const musicXml = (await _bookshelf_.analyze(new File([xml],'Filename.musicxml')))[0].metadata.title;
+    return {titles,musicXml};
+  },inputs);
+  expect(results.titles.map(metadata => metadata.title)).toEqual(cases.map(row => row[2]));
+  expect(results.titles.every(metadata => metadata.composer === 'Composer')).toBe(true);
+  expect(results.musicXml).toBe('Untitled score');
+});
+
 async function start(page, url = '/pod.html') {
   await page.goto(url); await page.waitForFunction(() => !!window._bookshelf_ && !!window._menu_);
   if (url.startsWith('file:')) await page.evaluate(() => _bookshelf_.configure({ kind:'indexeddb' }));

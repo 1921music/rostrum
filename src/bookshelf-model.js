@@ -620,7 +620,8 @@ class BookshelfStore extends EventTarget {
           if (xml.documentElement.tagName === 'museScore') {
             const tags = Object.fromEntries([...xml.querySelectorAll('Score > metaTag')].map(tag => [tag.getAttribute('name'), tag.textContent]));
             const titleText = [...xml.querySelectorAll('Text')].find(text => text.querySelector('style')?.textContent === 'title');
-            title = tags.workTitle || titleText?.querySelector('text')?.textContent || title;
+            const workTitle = ['無題のスコア','Untitled score'].includes(tags.workTitle) ? '' : tags.workTitle;
+            title = workTitle || titleText?.querySelector('text')?.textContent || title;
             composer = tags.composer || ''; source = 'music-metadata'; break;
           }
           if (/^score-(partwise|timewise)$/.test(xml.documentElement.tagName)) {

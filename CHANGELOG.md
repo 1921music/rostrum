@@ -2,6 +2,8 @@
 
 ## Unreleased — MSCZ support
 
+- Treat MSCZ work titles `無題のスコア` and `Untitled score` as unset when
+  importing songs, falling back to the visible title and then the filename.
 - Offer Library import after File → Open, with a View only option. Reuse the
   displayed score for import review, preserve the original file bytes, and open
   the Library copy after import. Cancelling keeps the original score open.
