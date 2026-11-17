@@ -1,7 +1,7 @@
 // Rostrum Service Worker
 // Enables offline functionality and PWA installation
 
-let CACHE_NAME = 'rostrum-v1.0.0-fc6cd5e3cb43';
+let CACHE_NAME = 'rostrum-v1.0.0-d10e3ec6f410';
 // Cache Storage is shared by every app on this origin; isolate each deployment.
 const CACHE_SCOPE = 'rostrum-scope:' + self.registration.scope + ':';
 // Relative to this script, so Rostrum works when served from a subdirectory.
