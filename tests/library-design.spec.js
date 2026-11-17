@@ -145,3 +145,46 @@ for (const [url,width] of [['/pod.html',1280],['/rostrum.html',390]]) test(`libr
   await expect(tab.getByLabel('Library view',{exact:true})).toHaveValue('documents');
  } finally {await other.close();}
 });
+
+
+for (const [url,width] of [['/pod.html',1280],['/rostrum.html',390]]) test(`library search restores results on reopen and reload, including a cleared query (${url})`,async({page})=>{
+ await page.setViewportSize({width,height:844});await start(page,url);await importScores(page,3);
+ const {selectLibraryView}=require('./library-ui-helpers');await selectLibraryView(page,'entries');
+ const search=page.getByRole('searchbox',{name:'Search songs',exact:true});
+ const rows=page.locator('.Bookshelf__row');
+ await search.fill('Study 2');await expect(rows).toHaveCount(1);
+ await expect(rows).toContainText('Study 2');
+ await page.getByRole('button',{name:'Close library',exact:true}).click();
+ await page.evaluate(()=>_menu_.showLibrary());
+ await expect(search).toHaveValue('Study 2');await expect(rows).toHaveCount(1);await expect(rows).toContainText('Study 2');
+ await page.reload();await expect(surface(page)).toBeVisible();
+ await expect(page.getByLabel('Library view',{exact:true})).toHaveValue('entries');
+ await expect(search).toHaveValue('Study 2');await expect(rows).toHaveCount(1);await expect(rows).toContainText('Study 2');
+ await search.fill('');await expect(rows).toHaveCount(3);
+ await page.reload();await expect(surface(page)).toBeVisible();
+ await expect(search).toHaveValue('');await expect(rows).toHaveCount(3);
+});
+
+
+test('library mutations clear the saved search, while refresh and file status do not',async({page})=>{
+ await start(page);await importScores(page,3);
+ const {selectLibraryView}=require('./library-ui-helpers');await selectLibraryView(page,'entries');
+ const search=page.getByRole('searchbox',{name:'Search songs',exact:true}),rows=page.locator('.Bookshelf__row');
+ await search.fill('Study 2');await expect(rows).toHaveCount(1);
+ await page.evaluate(async()=>{await _bookshelf_.availability();await _panels_.library.view.refresh();});
+ await expect(search).toHaveValue('Study 2');await expect(rows).toHaveCount(1);
+ await page.evaluate(async()=>{
+  const row=(await _bookshelf_.records('entries')).find(row=>JSON.parse(row.metadata_json).title==='Study 2');
+  await _bookshelf_.rename('entries',row,'New title');
+ });
+ await expect(search).toHaveValue('');await expect(rows).toHaveCount(3);
+ await page.reload();await expect(search).toHaveValue('');await expect(rows).toHaveCount(3);
+ await search.fill('Study 1');await expect(rows).toHaveCount(1);
+ await page.getByRole('button',{name:'Close library',exact:true}).click();
+ await page.evaluate(async()=>{
+  const row=(await _bookshelf_.records('entries'))[0];await _bookshelf_.rename('entries',row,'Changed while closed');
+ });
+ await page.evaluate(()=>_menu_.showLibrary());
+ await expect(search).toHaveValue('');await expect(rows).toHaveCount(3);
+ await page.reload();await expect(search).toHaveValue('');await expect(rows).toHaveCount(3);
+});

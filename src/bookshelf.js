@@ -8,6 +8,7 @@ import { reviewScoreImport } from './bookshelf-import.js';
 import { CloudFolderPicker } from './cloud-folder-picker.js';
 // -skip
 
+const librarySearchKey = 'rostrum-library-search';
 const bookshelfStore = new BookshelfStore({
   get host() { return window.RostrumLibraryHost; },
   get runtime() { return window._bookshelfRuntime_; },
@@ -31,6 +32,9 @@ const bookshelfStore = new BookshelfStore({
 });
 // Application integration: reader lifecycle and presentation, never storage decisions.
 bookshelfStore.addEventListener('warning',event => toast(event.detail.message));
+bookshelfStore.addEventListener('contentchange',() => {
+  try { localStorage.removeItem(librarySearchKey); } catch { /* Device storage may be unavailable. */ }
+});
 let syncCancelDisplay;
 bookshelfStore.addEventListener('statuschange',() => {
   const message = bookshelfStore.syncPending && bookshelfStore.manualSync ? 'Syncing library'
@@ -254,6 +258,9 @@ class BookshelfView {
     input.setAttribute('aria-label', 'Import scores');
     const search = document.createElement('input');
     search.type = 'search'; search.placeholder = 'Search songs'; search.setAttribute('aria-label', 'Search songs');
+    panel.listeners.push(listen(this.model,'contentchange',() => {
+      search.value = ''; this.refresh?.();
+    }));
     const status = document.createElement('div'); status.setAttribute('role', 'status');
     const deviceStatus = document.createElement('div'); deviceStatus.setAttribute('aria-label','Device save status');
     const cloudStatus = document.createElement('div'); cloudStatus.setAttribute('aria-label','Cloud sync status');
@@ -301,7 +308,9 @@ class BookshelfView {
     }
     // This is a device preference, separate from library records and backups.
     const categoryKey = 'rostrum-library-category';
+    const searchKey = librarySearchKey;
     try {
+      search.value = localStorage.getItem(searchKey) || '';
       const saved = localStorage.getItem(categoryKey);
       if ([...mode.options].some(option => option.value === saved)) mode.value = saved;
     } catch { /* The library remains usable when device storage is unavailable. */ }
@@ -794,7 +803,10 @@ class BookshelfView {
       status.textContent = `Imported ${imported} scores; skipped ${skipped} already imported scores; cancelled ${cancelled} scores.`;
       if (skipped) status.textContent += ' Previous or deleted scores remain in history.';
     });
-    search.oninput = () => this.refresh();
+    search.oninput = () => {
+      try { localStorage.setItem(searchKey,search.value); } catch { /* Keep the search usable without device storage. */ }
+      this.refresh();
+    };
     tagFilter.onchange = tagMatch.onchange = () => this.refresh();
     mode.onchange = () => this.changeCategory(mode.value);
     collection.onchange = () => this.refresh();

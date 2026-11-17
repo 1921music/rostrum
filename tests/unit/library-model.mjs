@@ -137,3 +137,17 @@ test('operation policy gives UI and callers the same blocking reason',async () =
  await assert.rejects(model.configure({kind:'indexeddb'}),{message:reason});
  model.opening = null; assert.equal(model.operationBlock('storage'),null);
 });
+
+
+test('search-affecting content changes are distinct from file status and reader autosave',async()=>{
+ const {model}=await library();
+ model.call=BookshelfStore.prototype.call;
+ model.ensureWorker=async()=>{};
+ model.send=async(action,args)=>action==='mergeDelta'?{addedChanges:args.count}:{};
+ let changes=0;model.addEventListener('contentchange',()=>changes++);
+ for(const action of ['installFile','releaseFile','pinFile','saveState','remoteInventory'])await model.call(action);
+ await model.call('mergeDelta',{count:0});assert.equal(changes,0);
+ await model.call('mergeDelta',{count:1});assert.equal(changes,1);
+ await model.call('update');assert.equal(changes,2);
+ await model.call('destroyStorage');assert.equal(changes,3);
+});

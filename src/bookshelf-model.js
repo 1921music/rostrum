@@ -15,6 +15,7 @@ class BookshelfStore extends EventTarget {
     this.ready = Promise.resolve().then(() => this.initializeSync()).catch(error => { this.syncError = error; this.notifyStatus(); });
   }
   warn(message) { this.dispatchEvent(new CustomEvent('warning',{detail:{message}})); }
+  notifyContent() { this.dispatchEvent(new Event('contentchange')); }
   notifyStatus() { this.dispatchEvent(new Event('statuschange')); }
   notifyData() { this.dispatchEvent(new Event('datachange')); this.notifyStatus(); }
   hasSyncDestination() { return !!(this.transport || this.cloudSelection?.source); }
@@ -133,7 +134,7 @@ class BookshelfStore extends EventTarget {
     const result = await this.call('open');
     try { await this.services.host.saveSelection(storage); }
     catch { this.warn('Library opened, but its location could not be remembered. Choose it again next time.'); }
-    this.autoSync?.request(); this.notifyData();
+    this.autoSync?.request(); this.notifyContent(); this.notifyData();
     return result;
   }
   async sync(transport, { automatic = false } = {}) {
@@ -456,6 +457,7 @@ class BookshelfStore extends EventTarget {
         if (this.syncNeeds?.checkedAt) await this.refreshSyncNeeds({id:this.syncNeeds.destination});
         this.autoSync?.request();
       }
+      if (shared && action !== 'saveState' || action === 'mergeDelta' && value.addedChanges > 0 || action === 'destroyStorage') this.notifyContent();
       if (writing || action === 'remoteInventory') this.notifyData();
       return value;
     }
