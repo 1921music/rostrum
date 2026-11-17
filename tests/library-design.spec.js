@@ -111,7 +111,8 @@ test('Add opens an on-screen menu and the native file chooser on a narrow screen
   expect(box.x).toBeGreaterThanOrEqual(0); expect(box.x + box.width).toBeLessThanOrEqual(390);
   const bytes = await page.evaluate(async () => { const pdf = await PDFLib.PDFDocument.create(); pdf.addPage([300,400]); return [...await pdf.save()]; });
   const picking = page.waitForEvent('filechooser'); await choose.click();
-  await (await picking).setFiles({name:'Picked.pdf',mimeType:'application/pdf',buffer:Buffer.from(bytes)});
+  const chooser=await picking;expect(chooser.isMultiple()).toBe(true);
+  await chooser.setFiles({name:'Picked.pdf',mimeType:'application/pdf',buffer:Buffer.from(bytes)});
   const review = page.getByRole('dialog',{name:'Review score import'});
   await expect(review).toBeVisible();
   await review.getByRole('button',{name:'Cancel import',exact:true}).click();

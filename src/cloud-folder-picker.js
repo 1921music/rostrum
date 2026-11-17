@@ -23,6 +23,9 @@ css('CloudFolderPicker', `
   .CloudFolderPicker__create input { display:block; width:100%; margin:4px 0 0; font-size:15px; }
   .CloudFolderPicker__list { flex:1; min-height:80px; overflow:auto; overscroll-behavior:contain; touch-action:pan-y; padding:0 12px; border-top:1px solid var(--ui-line); }
   :root dialog.CloudFolderPicker .CloudFolderPicker__folder { display:flex; width:100%; gap:12px; align-items:center; text-align:left; border:0; border-bottom:1px solid var(--ui-line); border-radius:0; padding:14px 12px; min-height:52px; }
+  :root dialog.CloudFolderPicker .CloudFolderPicker__file { display:flex; gap:12px; align-items:center; padding:14px 12px; min-height:52px; border-bottom:1px solid var(--ui-line); cursor:pointer; overflow-wrap:anywhere; }
+  .CloudFolderPicker__file:has(input:checked) { background:var(--ui-selected); }
+  .CloudFolderPicker__file input { flex:none; width:18px; height:18px; accent-color:var(--ui-primary); }
   .CloudFolderPicker__folder span { overflow-wrap:anywhere; }
   .CloudFolderPicker__folder svg { flex:none; }
   .CloudFolderPicker__empty { color:var(--ui-muted); padding:24px 12px; }
@@ -38,12 +41,12 @@ css('CloudFolderPicker', `
 // Folder browsing never changes the sync destination; the caller applies the result.
 class CloudFolderPicker {
   constructor(service, initialPath = '', {files = false} = {}) {
-    this.pickFiles = files;
+    this.pickFiles = files; this.selectedFiles = new Map();
     this.service = service; this.source = FileSrc.get(service);
     const relative = initialPath.replace(/^\/+|\/+$/g,'');
     this.path = relative ? '/' + relative : ''; this.valid = false; this.epoch = 0;
     this.elm = document.createElement('dialog'); this.elm.className = 'CloudFolderPicker';
-    this.elm.setAttribute('aria-label',files ? 'Choose cloud score' : 'Choose library sync folder');
+    this.elm.setAttribute('aria-label',files ? 'Choose cloud scores' : 'Choose library sync folder');
     this.elm.innerHTML = `<header><h2 tabindex="-1"></h2><button type="button" class="CloudFolderPicker__close" aria-label="Close folder picker">${iconSvg('Close',{size:'20px'})}</button></header>
       <div class="CloudFolderPicker__toolbar"><button type="button" data-up>Up</button><button type="button" data-refresh>Refresh</button><button type="button" data-new>New folder</button></div>
       <nav class="CloudFolderPicker__path" aria-label="Cloud folder path"></nav>
@@ -52,10 +55,10 @@ class CloudFolderPicker {
       <div class="CloudFolderPicker__list" role="group" aria-label="Cloud folders" tabindex="-1"></div>
       <footer>Current folder<output class="CloudFolderPicker__selected" aria-label="Current cloud folder" translate="no"></output><div class="CloudFolderPicker__actions"><button type="button" data-cancel>Cancel</button><button type="button" data-confirm>Use this folder</button></div></footer>`;
     const find = selector => this.elm.querySelector(selector);
-    this.title = find('h2'); this.title.textContent = (files ? 'Choose score — ' : 'Choose sync folder — ') + service;
+    this.title = find('h2'); this.title.textContent = (files ? 'Choose scores — ' : 'Choose sync folder — ') + service;
     if (files) {
-      find('.CloudFolderPicker__notice > p').textContent = 'Open a folder, then choose a score to import into your library.';
-      find('[data-confirm]').hidden = true; find('[data-new]').hidden = true;
+      find('.CloudFolderPicker__notice > p').textContent = 'Select scores, then import them. Selections are kept when you open another folder.';
+      find('[data-new]').hidden = true;
     }
     this.up = find('[data-up]'); this.refresh = find('[data-refresh]'); this.newFolder = find('[data-new]');
     this.crumbs = find('nav'); this.status = find('[data-status]'); this.error = find('[role=alert]'); this.errorText = find('[data-error]');
@@ -67,7 +70,7 @@ class CloudFolderPicker {
     this.newFolder.onclick = () => { this.form.hidden = false; this.name.value = ''; this.name.focus(); };
     find('[data-cancel-create]').onclick = () => { this.form.hidden = true; this.newFolder.focus(); };
     this.form.onsubmit = event => { event.preventDefault(); this.createFolder(); };
-    this.confirm.onclick = () => { if (this.valid && !this.busy) { this.result = this.path; this.close(); } };
+    this.confirm.onclick = () => { if (!this.confirm.disabled) { this.result = this.pickFiles ? [...this.selectedFiles.values()] : this.path; this.close(); } };
     this.elm.addEventListener('pointerdown',e => { e.taken = true; },{capture:true});
     this.renderPath();
   }
@@ -91,7 +94,9 @@ class CloudFolderPicker {
     for (const button of [...this.crumbs.querySelectorAll('button'),...this.list.querySelectorAll('button'),...this.form.querySelectorAll('button')]) button.disabled = busy;
     this.name.disabled = busy;
     this.up.disabled = busy || !this.path; this.refresh.disabled = this.newFolder.disabled = busy;
-    this.confirm.disabled = busy || !this.valid;
+    this.confirm.disabled = busy || !this.valid || this.pickFiles && !this.selectedFiles.size;
+    if (this.pickFiles) this.confirm.textContent = `Import selected (${this.selectedFiles.size})`;
+    for (const input of this.list.querySelectorAll('input')) input.disabled = busy;
   }
   showError(error, path) {
     this.errorText.textContent = error?.message || 'Could not open this cloud folder.';
@@ -115,9 +120,14 @@ class CloudFolderPicker {
       }
       const files = this.pickFiles ? Object.keys(directory.files || {}).filter(name => /\.(pdf|mscz|mxl|musicxml|xml)$/i.test(name)).sort((a,b) => a.localeCompare(b)) : [];
       for (const name of files) {
-        const button = document.createElement('button'); button.type = 'button'; button.className = 'CloudFolderPicker__folder';
-        button.innerHTML = iconSvg('File',{size:'22px'}); const label = document.createElement('span'); label.textContent = name; label.translate = false; button.append(label);
-        button.onclick = () => { this.result = {source:this.service,path,name}; this.close(); }; this.list.append(button);
+        const key = JSON.stringify([path,name]), row = document.createElement('label'); row.className = 'CloudFolderPicker__file';
+        const input = document.createElement('input'); input.type = 'checkbox'; input.checked = this.selectedFiles.has(key);
+        const label = document.createElement('span'); label.textContent = name; label.translate = false; row.append(input,label);
+        input.onchange = () => {
+          if (input.checked) this.selectedFiles.set(key,{source:this.service,path,name}); else this.selectedFiles.delete(key);
+          this.setBusy(false);
+        };
+        this.list.append(row);
       }
       if (!names.length && !files.length) { const empty = document.createElement('p'); empty.className = 'CloudFolderPicker__empty'; empty.textContent = this.pickFiles ? 'No scores or subfolders in this folder.' : 'No subfolders in this folder.'; this.list.append(empty); }
       this.status.textContent = ''; this.list.focus({preventScroll:true});

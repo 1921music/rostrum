@@ -27,15 +27,15 @@ async function setup(page,url='/pod.html'){
 async function choose(page,source='pCloud'){
  await page.getByLabel('Add scores',{exact:true}).click();
  await page.getByLabel('Add from cloud service').selectOption(source);
- await page.getByRole('button',{name:'Choose cloud file…',exact:true}).click();
- const picker=page.getByRole('dialog',{name:'Choose cloud score',exact:true});
+ await page.getByRole('button',{name:'Choose cloud files…',exact:true}).click();
+ const picker=page.getByRole('dialog',{name:'Choose cloud scores',exact:true});
  await picker.getByRole('button',{name:'A/B',exact:true}).click();
  await expect(picker.getByText('Ignore.txt',{exact:true})).toHaveCount(0);
  return picker;
 }
 for(const url of ['/pod.html','/rostrum.html'])for(const source of ['Drive','Dropbox','OneDrive','pCloud'])test(`cloud import retains ${source} location through review and reload (${url})`,async({page})=>{
  await setup(page,url);const picker=await choose(page,source);
- await picker.getByRole('button',{name:'Cloud score.pdf',exact:true}).click();
+ await picker.getByRole('checkbox',{name:'Cloud score.pdf',exact:true}).check();await picker.getByRole('button',{name:'Import selected (1)',exact:true}).click();
  const review=page.getByRole('dialog',{name:'Review score import',exact:true});await expect(review).toBeVisible();
  await review.getByLabel('Library score name').fill('My cloud score');
  await review.getByRole('button',{name:'Import into library',exact:true}).click();await expect(review).toHaveCount(0);
@@ -48,9 +48,9 @@ test('cancelled picker, cancelled review and failed download leave no document',
  await setup(page);let picker=await choose(page);await picker.getByRole('button',{name:'Cancel',exact:true}).click();
  await expect(page.getByLabel('Add scores',{exact:true})).toBeFocused();
  expect(await page.evaluate(()=>cloudCalls.some(call=>call[0]==='read'))).toBe(false);
- picker=await choose(page);await picker.getByRole('button',{name:'Cloud score.pdf',exact:true}).click();
+ picker=await choose(page);await picker.getByRole('checkbox',{name:'Cloud score.pdf',exact:true}).check();await picker.getByRole('button',{name:'Import selected (1)',exact:true}).click();
  await page.getByRole('dialog',{name:'Review score import'}).getByRole('button',{name:'Cancel import',exact:true}).click();
- await page.evaluate(()=>window.failCloudRead=true);picker=await choose(page);await picker.getByRole('button',{name:'Cloud score.pdf',exact:true}).click();
+ await page.evaluate(()=>window.failCloudRead=true);picker=await choose(page);await picker.getByRole('checkbox',{name:'Cloud score.pdf',exact:true}).check();await picker.getByRole('button',{name:'Import selected (1)',exact:true}).click();
  await expect(page.locator('.Bookshelf__message')).toHaveText('Download failed');
  expect(await page.evaluate(()=>_bookshelf_.call('list'))).toEqual([]);
 });
@@ -112,4 +112,25 @@ for(const url of ['/pod.html','/rostrum.html'])test(`cloud service and full file
   await page.locator('.Bookshelf__open').click();
   await expect(page.getByRole('complementary',{name:'Score details'})).toContainText('Drive · /Shared score.pdf');
  }
+});
+
+test('cloud Add keeps multiple selections while browsing and reviews each selected score',async({page})=>{
+ await setup(page);await page.setViewportSize({width:390,height:844});
+ await page.evaluate(async()=>{
+  const pdf=await PDFLib.PDFDocument.create();pdf.setTitle('Second');pdf.addPage([400,500]);window.secondScoreBytes=await pdf.save();
+  const get=_FileSrc_.get;const source=get('pCloud'),read=source.getFile;
+  source.getDir=async path=>path===''?{dirs:{'A/B':{}},files:{}}:{dirs:{},files:{'Cloud score.pdf':{},'Second.pdf':{}}};
+  source.getFile=async(path,name)=>name==='Second.pdf'?{data:secondScoreBytes.buffer,path,name}:read(path,name);
+  _FileSrc_.get=ref=>ref==='pCloud'?source:get(ref);
+ });
+ const picker=await choose(page);const confirm=picker.getByRole('button',{name:/Import selected/});await expect(confirm).toBeDisabled();
+ await picker.getByRole('checkbox',{name:'Cloud score.pdf',exact:true}).check();
+ await picker.getByRole('button',{name:'Up',exact:true}).click();await picker.getByRole('button',{name:'A/B',exact:true}).click();
+ await expect(picker.getByRole('checkbox',{name:'Cloud score.pdf',exact:true})).toBeChecked();
+ await picker.getByRole('checkbox',{name:'Second.pdf',exact:true}).check();await expect(confirm).toHaveText('Import selected (2)');
+ await confirm.click();
+ for(let i=0;i<2;i++)await page.getByRole('dialog',{name:'Review score import',exact:true}).getByRole('button',{name:'Import into library',exact:true}).click();
+ await expect.poll(()=>page.evaluate(async()=>(await _bookshelf_.call('list')).length)).toBe(2);
+ expect(await page.evaluate(async()=>(await _bookshelf_.call('list')).map(row=>JSON.parse(row.metadata_json).originalLocations[0].name).sort())).toEqual(['Cloud score.pdf','Second.pdf']);
+ await expect(page.locator('.Bookshelf__message')).toContainText('Imported 2 scores');
 });

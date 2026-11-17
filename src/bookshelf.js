@@ -37,8 +37,7 @@ bookshelfStore.addEventListener('contentchange',() => {
 });
 let syncCancelDisplay;
 bookshelfStore.addEventListener('statuschange',() => {
-  const message = bookshelfStore.syncPending && bookshelfStore.manualSync ? 'Syncing library'
-    : bookshelfStore.applyingChanges ? 'Applying score changes' : null;
+  const message = bookshelfStore.applyingChanges ? 'Applying score changes' : null;
   if (message && syncCancelDisplay === undefined) {
     syncCancelDisplay = _shade_.cancel.style.display;
     _shade_.cancel.style.display = 'none'; _shade_.show(message,0);
@@ -967,21 +966,31 @@ class BookshelfView {
     for (const source of [Score.sources.gdrive,Score.sources.dbx,Score.sources.odrive,Score.sources.pcloud]) cloudService.add(new Option(source,source));
     cloudLabel.append(cloudService);
     const preload = () => { if (cloudService.value === Score.sources.gdrive) FileSrc.get(cloudService.value).preloadGIS?.(); };
-    const chooseCloud = element('button','','Choose cloud file…'); chooseCloud.type = 'button';
+    const chooseCloud = element('button','','Choose cloud files…'); chooseCloud.type = 'button';
     chooseCloud.disabled = true;
     cloudService.onchange = () => { chooseCloud.disabled = !cloudService.value; preload(); };
     chooseCloud.onclick = async () => {
       add.open = false; chooseCloud.disabled = true;
       try {
         const picker = this.cloudFolderPicker = new CloudFolderPicker(cloudService.value,'',{files:true});
-        const location = await picker.show(); this.cloudFolderPicker = null;
-        if (!location || this.panel.closing) return;
-        this.status.textContent = 'Downloading ' + location.name;
-        const file = await this.model.readOriginalFile(location);
-        if (this.panel.closing) return;
-        const imported = await this.model.importReviewed(file,{originalLocation:location});
+        const locations = await picker.show(); this.cloudFolderPicker = null;
+        if (!locations || this.panel.closing) return;
+        let imported = 0, skipped = 0, cancelled = 0; const failures = [];
+        for (const location of locations) {
+          if (this.panel.closing) break;
+          try {
+            this.status.textContent = 'Downloading ' + location.name;
+            const file = await this.model.readOriginalFile(location);
+            if (this.panel.closing) break;
+            const result = await this.model.importReviewed(file,{originalLocation:location});
+            if (!result) cancelled++;
+            else if (result.alreadyImported) skipped++;
+            else imported++;
+            if (locations.length === 1) this.status.textContent = result ? result.alreadyImported ? 'Score already imported; original file location recorded.' : 'Imported ' + location.name : 'Import cancelled.';
+          } catch (error) { failures.push(location.name + ': ' + error.message); if (locations.length === 1) this.status.textContent = error.message; }
+        }
         await this.refresh();
-        this.status.textContent = imported ? imported.alreadyImported ? 'Score already imported; original file location recorded.' : 'Imported ' + location.name : 'Import cancelled.';
+        if (locations.length > 1) this.status.textContent = `Imported ${imported} scores; skipped ${skipped} already imported scores; cancelled ${cancelled} scores; failed ${failures.length} scores.` + (failures.length ? ' ' + failures.join(' · ') : '');
       } catch (error) { this.status.textContent = error.message; }
       finally {
         this.cloudFolderPicker = null; chooseCloud.disabled = false;

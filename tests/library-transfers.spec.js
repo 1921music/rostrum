@@ -226,3 +226,21 @@ test('download progress counts requests once and excludes cloud-only files not r
  await expect(downloadList).toContainText('No files waiting to download.');
  expect(await page.evaluate(()=>deltaCloud.calls.filter(c=>c.kind==='readScore').length)).toBe(2);
 });
+
+test('manual sync keeps its progress readable without the blocking shade',async({page})=>{
+ await seed(page,2);
+ await page.evaluate(async()=>{
+  await _bookshelf_.configure({kind:'indexeddb',name:'transfer-a'});deltaCloud.scores.clear();
+  const write=deltaCloud.transport.writeScore;
+  deltaCloud.transport.writeScore=async(doc,file)=>{await new Promise(resolve=>window.resumeManualUpload=resolve);return write(doc,file);};
+  window.manualSyncJob=_bookshelf_.sync(deltaCloud.transport);
+ });
+ await expect.poll(()=>page.evaluate(()=>!!window.resumeManualUpload)).toBe(true);
+ await expect(page.getByLabel('Library transfer progress',{exact:true})).toContainText('Uploading: Score 0.pdf');
+ await expect(page.locator('.Shade')).toHaveCount(0);
+ await expect(page.getByLabel('Search songs',{exact:true})).toBeEnabled();
+ await page.getByRole('button',{name:'Upload waiting: 1 files',exact:true}).click();
+ await expect(page.getByRole('region',{name:'Files waiting to upload',exact:true})).toContainText('Score 1.pdf');
+ await page.evaluate(()=>{deltaCloud.transport.writeScore=async(doc,file)=>{deltaCloud.scores.set(doc.storage_path,file);};resumeManualUpload();});
+ await page.evaluate(()=>manualSyncJob);await expect(page.getByLabel('Library transfer progress',{exact:true})).toContainText('Transfer complete');
+});
