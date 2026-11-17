@@ -12899,7 +12899,7 @@ function initializeLibrarySqlite() {
 // src/bookshelf-format.js
 var LIBRARY_NAMESPACE = "rostrum-library-v3";
 var LIBRARY_APPLICATION_ID = 1381192781;
-var LIBRARY_SCHEMA_VERSION = 5;
+var LIBRARY_SCHEMA_VERSION = 6;
 var LIBRARY_STORAGE_VERSION = 2;
 var LIBRARY_RECORD_VERSION = 4;
 var LIBRARY_BACKUP_VERSION = 2;
@@ -12920,6 +12920,17 @@ async function libraryEntityId(...parts) {
 function createScorePath(id) {
   if (!/^[a-f0-9]{64}$/.test(id)) throw new Error("Invalid score identity");
   return scorePath(`scores/${id}`);
+}
+function createLocalScorePath(id, name, otherIds = []) {
+  createScorePath(id);
+  let length = 8;
+  const others = [...otherIds].filter((other) => other !== id);
+  while (length < 64 && others.some((other) => other.startsWith(id.slice(0, length)))) length++;
+  const clean = String(name || "score").normalize("NFC").replace(/[<>\u0022:/\\|?*\x00-\x1f]/g, "_").replace(/[ .]+$/, "") || "score";
+  const extension = clean.match(/\.[a-z0-9]{1,12}$/i)?.[0] || "";
+  let stem = extension ? clean.slice(0, -extension.length) : clean;
+  while (new TextEncoder().encode(stem).length > 160) stem = [...stem].slice(0, -1).join("");
+  return scorePath(`scores/${id.slice(0, length)}_${stem || "score"}${extension}`);
 }
 function scoreStoragePath(path, version = LIBRARY_STORAGE_VERSION) {
   if (version !== LIBRARY_STORAGE_VERSION) throw new LibraryFormatError("Unsupported score storage version. Update Rostrum.");
@@ -14733,10 +14744,15 @@ async function initializeLibrarySchema(db2) {
   const app = db2.exec("PRAGMA application_id")[0].application_id;
   const tables2 = db2.exec("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'");
   if (app && app !== LIBRARY_APPLICATION_ID || !version && tables2.length || version && app !== LIBRARY_APPLICATION_ID) throw new LibraryFormatError("The selected database is not a Rostrum library.");
-  if (version && version !== LIBRARY_SCHEMA_VERSION) throw new LibraryFormatError("Unsupported library schema. Update Rostrum; pre-versioned data is not migrated.");
+  if (version && (version !== 5 && version !== LIBRARY_SCHEMA_VERSION)) throw new LibraryFormatError("Unsupported library schema. Update Rostrum; pre-versioned data is not migrated.");
   if (version) {
     const info = db2.exec("SELECT * FROM library_info WHERE id=1")[0];
     if (!info || info.storage_format_version !== LIBRARY_STORAGE_VERSION || info.record_format_version !== LIBRARY_RECORD_VERSION) throw new LibraryFormatError("Unsupported library data or storage format. Update Rostrum.");
+  }
+  if (version === 5) {
+    db2.exec("PRAGMA user_version=6");
+    await db2.flush();
+    version = 6;
   }
   if (!version) {
     transaction(db2, () => {
@@ -15020,10 +15036,30 @@ async function open() {
   sql("PRAGMA foreign_keys=ON");
   sql("PRAGMA trusted_schema=OFF");
   await initializeLibrarySchema(db);
+  const localPath = (path) => {
+    const logical = scoreStoragePath(path), id = logical.slice("scores/".length);
+    return fileState(id)?.localPath ? scorePath(fileState(id).localPath) : logical;
+  };
   files = {
-    read: (path) => rawFiles.read(scoreStoragePath(path)),
-    write: (path, bytes) => rawFiles.write(scoreStoragePath(path), bytes),
-    remove: (path) => rawFiles.remove(scoreStoragePath(path))
+    read: (path) => rawFiles.read(localPath(path)),
+    async write(path, bytes, name) {
+      const logical = scoreStoragePath(path), id = logical.slice("scores/".length);
+      let target = fileState(id)?.localPath;
+      if (!target) {
+        name ||= JSON.parse(sql("SELECT metadata_json FROM documents WHERE id=?", [id])[0]?.metadata_json || "{}").originalFilename;
+        const ids = sql("SELECT id FROM documents").map((row) => row.id);
+        ids.push(...sql("SELECT key FROM local_state WHERE key LIKE 'file:%'").map((row) => row.key.slice(5)));
+        target = createLocalScorePath(id, name, ids);
+      }
+      await rawFiles.write(scorePath(target), bytes);
+      setFileState(id, { localPath: target });
+      if (target !== logical) try {
+        await rawFiles.remove(logical);
+      } catch (error) {
+        if (error.name !== "NotFoundError") throw error;
+      }
+    },
+    remove: (path) => rawFiles.remove(localPath(path))
   };
   deviceId = sql("SELECT value FROM local_state WHERE key='device'")[0]?.value || crypto.randomUUID();
   sql("INSERT OR IGNORE INTO local_state VALUES ('device', ?)", [deviceId]);
@@ -15168,7 +15204,7 @@ var actions = {
         if (existing) {
           if (await hashLibraryBytes(await existing.arrayBuffer()) !== doc.content_hash) throw new Error("A different file already exists at " + doc.storage_path);
         } else {
-          await files.write(doc.storage_path, manifest.archive[doc.storage_path]);
+          await files.write(doc.storage_path, manifest.archive[doc.storage_path], JSON.parse(doc.metadata_json).originalFilename);
           created.push(doc.storage_path);
         }
       }
@@ -15245,7 +15281,7 @@ var actions = {
       }
     }
     try {
-      await files.write(path, bytes);
+      await files.write(path, bytes, file.name);
       return transaction2(() => {
         const document = save("documents", {
           id,
