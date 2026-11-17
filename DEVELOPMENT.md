@@ -75,6 +75,14 @@ no migration from earlier versions. `tests/library-pdf-ranges.spec.js` checks
 partial reads, selected-page priority, rotated and mixed-size pages, persistence
 and export in source, packaged HTTP and standalone file builds.
 
+File → Open (Local, Recent and cloud browsers) first displays the score, then
+offers Library import or View only. Import reuses the displayed score for review
+and copies the original file bytes; success opens the Library copy for autosave.
+View only, Escape and cancelled review keep the original score open. Review
+borrows that score without disposing it. Revert, Copy and Merge do not prompt.
+`tests/open-library-prompt.spec.js` covers these choices, original bytes, existing
+imports and failed-import cancellation across web and standalone builds.
+
 ### Library workspace design
 
 The library uses native HTML/CSS; no UI component framework is required.

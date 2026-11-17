@@ -278,6 +278,32 @@ class FileSrc {
       return src;
   }
 
+  static async offerLibraryImport(score, file) {
+    const library = window._bookshelf_;
+    if (!library) return;
+    const importFile = await new Promise(resolve => {
+      const prompt = dialog(`Import <span translate="no">${escapeHtml(file.name)}</span> to Library?<br><br>You can also view it without importing.`,
+        { 'Import to Library': { svg:'Open' }, 'View only': { svg:'Open' } }, (_e,_prop,tag,args) => {
+          resolve(tag === 'Import to Library'); args.close();
+        });
+      prompt.setAttribute('aria-label','Import opened score to Library');
+      listen(prompt,'close',() => resolve(false),{once:true});
+      prompt.buttonsElm.self.elms['View only'].focus();
+    });
+    if (!importFile) return;
+    try {
+      const imported = await library.importReviewed(file,{originalLocation:{
+        source:score.source,path:score.source === Score.sources.local ? null : score.path ?? null,name:file.name,
+      }},score);
+      if (!imported) return;
+      if (imported.deleted_at || imported.replaced_by_id) {
+        toast('Score already exists in Library history.'); return;
+      }
+      await library.openDocument(imported.id);
+      toast(imported.alreadyImported ? 'Opened existing Library score.' : 'Score imported to Library.');
+    } catch (error) { errDialog(error,'Could not import or open the Library copy.'); }
+  }
+
   static async openActiveScore(cell) {
     let score = _score_;
     let src = score ? FileSrc.get(score.source) : null;
@@ -2512,6 +2538,9 @@ class LocalFileView {
       score.fileHandle = file.handle || null;
       Score.visit(score, visitUpdate);
       toast('File opened');
+      this.panel.hide();
+      await FileSrc.offerLibraryImport(score,file);
+      return;
     }
     this.panel.hide();
   }
@@ -3004,10 +3033,16 @@ class FileListView {
             activateMerge(checked);
           }
         } else {
+          // Preserve the original bytes before PDF.js can transfer the buffer
+          // to its worker. Import the source file rather than an exported copy.
+          const file = new File([data],name);
           let score = await new Score().init(source, path, name, data);
           if (fileHandle) score.fileHandle = fileHandle;
           Score.visit(score, visitUpdate);
           toast("File downloaded");
+          _shade_.hide();
+          this.panel.hide();
+          await FileSrc.offerLibraryImport(score,file);
         }
       } catch (error) {
         if (!error.handled) errDialog(error, source === Score.sources.local ? 'Error opening local Recent file.' : 'Error: failed to download file from cloud server.');

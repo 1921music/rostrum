@@ -2,6 +2,9 @@
 
 ## Unreleased — MSCZ support
 
+- Offer Library import after File → Open, with a View only option. Reuse the
+  displayed score for import review, preserve the original file bytes, and open
+  the Library copy after import. Cancelling keeps the original score open.
 - Open local library PDFs with partial reads and start at the selected song's
   page. Store maximum page dimensions on import to keep existing layout sizing;
   fetch individual dimensions only as pages are used. Library schema 5 / record

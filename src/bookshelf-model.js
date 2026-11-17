@@ -651,18 +651,18 @@ class BookshelfStore extends EventTarget {
       return { entries: await this.analyze(file,score), maxWidth:score.maxWidth, maxHeight:score.maxHeight };
     } finally { if (!preview) await score.dispose(); }
   }
-  async importReviewed(file, options = {}) {
+  async importReviewed(file, options = {}, previewScore = null) {
     if (this.reviewPending) throw new Error('Finish the current score import review first.');
     this.reviewPending = true;
-    let preview;
+    let preview = previewScore;
     try {
       const existing = await this.call('findImportedFile', { file });
       if (existing) return this.call('importFile',{file,entries:[],...options});
-      preview = await this.scores.preview(file);
+      preview ||= await this.scores.preview(file);
       const analysis = await this.prepareImport(file, preview);
       return await this.scores.review(file, analysis.entries, preview, draft => this.call('importFile', { file, ...analysis, ...draft, ...options }),
         this.storage?.kind === 'directory' ? () => this.reauthorizeStorage() : null);
-    } finally { try { await preview?.dispose(); } finally { this.reviewPending = false; } }
+    } finally { try { if (!previewScore) await preview?.dispose(); } finally { this.reviewPending = false; } }
   }
   async reindex(id) {
     await this.ensureFile(id);
