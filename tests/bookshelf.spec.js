@@ -630,3 +630,32 @@ test('cloud sync publishes changes and separate scores through the provider inte
   expect(result.names.some(name => name.startsWith('/My library/rostrum-library-v3/changes/') && name.endsWith('.json'))).toBe(true);
   expect(result.failed).toBe(true);
 });
+
+
+test('selected directory stores readable score names and keeps logical identities across reload and backup',async({page})=>{
+ await page.goto('/pod.html');await page.waitForFunction(()=>!!window._bookshelf_&&!!window._menu_);
+ const saved=await page.evaluate(async()=>{
+  await _bookshelf_.setAutoSync(false);
+  const root=await(await navigator.storage.getDirectory()).getDirectoryHandle('readable-score-names',{create:true});
+  await _bookshelf_.configure({kind:'directory',directory:root});
+  const pdf=await PDFLib.PDFDocument.create();pdf.addPage([300,400]);
+  const bytes=await pdf.save(),doc=await _bookshelf_.import(new File([bytes],'曲集 Original.pdf'));
+  await _bookshelf_.import(new File([bytes],'Another name.pdf'));
+  const directory=await(await root.getDirectoryHandle('rostrum-library-v3')).getDirectoryHandle('scores');
+  const names=[];for await(const name of directory.keys())names.push(name);
+  const physical=await(await directory.getFileHandle(names[0])).getFile();
+  const backup=await _bookshelf_.exportBackup();
+  return {id:doc.id,path:doc.storage_path,names,size:physical.size,expectedSize:bytes.length,backup:[...new Uint8Array(await backup.arrayBuffer())]};
+ });
+ expect(saved.names).toEqual([saved.id.slice(0,8)+'_曲集 Original.pdf']);
+ expect(saved.path).toBe('scores/'+saved.id);expect(saved.size).toBe(saved.expectedSize);
+ await page.reload();await page.waitForFunction(()=>!!window._bookshelf_&&!!window._menu_);
+ expect(await page.evaluate(async id=>(await _bookshelf_.call('read',{id})).file.size,saved.id)).toBe(saved.size);
+ const restored=await page.evaluate(async({backup,id})=>{
+  await _bookshelf_.configure({kind:'indexeddb',name:'readable-score-restore'});
+  await _bookshelf_.importBackup(new File([new Uint8Array(backup)],'Backup.zip'));
+  const state=await _bookshelf_.call('read',{id});
+  return {name:state.file.name,size:state.file.size};
+ },saved);
+ expect(restored.size).toBe(saved.size);
+});

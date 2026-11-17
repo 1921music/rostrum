@@ -5,8 +5,8 @@ and `library_info`. There are no migration history or file-move journal tables.
 
 ## Information kept for future changes
 
-- SQLite `PRAGMA user_version` identifies the DB schema (currently 4).
-- `library_info` identifies record representation (3) and score storage format (2).
+- SQLite `PRAGMA user_version` identifies the DB schema (currently 6).
+- `library_info` identifies record representation (4) and score storage format (2).
 - Sync batches and backups identify their formats (both 2). Individual changes
   retain their record version so old history remains distinguishable later.
 - Score IDs and references are independent of display names. `storage_path` is
@@ -42,3 +42,12 @@ IDs hash the document identity and original outline tree position. Root entries
 use a fixed root identity; manual entries retain random IDs. Song edits never
 change their identities. Shelf/tag memberships derive IDs from their endpoints;
 playlist occurrences retain independent IDs.
+
+Local score filenames use `<hash prefix>_<original filename>`, starting with eight
+hash digits and extending the prefix when another document shares it. The exact
+local path is stored in the existing device-only file state. The immutable
+`scores/<full hash>` key remains unchanged in shared records, cloud storage and
+portable backups. Schema 6 guards clients that understand this local mapping;
+opening schema 5 only updates the client guard and does not rewrite score files.
+New imports and downloads use readable names; existing hash-only files remain
+readable and are renamed when saved again.

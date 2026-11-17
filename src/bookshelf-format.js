@@ -1,7 +1,7 @@
 // +skip
 export { LIBRARY_NAMESPACE, LIBRARY_APPLICATION_ID, LIBRARY_SCHEMA_VERSION, LIBRARY_STORAGE_VERSION,
   LIBRARY_RECORD_VERSION, LIBRARY_SYNC_VERSION, LIBRARY_BACKUP_VERSION, LibraryFormatError,
-  libraryFormat, validateLibraryFormat, scorePath, createScorePath, scoreStoragePath,
+  libraryFormat, validateLibraryFormat, scorePath, createScorePath, createLocalScorePath, scoreStoragePath,
   listStoredScores, isManagedScoreName, checkRecordVersion, hashLibraryBytes, libraryEntityId, checkLibraryEnvelope };
 // -skip
 
@@ -10,7 +10,7 @@ export { LIBRARY_NAMESPACE, LIBRARY_APPLICATION_ID, LIBRARY_SCHEMA_VERSION, LIBR
 // the parent directory and cannot damage files or batches inside this namespace.
 const LIBRARY_NAMESPACE = 'rostrum-library-v3';
 const LIBRARY_APPLICATION_ID = 0x5253544d;
-const LIBRARY_SCHEMA_VERSION = 5;
+const LIBRARY_SCHEMA_VERSION = 6;
 const LIBRARY_STORAGE_VERSION = 2;
 const LIBRARY_RECORD_VERSION = 4;
 const LIBRARY_SYNC_VERSION = 2;
@@ -42,6 +42,19 @@ async function libraryEntityId(...parts) {
 function createScorePath(id) {
   if (!/^[a-f0-9]{64}$/.test(id)) throw new Error('Invalid score identity');
   return scorePath(`scores/${id}`);
+}
+// Local filenames are independent of the immutable key used by sync/history.
+function createLocalScorePath(id, name, otherIds = []) {
+  createScorePath(id);
+  let length = 8;
+  const others = [...otherIds].filter(other => other !== id);
+  while (length < 64 && others.some(other => other.startsWith(id.slice(0,length)))) length++;
+  const clean = String(name || 'score').normalize('NFC').replace(/[<>\u0022:/\\|?*\x00-\x1f]/g,'_').replace(/[ .]+$/,'') || 'score';
+  const extension = clean.match(/\.[a-z0-9]{1,12}$/i)?.[0] || '';
+  let stem = extension ? clean.slice(0,-extension.length) : clean;
+  // Leave room for a full hash and extension on filesystems with 255-byte names.
+  while (new TextEncoder().encode(stem).length > 160) stem = [...stem].slice(0,-1).join('');
+  return scorePath(`scores/${id.slice(0,length)}_${stem || 'score'}${extension}`);
 }
 function scoreStoragePath(path,version = LIBRARY_STORAGE_VERSION) {
   if (version !== LIBRARY_STORAGE_VERSION) throw new LibraryFormatError('Unsupported score storage version. Update Rostrum.');

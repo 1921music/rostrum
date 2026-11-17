@@ -2,7 +2,7 @@ import { openLibraryStorage } from './bookshelf-storage.js';
 import { openConfiguredLibraryStorage } from './bookshelf-storage-policy.js';
 import { unzipSync } from 'fflate';
 import { exportLibraryPackage, readLibraryPackage, hashBytes, scorePath } from './bookshelf-transfer.js';
-import { LIBRARY_SCHEMA_VERSION, LIBRARY_RECORD_VERSION, createScorePath, scoreStoragePath, checkRecordVersion, libraryEntityId } from './bookshelf-format.js';
+import { LIBRARY_SCHEMA_VERSION, LIBRARY_RECORD_VERSION, createScorePath, createLocalScorePath, scoreStoragePath, checkRecordVersion, libraryEntityId } from './bookshelf-format.js';
 import { initializeLibrarySchema, libraryTables } from './bookshelf-schema.js';
 
 // All database and file mutations run serially in this worker. A second tab
@@ -220,10 +220,28 @@ async function open() {
   sql('PRAGMA foreign_keys=ON');
   sql('PRAGMA trusted_schema=OFF');
   await initializeLibrarySchema(db);
+  const localPath = path => {
+    const logical = scoreStoragePath(path), id = logical.slice('scores/'.length);
+    return fileState(id)?.localPath ? scorePath(fileState(id).localPath) : logical;
+  };
   files = {
-    read:path => rawFiles.read(scoreStoragePath(path)),
-    write:(path,bytes) => rawFiles.write(scoreStoragePath(path),bytes),
-    remove:path => rawFiles.remove(scoreStoragePath(path)),
+    read:path => rawFiles.read(localPath(path)),
+    async write(path,bytes,name) {
+      const logical = scoreStoragePath(path), id = logical.slice('scores/'.length);
+      let target = fileState(id)?.localPath;
+      if (!target) {
+        name ||= JSON.parse(sql('SELECT metadata_json FROM documents WHERE id=?',[id])[0]?.metadata_json || '{}').originalFilename;
+        const ids = sql('SELECT id FROM documents').map(row => row.id);
+        ids.push(...sql("SELECT key FROM local_state WHERE key LIKE 'file:%'").map(row => row.key.slice(5)));
+        target = createLocalScorePath(id,name,ids);
+      }
+      await rawFiles.write(scorePath(target),bytes);
+      setFileState(id,{localPath:target});
+      // Re-saving an older hash-only file must not leave a second local copy.
+      if (target !== logical) try { await rawFiles.remove(logical); }
+      catch (error) { if (error.name !== 'NotFoundError') throw error; }
+    },
+    remove:path => rawFiles.remove(localPath(path)),
   };
   deviceId = sql("SELECT value FROM local_state WHERE key='device'")[0]?.value || crypto.randomUUID();
   sql("INSERT OR IGNORE INTO local_state VALUES ('device', ?)", [deviceId]);
@@ -352,7 +370,7 @@ const actions = {
         if (existing) {
           if (await hashBytes(await existing.arrayBuffer()) !== doc.content_hash) throw new Error('A different file already exists at ' + doc.storage_path);
         } else {
-          await files.write(doc.storage_path, manifest.archive[doc.storage_path]); created.push(doc.storage_path);
+          await files.write(doc.storage_path, manifest.archive[doc.storage_path],JSON.parse(doc.metadata_json).originalFilename); created.push(doc.storage_path);
         }
       }
       mergeRecords(manifest);
@@ -422,7 +440,7 @@ const actions = {
       }
     }
     try {
-      await files.write(path, bytes);
+      await files.write(path, bytes,file.name);
       return transaction(() => {
         const document = save('documents', { id, content_hash: hash, storage_path: path, size_bytes: file.size,
           settings_json: JSON.stringify({ maxWidth, maxHeight }), metadata_json: JSON.stringify(withOriginalLocation({ displayName, originalFilename: file.name, format: file.name.split('.').pop().toLowerCase() },originalLocation)) });

@@ -39,10 +39,15 @@ export async function initializeLibrarySchema(db) {
   const app = db.exec('PRAGMA application_id')[0].application_id;
   const tables = db.exec("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'");
   if (app && app !== LIBRARY_APPLICATION_ID || !version && tables.length || version && app !== LIBRARY_APPLICATION_ID) throw new LibraryFormatError('The selected database is not a Rostrum library.');
-  if (version && (version !== LIBRARY_SCHEMA_VERSION)) throw new LibraryFormatError('Unsupported library schema. Update Rostrum; pre-versioned data is not migrated.');
+  if (version && (version !== 5 && version !== LIBRARY_SCHEMA_VERSION)) throw new LibraryFormatError('Unsupported library schema. Update Rostrum; pre-versioned data is not migrated.');
   if (version) {
     const info = db.exec('SELECT * FROM library_info WHERE id=1')[0];
     if (!info || info.storage_format_version !== LIBRARY_STORAGE_VERSION || info.record_format_version !== LIBRARY_RECORD_VERSION) throw new LibraryFormatError('Unsupported library data or storage format. Update Rostrum.');
+  }
+  // The local filename mapping is understood only by schema-6 clients.
+  // Existing schema-5 files remain readable at their unchanged logical paths.
+  if (version === 5) {
+    db.exec('PRAGMA user_version=6'); await db.flush(); version = 6;
   }
   if (!version) {
     transaction(db,() => {

@@ -117,3 +117,31 @@ test('Add opens an on-screen menu and the native file chooser on a narrow screen
   await review.getByRole('button',{name:'Cancel import',exact:true}).click();
   await expect(choose).not.toBeVisible();
 });
+
+
+for (const [url,width] of [['/pod.html',1280],['/rostrum.html',390]]) test(`library category is a device preference across ring-menu reopen and reload (${url})`,async({page,context})=>{
+ await page.setViewportSize({width,height:844});await start(page,url);
+ const {selectLibraryView}=require('./library-ui-helpers');
+ for(const [value,title] of [['entries','Songs'],['tags','Tags'],['playlists','Playlists'],['bookshelves','Bookshelves'],['documents','All scores']]){
+  await selectLibraryView(page,value);
+  await expect(page.locator('.Bookshelf__heading h2')).toHaveText(title);
+  await page.getByRole('button',{name:'Close library',exact:true}).click();
+  await page.evaluate(()=>_menu_.showLibrary());
+  await expect(page.locator('.Bookshelf__heading h2')).toHaveText(title);
+  await page.reload();await expect(surface(page)).toBeVisible();
+  await expect(page.getByLabel('Library view',{exact:true})).toHaveValue(value);
+  await expect(page.locator('.Bookshelf__heading h2')).toHaveText(title);
+ }
+ // Another browser storage context has its own default category.
+ const other=await context.browser().newContext();
+ try {
+  await other.route('**/*',route=>{
+   const url=new URL(route.request().url());
+   if(url.origin==='http://127.0.0.1:9876'||['blob:','data:'].includes(url.protocol))return route.continue();
+   throw new Error('Unexpected external network access: '+url.href);
+  });
+  await selectLibraryView(page,'tags');
+  const tab=await other.newPage();await tab.goto('http://127.0.0.1:9876/pod.html');
+  await expect(tab.getByLabel('Library view',{exact:true})).toHaveValue('documents');
+ } finally {await other.close();}
+});

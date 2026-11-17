@@ -14,11 +14,11 @@ async function start(page,url='/pod.html'){
 async function score(page){return page.evaluate(async()=>{const pdf=await PDFLib.PDFDocument.create();pdf.addPage([300,400]);return _bookshelf_.import(new File([await pdf.save()],'Keep.pdf'));});}
 for(const url of ['/pod.html','/rostrum.html',pathToFileURL(path.resolve('build/rostrum.html')).href])test(`new format persists schema/storage metadata, versioned revisions and backups (${url.startsWith('file:')?'file URL':url})`,async({page})=>{
  await start(page,url);const doc=await score(page);
- const info=await page.evaluate(()=>_bookshelf_.call('formatInfo'));expect(info).toMatchObject({schemaVersion:5,storage_format_version:2,record_format_version:4});
+ const info=await page.evaluate(()=>_bookshelf_.call('formatInfo'));expect(info).toMatchObject({schemaVersion:6,storage_format_version:2,record_format_version:4});
  expect(await page.evaluate(async()=>(await _bookshelf_.call('syncData')).changes.every(c=>c.record_version===4))).toBe(true);
  const bytes=await page.evaluate(async()=>[...new Uint8Array(await(await _bookshelf_.exportBackup()).arrayBuffer())]);
  const archive=unzipSync(new Uint8Array(bytes)),manifest=JSON.parse(strFromU8(archive['library.json']));
- expect(manifest).toMatchObject({version:2,schemaVersion:5,storageFormatVersion:2,recordFormatVersion:4});
+ expect(manifest).toMatchObject({version:2,schemaVersion:6,storageFormatVersion:2,recordFormatVersion:4});
  if(url==='/pod.html'){
   // The published v2 backup has the same portable records; its local SQLite
   // schema number must not force a separate backup conversion.

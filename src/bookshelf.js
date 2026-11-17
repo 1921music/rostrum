@@ -299,7 +299,19 @@ class BookshelfView {
     for (const [value, label] of [['documents', 'All scores'], ['entries', 'Songs'], ['bookshelves', 'Bookshelves'], ['playlists', 'Playlists'], ['tags', 'Tags'], ['history', 'Previous and deleted scores']]) {
       const option = new Option(label, value); option.hidden = value === 'history'; mode.add(option);
     }
+    // This is a device preference, separate from library records and backups.
+    const categoryKey = 'rostrum-library-category';
+    try {
+      const saved = localStorage.getItem(categoryKey);
+      if ([...mode.options].some(option => option.value === saved)) mode.value = saved;
+    } catch { /* The library remains usable when device storage is unavailable. */ }
     const collection = document.createElement('select'); collection.setAttribute('aria-label', 'Collection');
+    this.changeCategory = value => {
+      if (![...mode.options].some(option => option.value === value)) return;
+      this.closeRecord(); mode.value = value; collection.value = '';
+      try { localStorage.setItem(categoryKey,value); } catch { /* Keep the current selection in memory. */ }
+      this.refresh();
+    };
     const createName = document.createElement('input'); createName.placeholder = 'New collection name'; createName.setAttribute('aria-label', 'New collection name');
     const create = document.createElement('button'); create.textContent = 'Create';
     this.elm.insertBefore(mode, results); this.elm.insertBefore(collection, results);
@@ -336,7 +348,7 @@ class BookshelfView {
     backupSettings.append(backup, explanation, restore);
     historySettings.append(review, conflictResults);
     const history = document.createElement('button'); history.textContent = 'Previous and deleted scores';
-    history.onclick = () => { mode.value = 'history'; this.refresh(); };
+    history.onclick = () => this.changeCategory('history');
     historySettings.prepend(history);
     this.elm.insertBefore(transfers, results);
     const storageBlocked = document.createElement('p');
@@ -784,7 +796,7 @@ class BookshelfView {
     });
     search.oninput = () => this.refresh();
     tagFilter.onchange = tagMatch.onchange = () => this.refresh();
-    mode.onchange = () => { collection.value = ''; this.refresh(); };
+    mode.onchange = () => this.changeCategory(mode.value);
     collection.onchange = () => this.refresh();
     create.onclick = () => run(async () => {
       const name = createName.value.trim(); if (!name) return;
@@ -824,7 +836,7 @@ class BookshelfView {
     for (const [value,title,icon] of categories) {
       const button = element('button',''); button.type = 'button'; button.setAttribute('aria-label',title);
       const glyph = element('span','',icon); glyph.setAttribute('aria-hidden','true'); button.append(glyph,document.createTextNode(title));
-      button.onclick = () => { this.closeRecord(); this.mode.value = value; this.collection.value = ''; this.refresh(); };
+      button.onclick = () => this.changeCategory(value);
       this.navigationButtons.set(value,button); navigation.append(button);
     }
     sidebar.append(navigation);
