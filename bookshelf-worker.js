@@ -12899,9 +12899,9 @@ function initializeLibrarySqlite() {
 // src/bookshelf-format.js
 var LIBRARY_NAMESPACE = "rostrum-library-v3";
 var LIBRARY_APPLICATION_ID = 1381192781;
-var LIBRARY_SCHEMA_VERSION = 4;
+var LIBRARY_SCHEMA_VERSION = 5;
 var LIBRARY_STORAGE_VERSION = 2;
-var LIBRARY_RECORD_VERSION = 3;
+var LIBRARY_RECORD_VERSION = 4;
 var LIBRARY_BACKUP_VERSION = 2;
 var LibraryFormatError = class extends Error {
   constructor(message) {
@@ -15219,7 +15219,7 @@ var actions = {
     await open();
     return { version: LIBRARY_SCHEMA_VERSION };
   },
-  async importFile({ file, entries, displayName = file.name, replacesId = null, derivedFromId = null, originalLocation = null }) {
+  async importFile({ file, entries, maxWidth, maxHeight, displayName = file.name, replacesId = null, derivedFromId = null, originalLocation = null }) {
     const bytes = await file.arrayBuffer();
     const hash = await hashLibraryBytes(bytes);
     const id = hash;
@@ -15229,6 +15229,8 @@ var actions = {
       setFileState(existing.id, { present: true });
       return { ...actions.rememberOriginalLocation({ id: existing.id, location: originalLocation }), alreadyImported: true };
     }
+    if (/\.pdf$/i.test(file.name) && ![maxWidth, maxHeight].every((value) => Number.isFinite(value) && value > 0))
+      throw new Error("PDF maximum dimensions are required for import");
     const path = createScorePath(id, file.name);
     const inherited = [];
     if (replacesId) for (const [table, key] of [["bookshelf_documents", "bookshelf_id"], ["document_tags", "tag_id"]]) {
@@ -15250,7 +15252,7 @@ var actions = {
           content_hash: hash,
           storage_path: path,
           size_bytes: file.size,
-          settings_json: "{}",
+          settings_json: JSON.stringify({ maxWidth, maxHeight }),
           metadata_json: JSON.stringify(withOriginalLocation({ displayName, originalFilename: file.name, format: file.name.split(".").pop().toLowerCase() }, originalLocation))
         });
         setFileState(id, { present: true });
