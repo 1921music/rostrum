@@ -1,17 +1,3 @@
-// src/bookshelf-storage.js
-async function openLibraryStorage(opener) {
-  if (typeof opener !== "function") throw new Error("A library storage backend must be configured.");
-  const storage = await opener();
-  for (const [component, methods] of Object.entries({ files: ["read", "write", "remove"], database: ["exec", "flush", "export", "close"] })) {
-    for (const method of methods) {
-      if (typeof storage?.[component]?.[method] !== "function") {
-        throw new Error(`Invalid library storage backend: ${component}.${method}`);
-      }
-    }
-  }
-  return storage;
-}
-
 // node_modules/@sqlite.org/sqlite-wasm/dist/index.mjs
 async function sqlite3InitModule$1(moduleArg = {}) {
   var moduleRtn;
@@ -12888,76 +12874,140 @@ delete globalThis.sqlite3Worker1Promiser;
 var sqlite3InitModule = sqlite3_bundler_friendly_default;
 
 // src/bookshelf-sqlite.js
+var initializing;
 function initializeLibrarySqlite() {
   const binary = globalThis.rostrumLibraryWasm;
-  return sqlite3InitModule({
+  return initializing ||= sqlite3InitModule({
     wasmBinary: binary,
     locateFile: (name) => binary ? name : new URL(name, import.meta.url).href
   });
 }
 
-// src/bookshelf-format.js
-var LIBRARY_NAMESPACE = "rostrum-library-v3";
-var LIBRARY_APPLICATION_ID = 1381192781;
-var LIBRARY_SCHEMA_VERSION = 6;
-var LIBRARY_STORAGE_VERSION = 2;
-var LIBRARY_RECORD_VERSION = 4;
-var LIBRARY_BACKUP_VERSION = 2;
-var LibraryFormatError = class extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "LibraryFormatError";
+// src/bookshelf-storage-snapshot.js
+async function openSnapshotDatabase({ read, write, release = () => {
+}, destroy }) {
+  const sqlite = await initializeLibrarySqlite();
+  const bytes = await read();
+  const filename = "/library-" + crypto.randomUUID() + ".sqlite";
+  if (bytes) sqlite.capi.sqlite3_js_posix_create_file(filename, new Uint8Array(bytes));
+  const db2 = new sqlite.oo1.DB(filename, "c");
+  let dirty = false;
+  const close = () => {
+    db2.close();
+    sqlite.wasm.xWrap("sqlite3__wasm_vfs_unlink", "int", ["sqlite3_vfs*", "string"])(sqlite.capi.sqlite3_vfs_find(0), filename);
+  };
+  return {
+    exec(statement, bind = []) {
+      const rows = db2.exec({ sql: statement, bind, rowMode: "object", returnValue: "resultRows" });
+      if (!/^\s*(SELECT|PRAGMA table_info|PRAGMA user_version$)/i.test(statement)) dirty = true;
+      return rows;
+    },
+    export() {
+      return sqlite.capi.sqlite3_js_db_export(db2);
+    },
+    async flush() {
+      if (!dirty) return;
+      await write(sqlite.capi.sqlite3_js_db_export(db2));
+      dirty = false;
+    },
+    async close() {
+      try {
+        close();
+      } finally {
+        await release();
+      }
+    },
+    async destroy() {
+      if (!destroy) throw new Error("This storage cannot delete library data.");
+      try {
+        close();
+        await destroy();
+      } finally {
+        await release();
+      }
+    }
+  };
+}
+
+// src/bookshelf-storage-bridge.js
+var sequence = 0;
+var pending = /* @__PURE__ */ new Map();
+self.addEventListener("message", ({ data }) => {
+  if (!data.hostReply) return;
+  const request2 = pending.get(data.hostReply);
+  if (!request2) return;
+  pending.delete(data.hostReply);
+  if (data.error) request2.reject(Object.assign(new Error(data.error), { name: data.errorName }));
+  else request2.resolve(data.value);
+});
+function request(method, args = []) {
+  return new Promise((resolve, reject) => {
+    const hostRequest = ++sequence;
+    pending.set(hostRequest, { resolve, reject });
+    self.postMessage({ hostRequest, method, args });
+  });
+}
+async function openBridgedLibraryStorage() {
+  const database = await openSnapshotDatabase({ read: () => request("readDatabase"), write: (bytes) => request("writeDatabase", [bytes]), release: () => request("close"), destroy: () => request("clear") });
+  return { database, files: {
+    list: (path) => request("list", [path]),
+    read: (path) => request("read", [path]),
+    write: (path, bytes) => request("write", [path, bytes]),
+    remove: (path) => request("remove", [path])
+  } };
+}
+
+// src/bookshelf-readme.js
+var LIBRARY_README = `# Rostrum Library
+
+- library.sqlite: Shared library records, edit history and format versions.
+- scores/: Managed score files (hash prefix and original filename).
+- _sync/: Restore generations and their recovery snapshots. Keep this directory.
+- restore/<unique-name>/: Optional manual replacement requests.
+- README.md: This guide. Device settings and sync caches stay in browser storage.
+
+Normal copy: Copy library.sqlite, scores/ and _sync/ into the library folder.
+Other devices may merge their edits later; this does not force a replacement.
+
+Replace the library: Create restore/<unique-name>/ and copy library.sqlite and
+all its scores/ there. Use a NEW name every time, even after deleting a request.
+At the next sync, Rostrum validates the files and publishes a new generation.
+Other devices then discard edits from the previous generation when they sync.
+Incomplete requests wait without replacing the library. Competing requests are
+reported for review; submit only one replacement at a time.
+After Rostrum confirms the replacement was published to the cloud, you may
+manually delete that request directory. Other devices need not have synced yet.
+Rostrum never deletes your restore request directories automatically.
+`;
+
+// src/bookshelf-storage.js
+async function openLibraryStorage(opener) {
+  if (typeof opener !== "function") throw new Error("A library storage backend must be configured.");
+  const storage = await opener();
+  for (const [component, methods] of Object.entries({ files: ["read", "write", "remove"], database: ["exec", "flush", "export", "close"] })) {
+    for (const method of methods) {
+      if (typeof storage?.[component]?.[method] !== "function") {
+        throw new Error(`Invalid library storage backend: ${component}.${method}`);
+      }
+    }
   }
-};
-var hashLibraryBytes = async (bytes) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((n) => n.toString(16).padStart(2, "0")).join("");
-function scorePath(path) {
-  if (typeof path !== "string" || !/^scores\/[^/\\\x00]+$/.test(path) || path.split("/").some((p) => p === "." || p === "..")) throw new Error("Invalid score path in library package");
-  return path;
-}
-async function libraryEntityId(...parts) {
-  return hashLibraryBytes(new TextEncoder().encode(JSON.stringify(parts)));
-}
-function createScorePath(id) {
-  if (!/^[a-f0-9]{64}$/.test(id)) throw new Error("Invalid score identity");
-  return scorePath(`scores/${id}`);
-}
-function createLocalScorePath(id, name, otherIds = []) {
-  createScorePath(id);
-  let length = 8;
-  const others = [...otherIds].filter((other) => other !== id);
-  while (length < 64 && others.some((other) => other.startsWith(id.slice(0, length)))) length++;
-  const clean = String(name || "score").normalize("NFC").replace(/[<>\u0022:/\\|?*\x00-\x1f]/g, "_").replace(/[ .]+$/, "") || "score";
-  const extension = clean.match(/\.[a-z0-9]{1,12}$/i)?.[0] || "";
-  let stem = extension ? clean.slice(0, -extension.length) : clean;
-  while (new TextEncoder().encode(stem).length > 160) stem = [...stem].slice(0, -1).join("");
-  return scorePath(`scores/${id.slice(0, length)}_${stem || "score"}${extension}`);
-}
-function scoreStoragePath(path, version = LIBRARY_STORAGE_VERSION) {
-  if (version !== LIBRARY_STORAGE_VERSION) throw new LibraryFormatError("Unsupported score storage version. Update Rostrum.");
-  return scorePath(path);
-}
-function checkLibraryEnvelope(value, kind, version) {
-  if (!value || value.format !== kind || value.version !== version) throw new LibraryFormatError("Unsupported library package or sync version. Update Rostrum; pre-versioned data is not imported.");
-  return value;
-}
-function checkRecordVersion(version) {
-  if (version !== LIBRARY_RECORD_VERSION) throw new LibraryFormatError("Unsupported library record version. Update Rostrum.");
+  return storage;
 }
 
 // src/bookshelf-files.js
-var libraryDirectory = (root) => root.getDirectoryHandle(LIBRARY_NAMESPACE, { create: true });
+var libraryDirectory = async (root) => root;
 var DirectoryLibraryFiles = class {
   constructor(root) {
     this.root = root;
   }
   async clearLibrary({ database = true } = {}) {
-    try {
-      await this.root.removeEntry("scores", { recursive: true });
+    for (const name of ["scores", "_sync"]) try {
+      await this.root.removeEntry(name, { recursive: true });
     } catch (error) {
       if (error.name !== "NotFoundError") throw error;
     }
-    if (database) try {
-      await this.root.removeEntry("library.sqlite");
+    for (const name of database ? ["library.sqlite", "README.md"] : ["README.md"]) try {
+      await this.root.removeEntry(name);
     } catch (error) {
       if (error.name !== "NotFoundError") throw error;
     }
@@ -12971,6 +13021,22 @@ var DirectoryLibraryFiles = class {
     let directory = this.root;
     for (const part of parts) directory = await directory.getDirectoryHandle(part, { create });
     return { directory, name };
+  }
+  async list(path = "") {
+    let directory = this.root;
+    if (path) {
+      const parts = path.split("/");
+      if (parts.some((part) => !part || part === "." || part === ".." || /[\\\x00]/.test(part))) throw new Error("Invalid library path");
+      try {
+        for (const part of parts) directory = await directory.getDirectoryHandle(part);
+      } catch (error) {
+        if (error.name === "NotFoundError") return [];
+        throw error;
+      }
+    }
+    const result = [];
+    for await (const [name, handle] of directory.entries()) result.push({ name, kind: handle.kind });
+    return result;
   }
   async read(path) {
     const { directory, name } = await this.parent(path);
@@ -12995,84 +13061,6 @@ var DirectoryLibraryFiles = class {
   }
 };
 
-// src/bookshelf-storage-opfs.js
-async function openOpfsLibraryStorage() {
-  const root = await libraryDirectory(await navigator.storage.getDirectory());
-  const sqlite = await initializeLibrarySqlite();
-  const pool = await sqlite.installOpfsSAHPoolVfs({ directory: LIBRARY_NAMESPACE + "/.rostrum-library-db" });
-  const db2 = new pool.OpfsSAHPoolDb("/library.sqlite");
-  const files2 = new DirectoryLibraryFiles(root);
-  return {
-    files: files2,
-    database: {
-      exec(statement, bind = []) {
-        return db2.exec({ sql: statement, bind, rowMode: "object", returnValue: "resultRows" });
-      },
-      export() {
-        return pool.exportFile("/library.sqlite");
-      },
-      async flush() {
-      },
-      close() {
-        db2.close();
-      },
-      async destroy() {
-        db2.close();
-        await files2.clearLibrary({ database: false });
-        if (!await pool.removeVfs()) throw new Error("Could not remove the OPFS library database.");
-        try {
-          await root.getDirectoryHandle(".rostrum-library-db");
-          throw new Error("The OPFS library database could not be fully removed.");
-        } catch (error) {
-          if (error.name !== "NotFoundError") throw error;
-        }
-      }
-    }
-  };
-}
-
-// src/bookshelf-storage-snapshot.js
-async function openSnapshotDatabase({ read, write, release = () => {
-}, destroy }) {
-  const sqlite = await initializeLibrarySqlite();
-  const bytes = await read();
-  const filename = "/library-" + crypto.randomUUID() + ".sqlite";
-  if (bytes) sqlite.capi.sqlite3_js_posix_create_file(filename, new Uint8Array(bytes));
-  const db2 = new sqlite.oo1.DB(filename, "c");
-  let dirty = false;
-  return {
-    exec(statement, bind = []) {
-      const rows = db2.exec({ sql: statement, bind, rowMode: "object", returnValue: "resultRows" });
-      if (!/^\s*(SELECT|PRAGMA table_info|PRAGMA user_version$)/i.test(statement)) dirty = true;
-      return rows;
-    },
-    export() {
-      return sqlite.capi.sqlite3_js_db_export(db2);
-    },
-    async flush() {
-      if (!dirty) return;
-      await write(sqlite.capi.sqlite3_js_db_export(db2));
-      dirty = false;
-    },
-    async close() {
-      try {
-        db2.close();
-      } finally {
-        await release();
-      }
-    },
-    async destroy() {
-      if (!destroy) throw new Error("This storage cannot delete library data.");
-      try {
-        db2.close();
-        await destroy();
-      } finally {
-        await release();
-      }
-    }
-  };
-}
-
 // src/bookshelf-storage-lock.js
 async function holdLibraryLock(name) {
   if (!navigator.locks) throw new Error("This storage backend requires browser locking support.");
@@ -13091,72 +13079,6 @@ async function holdLibraryLock(name) {
     }).catch(reject);
   });
   return release;
-}
-
-// src/bookshelf-storage-bytes-indexeddb.js
-async function openIndexedDbBytes({ name = "rostrum-bookshelf-v3" } = {}) {
-  const release = await holdLibraryLock("rostrum-library-idb:" + name);
-  let connection;
-  try {
-    connection = await new Promise((resolve, reject) => {
-      const request2 = indexedDB.open(name, 1);
-      request2.onupgradeneeded = () => request2.result.createObjectStore("files");
-      request2.onsuccess = () => resolve(request2.result);
-      request2.onerror = () => reject(request2.error);
-    });
-    const access = (mode, run) => new Promise((resolve, reject) => {
-      const transaction3 = connection.transaction("files", mode);
-      const request2 = run(transaction3.objectStore("files"));
-      transaction3.oncomplete = () => resolve(request2.result);
-      transaction3.onabort = transaction3.onerror = () => reject(transaction3.error || request2.error);
-    });
-    const validate = (path) => {
-      if (typeof path !== "string" || path.split("/").some((p) => !p || p === "." || p === ".." || /[\\\x00]/.test(p))) throw new Error("Invalid library path");
-      return path;
-    };
-    const files2 = {
-      async read(path) {
-        const value = await access("readonly", (store) => store.get(validate(path)));
-        if (!value) throw new DOMException("Library file not found", "NotFoundError");
-        return value;
-      },
-      async write(path, bytes) {
-        await access("readwrite", (store) => store.put(new Blob([bytes]), validate(path)));
-      },
-      async remove(path) {
-        await access("readwrite", (store) => store.delete(validate(path)));
-      }
-    };
-    return {
-      files: files2,
-      async readDatabase() {
-        const blob = await access("readonly", (store) => store.get("library.sqlite"));
-        return blob && blob.arrayBuffer();
-      },
-      writeDatabase: (bytes) => files2.write("library.sqlite", bytes),
-      clear: () => access("readwrite", (store) => store.clear()),
-      close() {
-        connection.close();
-        release();
-      }
-    };
-  } catch (error) {
-    connection?.close();
-    release();
-    throw error;
-  }
-}
-
-// src/bookshelf-storage-indexeddb.js
-async function openIndexedDbLibraryStorage({ name = "rostrum-bookshelf-v3" } = {}) {
-  const storage = await openIndexedDbBytes({ name });
-  try {
-    const database = await openSnapshotDatabase({ read: storage.readDatabase, write: storage.writeDatabase, release: storage.close, destroy: storage.clear });
-    return { files: storage.files, database };
-  } catch (error) {
-    storage.close();
-    throw error;
-  }
 }
 
 // src/bookshelf-storage-bytes-directory.js
@@ -13211,31 +13133,84 @@ async function openDirectoryLibraryStorage({ directory }) {
   }
 }
 
-// src/bookshelf-storage-bridge.js
-var sequence = 0;
-var pending = /* @__PURE__ */ new Map();
-self.addEventListener("message", ({ data }) => {
-  if (!data.hostReply) return;
-  const request2 = pending.get(data.hostReply);
-  if (!request2) return;
-  pending.delete(data.hostReply);
-  if (data.error) request2.reject(Object.assign(new Error(data.error), { name: data.errorName }));
-  else request2.resolve(data.value);
-});
-function request(method, args = []) {
-  return new Promise((resolve, reject) => {
-    const hostRequest = ++sequence;
-    pending.set(hostRequest, { resolve, reject });
-    self.postMessage({ hostRequest, method, args });
-  });
+// src/bookshelf-storage-opfs.js
+async function openOpfsLibraryStorage() {
+  return openDirectoryLibraryStorage({ directory: await navigator.storage.getDirectory() });
 }
-async function openBridgedLibraryStorage() {
-  const database = await openSnapshotDatabase({ read: () => request("readDatabase"), write: (bytes) => request("writeDatabase", [bytes]), release: () => request("close"), destroy: () => request("clear") });
-  return { database, files: {
-    read: (path) => request("read", [path]),
-    write: (path, bytes) => request("write", [path, bytes]),
-    remove: (path) => request("remove", [path])
-  } };
+
+// src/bookshelf-storage-bytes-indexeddb.js
+async function openIndexedDbBytes({ name = "rostrum-bookshelf-v4" } = {}) {
+  const release = await holdLibraryLock("rostrum-library-idb:" + name);
+  let connection;
+  try {
+    connection = await new Promise((resolve, reject) => {
+      const request2 = indexedDB.open(name, 1);
+      request2.onupgradeneeded = () => request2.result.createObjectStore("files");
+      request2.onsuccess = () => resolve(request2.result);
+      request2.onerror = () => reject(request2.error);
+    });
+    const access = (mode, run) => new Promise((resolve, reject) => {
+      const transaction3 = connection.transaction("files", mode);
+      const request2 = run(transaction3.objectStore("files"));
+      transaction3.oncomplete = () => resolve(request2.result);
+      transaction3.onabort = transaction3.onerror = () => reject(transaction3.error || request2.error);
+    });
+    const validate = (path) => {
+      if (typeof path !== "string" || path.split("/").some((p) => !p || p === "." || p === ".." || /[\\\x00]/.test(p))) throw new Error("Invalid library path");
+      return path;
+    };
+    const files2 = {
+      async list(path = "") {
+        const prefix = path ? validate(path) + "/" : "", keys = await access("readonly", (store) => store.getAllKeys());
+        const entries = /* @__PURE__ */ new Map();
+        for (const key of keys) if (typeof key === "string" && key.startsWith(prefix)) {
+          const parts = key.slice(prefix.length).split("/");
+          entries.set(parts[0], { name: parts[0], kind: parts.length > 1 ? "directory" : "file" });
+        }
+        return [...entries.values()];
+      },
+      async read(path) {
+        const value = await access("readonly", (store) => store.get(validate(path)));
+        if (!value) throw new DOMException("Library file not found", "NotFoundError");
+        return value;
+      },
+      async write(path, bytes) {
+        await access("readwrite", (store) => store.put(new Blob([bytes]), validate(path)));
+      },
+      async remove(path) {
+        await access("readwrite", (store) => store.delete(validate(path)));
+      }
+    };
+    return {
+      files: files2,
+      async readDatabase() {
+        const blob = await access("readonly", (store) => store.get("library.sqlite"));
+        return blob && blob.arrayBuffer();
+      },
+      writeDatabase: (bytes) => files2.write("library.sqlite", bytes),
+      clear: () => access("readwrite", (store) => store.clear()),
+      close() {
+        connection.close();
+        release();
+      }
+    };
+  } catch (error) {
+    connection?.close();
+    release();
+    throw error;
+  }
+}
+
+// src/bookshelf-storage-indexeddb.js
+async function openIndexedDbLibraryStorage({ name = "rostrum-bookshelf-v4" } = {}) {
+  const storage = await openIndexedDbBytes({ name });
+  try {
+    const database = await openSnapshotDatabase({ read: storage.readDatabase, write: storage.writeDatabase, release: storage.close, destroy: storage.clear });
+    return { files: storage.files, database };
+  } catch (error) {
+    storage.close();
+    throw error;
+  }
 }
 
 // src/bookshelf-storage-policy.js
@@ -14599,6 +14574,45 @@ function unzipSync(data, opts) {
   return files2;
 }
 
+// src/bookshelf-format.js
+var LIBRARY_APPLICATION_ID = 1381192781;
+var LIBRARY_SCHEMA_VERSION = 7;
+var LIBRARY_STORAGE_VERSION = 3;
+var LIBRARY_RECORD_VERSION = 4;
+var LIBRARY_BACKUP_VERSION = 2;
+var LibraryFormatError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "LibraryFormatError";
+  }
+};
+var hashLibraryBytes = async (bytes) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((n) => n.toString(16).padStart(2, "0")).join("");
+function scorePath(path) {
+  if (typeof path !== "string" || !/^scores\/[^/\\\x00]+$/.test(path) || path.split("/").some((p) => p === "." || p === "..")) throw new Error("Invalid score path in library package");
+  return path;
+}
+async function libraryEntityId(...parts) {
+  return hashLibraryBytes(new TextEncoder().encode(JSON.stringify(parts)));
+}
+function createScorePath(id, name, otherIds = []) {
+  if (!/^[a-f0-9]{64}$/.test(id)) throw new Error("Invalid score identity");
+  let length = 8;
+  const others = [...otherIds].filter((other) => other !== id);
+  while (length < 64 && others.some((other) => other.startsWith(id.slice(0, length)))) length++;
+  const clean = String(name || "score").normalize("NFC").replace(/[<>\u0022:/\\|?*\x00-\x1f]/g, "_").replace(/[ .]+$/, "") || "score";
+  const extension = clean.match(/\.[a-z0-9]{1,12}$/i)?.[0] || "";
+  let stem = extension ? clean.slice(0, -extension.length) : clean;
+  while (new TextEncoder().encode(stem).length > 160) stem = [...stem].slice(0, -1).join("");
+  return scorePath(`scores/${id.slice(0, length)}_${stem || "score"}${extension}`);
+}
+function checkLibraryEnvelope(value, kind, version) {
+  if (!value || value.format !== kind || value.version !== version) throw new LibraryFormatError("Unsupported library package or sync version. Update Rostrum; pre-versioned data is not imported.");
+  return value;
+}
+function checkRecordVersion(version) {
+  if (version !== LIBRARY_RECORD_VERSION) throw new LibraryFormatError("Unsupported library record version. Update Rostrum.");
+}
+
 // src/bookshelf-transfer.js
 async function exportLibraryPackage({ db: db2, files: files2, tables: tables2 }) {
   const records = Object.fromEntries(Object.keys(tables2).map((table) => [table, db2.exec(`SELECT * FROM ${table}`)]));
@@ -14721,13 +14735,12 @@ function createSchema(db2) {
     id TEXT PRIMARY KEY NOT NULL, revision_id TEXT NOT NULL, deleted_at TEXT,
     metadata_json TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(metadata_json))${extra ? "," + extra : ""})`);
   db2.exec("CREATE TABLE changes (id TEXT PRIMARY KEY, device_id TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT NOT NULL, parent_revision_ids_json TEXT NOT NULL, payload_json TEXT NOT NULL, created_at TEXT NOT NULL, record_version INTEGER NOT NULL)");
-  db2.exec("CREATE TABLE local_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
   db2.exec("CREATE INDEX changes_entity ON changes(entity_type,entity_id)");
   db2.exec("CREATE INDEX entries_document ON entries(document_id)");
   db2.exec("CREATE INDEX documents_hash ON documents(content_hash)");
   db2.exec("CREATE INDEX entries_title ON entries(json_extract(metadata_json,'$.title'))");
-  db2.exec("CREATE TABLE library_info (id INTEGER PRIMARY KEY CHECK(id=1), storage_format_version INTEGER NOT NULL, record_format_version INTEGER NOT NULL)");
-  db2.exec("INSERT INTO library_info VALUES (1,?,?)", [LIBRARY_STORAGE_VERSION, LIBRARY_RECORD_VERSION]);
+  db2.exec("CREATE TABLE library_info (id INTEGER PRIMARY KEY CHECK(id=1), storage_format_version INTEGER NOT NULL, record_format_version INTEGER NOT NULL, snapshot_id TEXT, ancestors_json TEXT NOT NULL, generation_json TEXT NOT NULL)");
+  db2.exec("INSERT INTO library_info VALUES (1,?,?,NULL,?,?)", [LIBRARY_STORAGE_VERSION, LIBRARY_RECORD_VERSION, "[]", JSON.stringify({ id: "initial", ancestors: [] })]);
 }
 function transaction(db2, run) {
   db2.exec("BEGIN IMMEDIATE");
@@ -14744,15 +14757,10 @@ async function initializeLibrarySchema(db2) {
   const app = db2.exec("PRAGMA application_id")[0].application_id;
   const tables2 = db2.exec("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'");
   if (app && app !== LIBRARY_APPLICATION_ID || !version && tables2.length || version && app !== LIBRARY_APPLICATION_ID) throw new LibraryFormatError("The selected database is not a Rostrum library.");
-  if (version && (version !== 5 && version !== LIBRARY_SCHEMA_VERSION)) throw new LibraryFormatError("Unsupported library schema. Update Rostrum; pre-versioned data is not migrated.");
+  if (version && version !== LIBRARY_SCHEMA_VERSION) throw new LibraryFormatError("Unsupported library schema. Update Rostrum; pre-versioned data is not migrated.");
   if (version) {
     const info = db2.exec("SELECT * FROM library_info WHERE id=1")[0];
     if (!info || info.storage_format_version !== LIBRARY_STORAGE_VERSION || info.record_format_version !== LIBRARY_RECORD_VERSION) throw new LibraryFormatError("Unsupported library data or storage format. Update Rostrum.");
-  }
-  if (version === 5) {
-    db2.exec("PRAGMA user_version=6");
-    await db2.flush();
-    version = 6;
   }
   if (!version) {
     transaction(db2, () => {
@@ -14834,13 +14842,17 @@ function validateRelations() {
     }
   }
 }
+function invalidateSnapshot() {
+  const info = sql("SELECT snapshot_id,ancestors_json FROM library_info")[0];
+  if (info.snapshot_id) sql("UPDATE library_info SET snapshot_id=NULL,ancestors_json=? WHERE id=1", [JSON.stringify([.../* @__PURE__ */ new Set([...JSON.parse(info.ancestors_json), info.snapshot_id])].sort())]);
+}
 function save(table, values, parents = null) {
   if (!Object.hasOwn(tables, table)) throw new Error("Unknown library record type");
   if (typeof values.id !== "string" || !values.id) throw new Error("Record identity is required");
   const previous = sql(`SELECT * FROM ${table} WHERE id = ?`, [values.id])[0];
   if (!parents && heads(table, values.id).length > 1) throw new Error("Resolve the conflicting edits before changing this item.");
   if (previous && table === "documents") {
-    for (const key of ["storage_path", "content_hash", "size_bytes"]) {
+    for (const key of ["content_hash", "size_bytes"]) {
       if (Object.hasOwn(values, key) && values[key] !== previous[key]) throw new Error("Import a new document to replace score contents");
     }
   }
@@ -14858,6 +14870,7 @@ function save(table, values, parents = null) {
   for (const [key, value] of Object.entries(row)) {
     if (key.endsWith("_json")) validateJsonField(value);
   }
+  invalidateSnapshot();
   writeRow(table, row);
   sql("INSERT INTO changes VALUES (?,?,?,?,?,?,?,?)", [
     revision,
@@ -14876,8 +14889,7 @@ var decodeChange = (change) => {
   checkRecordVersion(change.record_version);
   return JSON.parse(change.payload_json);
 };
-function validateTransfer(manifest) {
-  const schemas = Object.fromEntries(Object.keys(tables).map((table) => [table, sql(`PRAGMA table_info(${table})`)]));
+function validateTransfer(manifest, schemas = Object.fromEntries(Object.keys(tables).map((table) => [table, sql(`PRAGMA table_info(${table})`)]))) {
   const normalize = (table, row) => {
     if (!Object.hasOwn(schemas, table) || !row || typeof row !== "object" || Array.isArray(row)) throw new Error("Invalid library record");
     const schema = schemas[table];
@@ -14945,13 +14957,14 @@ function validateTransfer(manifest) {
   const documents = new Map(manifest.records.documents.map((doc) => [doc.id, doc]));
   for (const doc of documents.values()) {
     scorePath(doc.storage_path);
-    if (doc.id !== doc.content_hash || doc.storage_path !== createScorePath(doc.id) || !/^[a-f0-9]{64}$/.test(doc.content_hash) || !Number.isSafeInteger(doc.size_bytes) || doc.size_bytes < 0) throw new Error("Invalid score identity");
+    const prefix = doc.storage_path.match(/^scores\/([a-f0-9]{8,64})_/)?.[1];
+    if (!prefix || typeof doc.id !== "string" || !doc.id.startsWith(prefix) || doc.id !== doc.content_hash || !/^[a-f0-9]{64}$/.test(doc.content_hash) || !Number.isSafeInteger(doc.size_bytes) || doc.size_bytes < 0) throw new Error("Invalid score identity");
   }
   for (const change of incoming.values()) if (change.entity_type === "documents") {
     const row = decodeChange(change), doc = documents.get(row.id);
-    if (!doc || ["storage_path", "content_hash", "size_bytes"].some((key) => row[key] !== doc[key])) throw new Error("A document identity has different file contents");
-    const local = sql("SELECT * FROM documents WHERE id=? OR storage_path=?", [doc.id, doc.storage_path])[0];
-    if (local && (local.id !== doc.id || ["storage_path", "content_hash", "size_bytes"].some((key) => local[key] !== doc[key]))) throw new Error("The package would overwrite a different score");
+    if (!doc || ["content_hash", "size_bytes"].some((key) => row[key] !== doc[key])) throw new Error("A document identity has different file contents");
+    const local = sql("SELECT * FROM documents WHERE id=?", [doc.id])[0];
+    if (local && (local.id !== doc.id || ["content_hash", "size_bytes"].some((key) => local[key] !== doc[key]))) throw new Error("The package would overwrite a different score");
   }
   return { incoming, normalize, known };
 }
@@ -14992,18 +15005,21 @@ function mergeRecords(manifest) {
         save(table, row, revisions.map((change) => change.id));
       } else writeRow(table, normalize(table, decodeChange(chosen)));
     }
+    if ([...incoming.keys()].some((id) => !known.has(id))) invalidateSnapshot();
     validateRelations();
     if (sql("PRAGMA foreign_key_check").length) throw new Error("The changes contain broken library references");
   });
   return { addedChanges: [...incoming.keys()].filter((id) => !known.has(id)).length, conflicts: actions.conflicts().length };
 }
+var deviceState = {};
 function getLocal(key, fallback = null) {
-  const row = sql("SELECT value FROM local_state WHERE key=?", [key])[0];
-  return row ? JSON.parse(row.value) : fallback;
+  return Object.hasOwn(deviceState, key) ? deviceState[key] : fallback;
 }
 function setLocal(key, value) {
-  const text = JSON.stringify(value);
-  if (sql("SELECT value FROM local_state WHERE key=?", [key])[0]?.value !== text) sql("INSERT INTO local_state VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [key, text]);
+  Object.defineProperty(deviceState, key, { value, enumerable: true, writable: true, configurable: true });
+}
+async function flushDeviceState() {
+  await request("saveDeviceState", [deviceState]);
 }
 function fileState(id) {
   return getLocal("file:" + id);
@@ -15036,33 +15052,28 @@ async function open() {
   sql("PRAGMA foreign_keys=ON");
   sql("PRAGMA trusted_schema=OFF");
   await initializeLibrarySchema(db);
-  const localPath = (path) => {
-    const logical = scoreStoragePath(path), id = logical.slice("scores/".length);
-    return fileState(id)?.localPath ? scorePath(fileState(id).localPath) : logical;
-  };
+  const documentAt = (path) => sql("SELECT * FROM documents WHERE storage_path=?", [path])[0];
   files = {
-    read: (path) => rawFiles.read(localPath(path)),
-    async write(path, bytes, name) {
-      const logical = scoreStoragePath(path), id = logical.slice("scores/".length);
-      let target = fileState(id)?.localPath;
-      if (!target) {
-        name ||= JSON.parse(sql("SELECT metadata_json FROM documents WHERE id=?", [id])[0]?.metadata_json || "{}").originalFilename;
-        const ids = sql("SELECT id FROM documents").map((row) => row.id);
-        ids.push(...sql("SELECT key FROM local_state WHERE key LIKE 'file:%'").map((row) => row.key.slice(5)));
-        target = createLocalScorePath(id, name, ids);
-      }
-      await rawFiles.write(scorePath(target), bytes);
-      setFileState(id, { localPath: target });
-      if (target !== logical) try {
-        await rawFiles.remove(logical);
+    async read(path) {
+      path = scorePath(path);
+      try {
+        return await rawFiles.read(path);
       } catch (error) {
         if (error.name !== "NotFoundError") throw error;
+        const doc = documentAt(path), previous = doc && fileState(doc.id)?.localPath;
+        if (!previous || previous === path) throw error;
+        const file = await rawFiles.read(scorePath(previous));
+        await rawFiles.write(path, file);
+        setFileState(doc.id, { localPath: path });
+        return file;
       }
     },
-    remove: (path) => rawFiles.remove(localPath(path))
+    write: (path, bytes) => rawFiles.write(scorePath(path), bytes),
+    remove: (path) => rawFiles.remove(scorePath(path))
   };
-  deviceId = sql("SELECT value FROM local_state WHERE key='device'")[0]?.value || crypto.randomUUID();
-  sql("INSERT OR IGNORE INTO local_state VALUES ('device', ?)", [deviceId]);
+  deviceId = getLocal("device") || crypto.randomUUID();
+  setLocal("device", deviceId);
+  await rawFiles.write("README.md", new Blob([LIBRARY_README], { type: "text/markdown" }));
   initialized = true;
 }
 var importedDocument = (hash) => sql("SELECT * FROM documents WHERE content_hash=? ORDER BY deleted_at IS NOT NULL, replaced_by_id IS NOT NULL, id LIMIT 1", [hash])[0];
@@ -15075,7 +15086,73 @@ var withOriginalLocation = (metadata, location) => {
   return { ...metadata, originalLocations: [...locations, clean] };
 };
 var relationId = (table, values) => libraryEntityId(table, Object.entries(values).filter(([key]) => !["order_key", "id", "revision_id", "deleted_at", "metadata_json"].includes(key)).sort());
+async function readSnapshot(file) {
+  if (!(file instanceof Blob) || file.size > 256 * 1024 * 1024) throw new Error("Invalid or excessive SQLite snapshot");
+  const reader = await openSnapshotDatabase({ read: () => file.arrayBuffer(), write: () => {
+    throw new Error("A remote snapshot is read-only");
+  } });
+  const current = db;
+  const schemas = Object.fromEntries(Object.keys(tables).map((table) => [table, sql(`PRAGMA table_info(${table})`)]));
+  try {
+    reader.exec("PRAGMA trusted_schema=OFF");
+    reader.exec("PRAGMA query_only=ON");
+    if (reader.exec("PRAGMA user_version")[0].user_version !== LIBRARY_SCHEMA_VERSION) throw new Error("Unsupported library snapshot version");
+    await initializeLibrarySchema(reader);
+    if (reader.exec("PRAGMA quick_check")[0].quick_check !== "ok" || reader.exec("PRAGMA foreign_key_check").length) throw new Error("Damaged library snapshot");
+    const records = Object.fromEntries(Object.keys(tables).map((table) => [table, reader.exec(`SELECT * FROM ${table}`)]));
+    const changes = reader.exec("SELECT * FROM changes"), info = reader.exec("SELECT * FROM library_info WHERE id=1")[0];
+    const names = reader.exec("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'").map((row) => row.name);
+    if (names.length !== libraryTables.length + 2 || names.some((name) => ![...libraryTables, "changes", "library_info"].includes(name))) throw new Error("Unexpected tables in a shared library snapshot");
+    db = reader;
+    validateTransfer({ records, changes }, schemas);
+    validateRelations();
+    for (const change of changes) if (!records[change.entity_type].some((row) => row.id === change.entity_id)) throw new Error("A snapshot record is missing from its history");
+    for (const [table, rows] of Object.entries(records)) for (const row of rows) if (!revisionHeads(table, row.id).some((change) => change.id === row.revision_id)) throw new Error("A snapshot record is not a current revision");
+    const generation = JSON.parse(info.generation_json), ancestors = JSON.parse(info.ancestors_json);
+    if (typeof generation.id !== "string" || !generation.id || !Array.isArray(generation.ancestors) || generation.ancestors.some((id) => typeof id !== "string" || id === generation.id) || !Array.isArray(ancestors) || ancestors.some((id) => typeof id !== "string" || id === info.snapshot_id) || info.snapshot_id !== null && typeof info.snapshot_id !== "string") throw new Error("Invalid snapshot ancestry");
+    return { records, changes, documents: records.documents, info, generation, ancestors, id: info.snapshot_id, tableNames: reader.exec("SELECT name FROM sqlite_schema WHERE type='table'").map((row) => row.name) };
+  } finally {
+    db = current;
+    await reader.close();
+  }
+}
 var actions = {
+  listManaged: ({ path }) => rawFiles.list(path),
+  async prepareSnapshot({ file, id, generation }) {
+    await readSnapshot(file);
+    const editor = await openSnapshotDatabase({ read: () => file.arrayBuffer(), write: () => {
+    } });
+    try {
+      editor.exec("UPDATE library_info SET snapshot_id=?,ancestors_json=?,generation_json=? WHERE id=1", [id, "[]", JSON.stringify(generation)]);
+      return new Blob([await editor.export()], { type: "application/vnd.sqlite3" });
+    } finally {
+      await editor.close();
+    }
+  },
+  inspectSnapshot: ({ file }) => readSnapshot(file),
+  async captureSnapshot({ id, ancestors, generation } = {}) {
+    if (id) sql("UPDATE library_info SET snapshot_id=?, ancestors_json=?, generation_json=? WHERE id=1", [id, JSON.stringify([...new Set(ancestors)].sort()), JSON.stringify(generation)]);
+    return { file: new Blob([await db.export()], { type: "application/vnd.sqlite3" }), ...actions.syncData(), info: sql("SELECT * FROM library_info")[0] };
+  },
+  async replaceSnapshot({ file, generation }) {
+    const snapshot = await readSnapshot(file);
+    transaction2(() => {
+      sql("PRAGMA defer_foreign_keys=ON");
+      for (const table of Object.keys(tables).reverse()) sql(`DELETE FROM ${table}`);
+      sql("DELETE FROM changes");
+      for (const [table, rows] of Object.entries(snapshot.records)) for (const row of rows) writeRow(table, row);
+      for (const change of snapshot.changes) sql("INSERT INTO changes VALUES (?,?,?,?,?,?,?,?)", [change.id, change.device_id, change.entity_type, change.entity_id, change.parent_revision_ids_json, change.payload_json, change.created_at, change.record_version]);
+      sql("UPDATE library_info SET snapshot_id=?,ancestors_json=?,generation_json=? WHERE id=1", [snapshot.id, JSON.stringify(snapshot.ancestors), JSON.stringify(generation || snapshot.generation)]);
+    });
+    deviceState = { device: deviceId };
+    for (const doc of snapshot.documents) await localFile(doc);
+    return true;
+  },
+  rememberSnapshot({ destination, file, versions, changeIds, coveredVersions }) {
+    setLocal("base:" + destination, { file, versions, changeIds, coveredVersions });
+  },
+  readManaged: ({ path }) => rawFiles.read(path),
+  writeManaged: ({ path, file }) => rawFiles.write(path, file),
   formatInfo() {
     return { schemaVersion: sql("PRAGMA user_version")[0].user_version, ...sql("SELECT * FROM library_info WHERE id=1")[0] };
   },
@@ -15109,6 +15186,22 @@ var actions = {
     if (file && verify && (file.size !== document.size_bytes || await hashLibraryBytes(await file.arrayBuffer()) !== document.content_hash)) throw new Error("Local score contents do not match the imported file");
     return { document, file };
   },
+  async relocateFile({ id, otherIds }) {
+    const doc = sql("SELECT * FROM documents WHERE id=?", [id])[0];
+    if (!doc) throw new Error("Score not found");
+    const path = createScorePath(id, JSON.parse(doc.metadata_json).originalFilename, [...sql("SELECT id FROM documents").map((row) => row.id), ...otherIds]);
+    if (path === doc.storage_path) throw new Error("Could not resolve a stored filename collision");
+    const { file } = await actions.fileInfo({ id, verify: true });
+    if (file) await rawFiles.write(path, file);
+    const updated = transaction2(() => save("documents", { id, storage_path: path }));
+    setFileState(id, { present: !!file, localPath: path });
+    if (file) try {
+      await rawFiles.remove(doc.storage_path);
+    } catch (error) {
+      if (error.name !== "NotFoundError") throw error;
+    }
+    return updated;
+  },
   async installFile({ id, file }) {
     await actions.verifyFile({ id, file });
     const doc = sql("SELECT * FROM documents WHERE id=?", [id])[0];
@@ -15136,10 +15229,10 @@ var actions = {
     if (table === "playlists") return sql("SELECT DISTINCT d.id FROM playlist_items m JOIN entries e ON e.id=m.entry_id JOIN documents d ON d.id=e.document_id WHERE m.playlist_id=? AND m.deleted_at IS NULL AND e.deleted_at IS NULL AND d.deleted_at IS NULL", [id]).map((row) => row.id);
     throw new Error("Choose a bookshelf or playlist");
   },
-  syncData() {
-    return { deviceId, changes: sql("SELECT * FROM changes"), documents: sql("SELECT * FROM documents"), batches: getLocal("delta-batches", {}) };
+  syncData({ destination = "" } = {}) {
+    return { deviceId, changes: sql("SELECT * FROM changes"), documents: sql("SELECT * FROM documents"), base: getLocal("base:" + destination), info: sql("SELECT * FROM library_info")[0] };
   },
-  mergeDelta({ changes }) {
+  async mergeDelta({ changes }) {
     if (!Array.isArray(changes)) throw new Error("Invalid changes");
     const records = Object.fromEntries(Object.keys(tables).map((table) => [table, []]));
     const selected = /* @__PURE__ */ new Map();
@@ -15148,16 +15241,15 @@ var actions = {
       selected.set(change.entity_type + ":" + change.entity_id, change);
     }
     for (const change of selected.values()) records[change.entity_type].push(decodeChange(change));
+    validateTransfer({ records, changes });
+    for (const doc of records.documents) {
+      const collision = sql("SELECT id FROM documents WHERE storage_path=? AND id<>?", [doc.storage_path, doc.id])[0];
+      if (collision) await actions.relocateFile({ id: collision.id, otherIds: [doc.id] });
+    }
     const existing = new Set(sql("SELECT id FROM documents").map((doc) => doc.id));
     const result = mergeRecords({ records, changes });
     for (const doc of records.documents) if (!existing.has(doc.id)) setFileState(doc.id, { present: false });
     return result;
-  },
-  rememberBatch({ destination, id, changeIds }) {
-    const batches = getLocal("delta-batches", {});
-    if (!Object.hasOwn(batches, destination)) Object.defineProperty(batches, destination, { value: {}, enumerable: true, configurable: true, writable: true });
-    Object.defineProperty(batches[destination], id, { value: changeIds, enumerable: true, configurable: true, writable: true });
-    setLocal("delta-batches", batches);
   },
   remoteInventory({ destination, changeIds, paths, unknown = false }) {
     if (!Array.isArray(changeIds) || !Array.isArray(paths) || [...changeIds, ...paths].some((value) => typeof value !== "string")) throw new Error("Invalid remote inventory");
@@ -15175,7 +15267,7 @@ var actions = {
     const active = new Set(sql("SELECT id FROM documents WHERE deleted_at IS NULL AND replaced_by_id IS NULL").map((row) => row.id));
     return {
       ...status,
-      uploads: states.filter((state) => !state.remote).length,
+      uploads: states.filter((state) => active.has(state.id) && !state.remote).length,
       downloads: states.filter((state) => active.has(state.id) && !state.present).length
     };
   },
@@ -15267,7 +15359,7 @@ var actions = {
     }
     if (/\.pdf$/i.test(file.name) && ![maxWidth, maxHeight].every((value) => Number.isFinite(value) && value > 0))
       throw new Error("PDF maximum dimensions are required for import");
-    const path = createScorePath(id, file.name);
+    const path = createScorePath(id, file.name, sql("SELECT id FROM documents").map((row) => row.id));
     const inherited = [];
     if (replacesId) for (const [table, key] of [["bookshelf_documents", "bookshelf_id"], ["document_tags", "tag_id"]]) {
       for (const previous of sql(`SELECT * FROM ${table} WHERE document_id=? AND deleted_at IS NULL`, [replacesId])) {
@@ -15291,7 +15383,7 @@ var actions = {
           settings_json: JSON.stringify({ maxWidth, maxHeight }),
           metadata_json: JSON.stringify(withOriginalLocation({ displayName, originalFilename: file.name, format: file.name.split(".").pop().toLowerCase() }, originalLocation))
         });
-        setFileState(id, { present: true });
+        setFileState(id, { present: true, localPath: path });
         for (const entry of entries) save("entries", {
           id: entry.id,
           document_id: id,
@@ -15505,10 +15597,12 @@ self.onmessage = ({ data }) => {
       if (action === "open" && args?.storage) {
         if (db) throw new Error("Close the current library before changing storage");
         storageOptions = args.storage;
+        deviceState = args.deviceState || {};
       }
       if (action === "close") {
         if (db) {
           await db.flush();
+          await flushDeviceState();
           await db.close();
         }
         db = files = rawFiles = null;
@@ -15519,6 +15613,8 @@ self.onmessage = ({ data }) => {
       await open();
       if (action === "destroyStorage") {
         await db.destroy();
+        deviceState = { device: deviceId };
+        await flushDeviceState();
         db = files = rawFiles = null;
         initialized = false;
         self.postMessage({ id, value: true });
@@ -15526,7 +15622,10 @@ self.onmessage = ({ data }) => {
       }
       value = await actions[action](args || {});
       actionCompleted = true;
-      if (!["backup", "export"].includes(action)) await db.flush();
+      if (!["backup", "export"].includes(action)) {
+        await db.flush();
+        await flushDeviceState();
+      }
       self.postMessage({ id, value });
     } catch (error) {
       self.postMessage({
