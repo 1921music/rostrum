@@ -10,9 +10,9 @@ export { LIBRARY_NAMESPACE, LIBRARY_APPLICATION_ID, LIBRARY_SCHEMA_VERSION, LIBR
 // the parent directory and cannot damage files or batches inside this namespace.
 const LIBRARY_NAMESPACE = 'rostrum-library-v3';
 const LIBRARY_APPLICATION_ID = 0x5253544d;
-const LIBRARY_SCHEMA_VERSION = 4;
+const LIBRARY_SCHEMA_VERSION = 5;
 const LIBRARY_STORAGE_VERSION = 2;
-const LIBRARY_RECORD_VERSION = 3;
+const LIBRARY_RECORD_VERSION = 4;
 const LIBRARY_SYNC_VERSION = 2;
 const LIBRARY_BACKUP_VERSION = 2;
 class LibraryFormatError extends Error {

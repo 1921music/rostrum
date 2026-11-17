@@ -408,7 +408,7 @@ test('resolving grouped equal edits acknowledges every branch and stays resolved
   await _bookshelf_.configure(a);
   const change = (id,name) => ({id,device_id:id,entity_type:'tags',entity_id:'tag',parent_revision_ids_json:'[]',
    payload_json:JSON.stringify({id:'tag',revision_id:id,deleted_at:null,metadata_json:'{}',name}),
-   created_at:'2026-11-16T00:00:00Z',record_version:3});
+   created_at:'2026-11-16T00:00:00Z',record_version:4});
   await _bookshelf_.call('mergeDelta',{changes:[change('a','Same'),change('b','Same'),change('c','Different')]});
   const conflict = (await _bookshelf_.conflicts())[0];
   const expected = conflict.alternatives.map(c=>c.id);

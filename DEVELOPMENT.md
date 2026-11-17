@@ -62,6 +62,19 @@ restore**, and **History and conflicts**. **Sync library now** stays beside the
 save/sync status. Record **⋯** menus group metadata, tags/collections, offline
 storage, songs, replacement and deletion.
 
+Local library PDFs use PDF.js range loading over `Blob.slice()`. Import scans
+page dimensions once and stores only the maximum width and height in document
+settings. Opening a song builds the existing common-size layout from those
+maxima, starts at the song's page, and resolves individual dimensions as pages
+are used. Source PDF page dimensions are not persisted; added blank pages keep
+their explicit dimensions. Saving/exporting may read the whole PDF. Cloud-only
+scores still download and verify the complete file before opening.
+
+Library schema 5 / record format 4 requires a newly imported library; there is
+no migration from earlier versions. `tests/library-pdf-ranges.spec.js` checks
+partial reads, selected-page priority, rotated and mixed-size pages, persistence
+and export in source, packaged HTTP and standalone file builds.
+
 ### Library workspace design
 
 The library uses native HTML/CSS; no UI component framework is required.

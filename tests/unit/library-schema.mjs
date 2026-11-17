@@ -9,14 +9,14 @@ function database(){
 }
 test('new databases have version information and no migration-only tables',async()=>{
  const db=database();await initializeLibrarySchema(db);
- assert.equal(db.exec('PRAGMA user_version')[0].user_version,4);
+ assert.equal(db.exec('PRAGMA user_version')[0].user_version,5);
  const names=db.exec("SELECT name FROM sqlite_schema WHERE type='table'").map(row=>row.name);
  assert.equal(names.length,13);assert.ok(!names.includes('library_migrations'));assert.ok(!names.includes('library_file_moves'));
  assert.equal(db.exec('SELECT * FROM library_info')[0].storage_format_version,2);
  await initializeLibrarySchema(db);assert.equal(db.flushes,1);db.close();
 });
 test('unsupported schema, data and storage versions are not modified',async()=>{
- for(const sql of ['PRAGMA user_version=99','UPDATE library_info SET storage_format_version=99','UPDATE library_info SET record_format_version=99']){
+ for(const sql of ['PRAGMA user_version=4','PRAGMA user_version=99','UPDATE library_info SET storage_format_version=99','UPDATE library_info SET record_format_version=3','UPDATE library_info SET record_format_version=99']){
   const db=database();await initializeLibrarySchema(db);db.exec(sql);const before=db.exec('SELECT * FROM library_info'),flushes=db.flushes;
   await assert.rejects(initializeLibrarySchema(db),/Unsupported/);assert.deepEqual(db.exec('SELECT * FROM library_info'),before);assert.equal(db.flushes,flushes);db.close();
  }

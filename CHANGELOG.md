@@ -2,6 +2,10 @@
 
 ## Unreleased — MSCZ support
 
+- Open local library PDFs with partial reads and start at the selected song's
+  page. Store maximum page dimensions on import to keep existing layout sizing;
+  fetch individual dimensions only as pages are used. Library schema 5 / record
+  format 4 starts fresh without migrating earlier libraries.
 - Use bundled browser-fs-access for local Open/Save. Store reusable file handles
   for Recent, read externally edited files afresh, and distinguish same-name files.
   Disable Recent entries without a usable handle; remove the old stored copies.

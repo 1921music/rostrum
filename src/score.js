@@ -214,6 +214,14 @@ class Pg {
     return this;
   }
 
+  async ensureDimensions() {
+    if (this.width != null && this.height != null) return;
+    const page = await this.score.mozDoc.getPage(this.mozPn);
+    const { width, height } = page.getViewport({ scale: 1 });
+    this.width = width;
+    this.height = height;
+  }
+
   async renderPdf(canvas, signal = this.inflateCtrl?.signal) {
     // If this page is used to display pdf content (the usual case),
     // then this function renders that pdf to a dom canvas instance
@@ -397,6 +405,8 @@ class Pg {
          await new Promise(resolve => delay(1, resolve));
          checkAbort();
       }
+      await this.ensureDimensions();
+      checkAbort();
   
       // If indicated, determine scaling factor that will "stretch" score s.t. it
       // will expand pg to fit within score's maxWidth & maxHeight
@@ -706,8 +716,8 @@ class Pg {
     this.zoom = zoom;
     if(this.deferred) { 
       // When deferred, where actually resizing a temporary "fake" canvas which is actually a div
-      this.canvas.style.width = this.width * zoom * this.stretch / _pxPerEm_ + "em";
-      this.canvas.style.height = this.height * zoom * this.stretch / _pxPerEm_ + "em";
+      this.canvas.style.width = (this.width ?? this.score.maxWidth) * zoom * this.stretch / _pxPerEm_ + "em";
+      this.canvas.style.height = (this.height ?? this.score.maxHeight) * zoom * this.stretch / _pxPerEm_ + "em";
       this.canvas.style.lineHeight = this.canvas.style.height;
     }
     else if(this.inflated) {
@@ -1384,10 +1394,11 @@ class Score {
     //  For new scores (no external data sources), this is just null.
     // @path identifies the file path in the data source (not including name), or null for new scores.
     // @name identifies the file name of the data source (not including path)
-    // @pdfData bytearray containing pdf file, or null for new scores. 
+    // @pdfData PDF bytes, a local library PDF Blob, or null for new scores.
     // @activate make this score the "active" score
 
     Object.assign(this, { source, path, name });
+    const lazyPdf = pdfData instanceof Blob && libraryState;
     // Reset quality to default; will be overridden by scoreJson if stored in the PDF
     this.quality = 2;
     // Initialize page undo stack
@@ -1414,7 +1425,7 @@ class Score {
       }
       await this.initMusic(activate);
     } else if (pdfData) {
-      this.size = pdfData.byteLength;
+      this.size = pdfData.size ?? pdfData.byteLength;
       if (!window.pdfjsLib) {
         // mozilla pdfjsLib is loaded from mozSrc and mozWorkerSrc (strings
         // (base64-encoded-gzipped strings defined globally) on demand
@@ -1448,9 +1459,30 @@ class Score {
       Score.pdfWorker ||= window.pdfjsLib.PDFWorker.fromPort({
         port: window.pdfjsLib.GlobalWorkerOptions.workerPort,
       });
-      let loadingTask = this.loadingTask = window.pdfjsLib.getDocument({
-        data: pdfData, worker: Score.pdfWorker,
-      });
+      let loadingTask;
+      let readFailure;
+      let input = { data: pdfData };
+      if (lazyPdf) {
+        // PDF.js owns the byte cache and requests only missing ranges. Do not
+        // turn the local Blob into a full in-memory buffer or auto-fetch it.
+        let rejectRead;
+        readFailure = new Promise((resolve,reject) => { rejectRead = reject; });
+        const range = new class extends window.pdfjsLib.PDFDataRangeTransport {
+          constructor() { super(pdfData.size, new Uint8Array(), true); }
+          requestDataRange(begin, end) {
+            pdfData.slice(begin,end).arrayBuffer().then(bytes => {
+              if (!this.aborted) this.onDataRange(begin,new Uint8Array(bytes));
+            }).catch(error => {
+              if (this.aborted) return;
+              rejectRead(error);
+              loadingTask.destroy().catch(() => {});
+            });
+          }
+          abort() { this.aborted = true; }
+        }();
+        input = { range, length:pdfData.size, disableAutoFetch:true, disableStream:true };
+      }
+      this.loadingTask = loadingTask = window.pdfjsLib.getDocument({ ...input, worker: Score.pdfWorker });
 
       // detect non-standard or missing features (fonts, non-standard compression, etc)
       loadingTask.onUnsupportedFeature = (featureId) => {
@@ -1476,7 +1508,7 @@ class Score {
         loadingTask.destroy();
       };
 
-      this.mozDoc = await loadingTask.promise;
+      this.mozDoc = await (readFailure ? Promise.race([loadingTask.promise,readFailure]) : loadingTask.promise);
 
       // A score must always have at least one page (see pgCut's last-page guard).
       // A zero-page PDF is non-conforming per the spec but can be produced (e.g.
@@ -1521,14 +1553,19 @@ class Score {
         Object.assign(score.cells.details.stash, defaults.score?.cells?.details);
         this.quality = score.cells.details.stash.quality ?? this.quality;
       }
-      // create a Pg instance for every pdf page, and calculate the
-      // max {width/height} over all pgs.
+      if (lazyPdf) {
+        this.maxWidth = libraryState.settings.maxWidth;
+        this.maxHeight = libraryState.settings.maxHeight;
+        if (!(this.maxWidth > 0 && this.maxHeight > 0)) throw new Error('PDF maximum dimensions are missing. Reimport this score.');
+      }
+      // Local library PDFs already have a common layout size. Individual page
+      // dimensions are resolved only when a page is inflated for use.
       for (let i = 1; i <= this.mozDoc.numPages; i++) {
-        let mozPage = await this.mozDoc.getPage(i);
-        // Use the viewport, not mozPage.view: the viewport applies the page's
-        // /Rotate, so pg dimensions match what renderPdf will actually draw
-        // (a 90/270-rotated page swaps width and height).
-        let { width, height } = mozPage.getViewport({ scale: 1 });
+        let width = null, height = null;
+        if (!lazyPdf) {
+          const mozPage = await this.mozDoc.getPage(i);
+          ({ width, height } = mozPage.getViewport({ scale: 1 }));
+        }
         let pgJson = scoreJson?.pages ? scoreJson.pages[i]:null;
         this.pgs.push(new Pg(this, width, height, pgJson, i));
         // PDF attachments are untrusted; use red for invalid bookmark colors.
@@ -1536,8 +1573,10 @@ class Score {
           this.pgs[this.pgs.length -1].bookmark =
             typeof pgJson.bookmark == "string" && CSS.supports("color", pgJson.bookmark)
               ? pgJson.bookmark : "#ff0000";
-        this.maxWidth = Math.max(width, this.maxWidth);
-        this.maxHeight = Math.max(height, this.maxHeight);
+        if (!lazyPdf) {
+          this.maxWidth = Math.max(width, this.maxWidth);
+          this.maxHeight = Math.max(height, this.maxHeight);
+        }
       }
     }
 
@@ -1549,6 +1588,12 @@ class Score {
     }
 
     if (libraryState) await this.restoreLibraryState(libraryState, activate);
+    const anchor = libraryState?.anchor;
+    if (activate && anchor && Number.isInteger(anchor.pageIndex)) {
+      const index = anchor.type === 'pdf' ? this.pgs.findIndex(pg => pg.mozPn === anchor.pageIndex + 1) : anchor.pageIndex;
+      if (index < 0 || index >= this.pgs.length) throw new Error('The indexed page is not present in this score view');
+      _menu_.rings.page.cells.numbers.stash.pn = index + 1;
+    }
     if(activate) await this.activate();
     return this;
   }
@@ -1974,7 +2019,9 @@ class Score {
     // If there are no pgs, the current maxWidth,maxHeight
     // are unchanged.
     if (resetMax && this.pgs.length) {
-      this.maxWidth = this.maxHeight = -1;
+      // Unknown pages still fit the saved common frame; never shrink that
+      // frame just because only a few pages have been visited this session.
+      if (this.pgs.every(pg => pg.width != null && pg.height != null)) this.maxWidth = this.maxHeight = -1;
       this.pgs.forEach((pg, index) => {
         this.maxWidth = Math.max(pg.width, this.maxWidth);
         this.maxHeight = Math.max(pg.height, this.maxHeight);
@@ -2156,6 +2203,8 @@ class Score {
         id: await identity(record.id),
         anchor: { type: 'music', key: record.key, staff: record.staff }, content: record });
     } else {
+      settings.maxWidth = this.maxWidth;
+      settings.maxHeight = this.maxHeight;
       const seen = new Set();
       const pageIds = new Set();
       settings.pages = this.pgs.map(pg => {
@@ -2174,7 +2223,8 @@ class Score {
             content: object });
         }
         const { objects: ignored, ...canvas } = json;
-        return { id: pg.libraryPageId, mozPn: pg.mozPn, width: pg.width, height: pg.height,
+        return { id: pg.libraryPageId, mozPn: pg.mozPn,
+          ...(!pg.mozPn ? {width:pg.width,height:pg.height} : {}),
           bookmark: pg.bookmark, background: pg.background, canvas };
       });
       for (const annotation of annotations) { annotation.id = await identity(annotation.objectKey); delete annotation.objectKey; }
@@ -2201,7 +2251,7 @@ class Score {
           for (const pg of this.pgs) pg.deflate(true);
           this.pgs = settings.pages.map(page => {
             const objects = annotations.filter(a => JSON.parse(a.anchor_json).pageId === page.id).map(a => JSON.parse(a.content_json));
-            const pg = new Pg(this, page.width, page.height, { ...page.canvas, objects }, page.mozPn, page.background);
+            const pg = new Pg(this, page.width ?? null, page.height ?? null, { ...page.canvas, objects }, page.mozPn, page.background);
             pg.libraryPageId = page.id; pg.bookmark = page.bookmark;
             return pg;
           });

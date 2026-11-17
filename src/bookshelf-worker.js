@@ -399,7 +399,7 @@ const actions = {
     return Object.fromEntries(Object.entries(selected).map(([name, bytes]) => [name, new TextDecoder().decode(bytes)]));
   },
   async open() { await open(); return { version: LIBRARY_SCHEMA_VERSION }; },
-  async importFile({ file, entries, displayName = file.name, replacesId = null, derivedFromId = null, originalLocation = null }) {
+  async importFile({ file, entries, maxWidth, maxHeight, displayName = file.name, replacesId = null, derivedFromId = null, originalLocation = null }) {
     const bytes = await file.arrayBuffer();
     const hash = await hashBytes(bytes);
     const id = hash;
@@ -410,6 +410,8 @@ const actions = {
       await files.write(existing.storage_path,bytes); setFileState(existing.id,{present:true});
       return { ...actions.rememberOriginalLocation({id:existing.id,location:originalLocation}), alreadyImported:true };
     }
+    if (/\.pdf$/i.test(file.name) && ![maxWidth,maxHeight].every(value => Number.isFinite(value) && value > 0))
+      throw new Error('PDF maximum dimensions are required for import');
     const path = createScorePath(id,file.name);
     const inherited = [];
     if (replacesId) for (const [table,key] of [['bookshelf_documents','bookshelf_id'],['document_tags','tag_id']]) {
@@ -423,7 +425,7 @@ const actions = {
       await files.write(path, bytes);
       return transaction(() => {
         const document = save('documents', { id, content_hash: hash, storage_path: path, size_bytes: file.size,
-          settings_json: '{}', metadata_json: JSON.stringify(withOriginalLocation({ displayName, originalFilename: file.name, format: file.name.split('.').pop().toLowerCase() },originalLocation)) });
+          settings_json: JSON.stringify({ maxWidth, maxHeight }), metadata_json: JSON.stringify(withOriginalLocation({ displayName, originalFilename: file.name, format: file.name.split('.').pop().toLowerCase() },originalLocation)) });
         setFileState(id,{ present:true });
         for (const entry of entries) save('entries', { id: entry.id, document_id: id, parent_id: entry.parent_id || null,
           anchor_json: JSON.stringify(entry.anchor), metadata_json: JSON.stringify(entry.metadata), deleted_at: entry.deleted_at || null });

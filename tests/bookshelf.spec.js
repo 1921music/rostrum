@@ -389,7 +389,7 @@ test('a failed import rolls back metadata and removes the copied file', async ({
   const result = await page.evaluate(async () => {
     let failed = false;
     try {
-      await _bookshelf_.call('importFile', { file: new File(['not committed'], 'Failed.pdf'), entries: [
+      await _bookshelf_.call('importFile', { file: new File(['not committed'], 'Failed.pdf'), maxWidth:300, maxHeight:400, entries: [
         { id: crypto.randomUUID(), parent_id: crypto.randomUUID(), anchor: { type: 'pdf', pageIndex: 0 }, metadata: { title: 'Invalid parent' } },
       ] });
     } catch { failed = true; }

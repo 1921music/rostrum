@@ -642,7 +642,14 @@ class BookshelfStore extends EventTarget {
     const existing = await this.call('findImportedFile', { file });
     if (existing) return this.call('importFile',{file,entries:[],...options});
     // importFile checks again in the serial Worker queue for concurrent imports.
-    return this.call('importFile', { file, entries: await this.analyze(file), ...options });
+    return this.call('importFile', { file, ...await this.prepareImport(file), ...options });
+  }
+  async prepareImport(file, preview = null) {
+    if (!/\.pdf$/i.test(file.name)) return { entries: await this.analyze(file,preview) };
+    const score = preview || await this.scores.preview(file);
+    try {
+      return { entries: await this.analyze(file,score), maxWidth:score.maxWidth, maxHeight:score.maxHeight };
+    } finally { if (!preview) await score.dispose(); }
   }
   async importReviewed(file, options = {}) {
     if (this.reviewPending) throw new Error('Finish the current score import review first.');
@@ -652,8 +659,8 @@ class BookshelfStore extends EventTarget {
       const existing = await this.call('findImportedFile', { file });
       if (existing) return this.call('importFile',{file,entries:[],...options});
       preview = await this.scores.preview(file);
-      const entries = await this.analyze(file, preview);
-      return await this.scores.review(file, entries, preview, draft => this.call('importFile', { file, ...draft, ...options }),
+      const analysis = await this.prepareImport(file, preview);
+      return await this.scores.review(file, analysis.entries, preview, draft => this.call('importFile', { file, ...analysis, ...draft, ...options }),
         this.storage?.kind === 'directory' ? () => this.reauthorizeStorage() : null);
     } finally { try { await preview?.dispose(); } finally { this.reviewPending = false; } }
   }

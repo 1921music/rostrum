@@ -1631,7 +1631,8 @@ class BookLayout extends Layout {
       for (let slot of spread) Object.assign(slot.style, { transition: "none", opacity: 0 });
       let fadeMs = 250, fade = "";
       try {
-        for (let [slot, nonblocking] of [[2, false], [3, false], [0, true], [1, true], [4, true], [5, true]])
+        const visible = pn === pn0 + 3 ? [3,2] : [2,3];
+        for (let [slot, nonblocking] of [...visible.map(slot => [slot,false]), [0, true], [1, true], [4, true], [5, true]])
           await this.pgMount(pn0 + slot, slot, nonblocking);
         // (after layoutSlots: it re-appends the slots, which would cancel a transition under way)
         this.layoutSlots();

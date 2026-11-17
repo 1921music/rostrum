@@ -22,17 +22,9 @@ const bookshelfStore = new BookshelfStore({
     review: reviewScoreImport,
     async open(state,anchor) {
       const settings = JSON.parse(state.document.settings_json);
-      const score = await new Score().init(null,null,JSON.parse(state.document.metadata_json).originalFilename,
-        await state.file.arrayBuffer(),true,{...state,settings});
-      if (anchor) {
-        let page = Number(anchor.pageIndex);
-        if (anchor.type === 'pdf' && Number.isInteger(page)) {
-          const actual = score.pgs.findIndex(pg => pg.mozPn === page + 1);
-          if (actual < 0) throw new Error('The indexed page is not present in this score view');
-          page = actual;
-        }
-        if (Number.isInteger(page) && page >= 0 && page < score.pgs.length) await window._Layout_.activeLayout.pgGoTo(page + 1);
-      }
+      const name = JSON.parse(state.document.metadata_json).originalFilename;
+      const score = await new Score().init(null,null,name,
+        /\.pdf$/i.test(name) ? state.file : await state.file.arrayBuffer(),true,{...state,settings,anchor});
       return score;
     },
   },
