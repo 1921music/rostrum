@@ -21,6 +21,7 @@ const bookshelfStore = new BookshelfStore({
     get active() { return Score.activeScore; },
     preview: async file => new Score().init(null,null,file.name,await file.arrayBuffer(),false),
     review: reviewScoreImport,
+    navigate: (score,anchor) => score.goToLibraryAnchor(anchor),
     async open(state,anchor) {
       const settings = JSON.parse(state.document.settings_json);
       const name = JSON.parse(state.document.metadata_json).originalFilename;

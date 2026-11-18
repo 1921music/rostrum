@@ -1588,14 +1588,17 @@ class Score {
     }
 
     if (libraryState) await this.restoreLibraryState(libraryState, activate);
-    const anchor = libraryState?.anchor;
-    if (activate && anchor && Number.isInteger(anchor.pageIndex)) {
-      const index = anchor.type === 'pdf' ? this.pgs.findIndex(pg => pg.mozPn === anchor.pageIndex + 1) : anchor.pageIndex;
-      if (index < 0 || index >= this.pgs.length) throw new Error('The indexed page is not present in this score view');
-      _menu_.rings.page.cells.numbers.stash.pn = index + 1;
-    }
+    if (activate) await this.goToLibraryAnchor(libraryState?.anchor);
     if(activate) await this.activate();
     return this;
+  }
+
+  async goToLibraryAnchor(anchor) {
+    if (!anchor || !Number.isInteger(anchor.pageIndex)) return;
+    const index = anchor.type === 'pdf' ? this.pgs.findIndex(pg => pg.mozPn === anchor.pageIndex + 1) : anchor.pageIndex;
+    if (index < 0 || index >= this.pgs.length) throw new Error('The indexed page is not present in this score view');
+    if (Layout.activeLayout?.score === this) await Layout.activeLayout.pgGoTo(index + 1,false);
+    else _menu_.rings.page.cells.numbers.stash.pn = index + 1;
   }
 
   dispose() {

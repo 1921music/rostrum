@@ -154,3 +154,29 @@ test('search-affecting content changes are distinct from file status and reader 
  await model.call('update');assert.equal(changes,2);
  await model.call('destroyStorage');assert.equal(changes,3);
 });
+
+test('opening the active library score navigates without fetching or reopening it',async()=>{
+ const {model}=await library(),active={libraryDocumentId:'score'},anchor={type:'pdf',pageIndex:3},calls=[];
+ model.scores.active=active;
+ model.flush=async score=>{assert.equal(score,active);calls.push('flush');};
+ model.call=async action=>{assert.equal(action,'conflicts');return [];};
+ model.scores.navigate=async(score,target)=>{assert.equal(score,active);assert.equal(target,anchor);calls.push('navigate');};
+ assert.equal(await model.openDocument('score',anchor),active);
+ assert.deepEqual(calls,['flush','navigate']);assert.equal(model.opening,null);
+ model.call=async()=>[{table:'documents',id:'score'}];
+ await assert.rejects(model.openDocument('score',anchor),/conflicting edits/);
+ assert.deepEqual(calls,['flush','navigate','flush']);
+ model.syncPending=true;model.manualSync=true;
+ await assert.rejects(model.openDocument('score',anchor),/Wait for library sync/);
+});
+
+test('a different library score still loads its file and opens a new reader',async()=>{
+ const {model}=await library(),active={libraryDocumentId:'old'},state={document:{id:'new'}},anchor={type:'pdf',pageIndex:1},calls=[];
+ model.scores.active=active;model.flush=async()=>calls.push('flush');
+ model.scores.navigate=()=>assert.fail('Must not navigate the old score');
+ model.ensureFile=async id=>{assert.equal(id,'new');calls.push('file');};
+ model.call=async(action,args)=>{if(action==='conflicts')return [];assert.equal(action,'read');assert.equal(args.id,'new');calls.push('read');return state;};
+ model.scores.open=async(data,target)=>{assert.equal(data,state);assert.equal(target,anchor);calls.push('open');return 'reader';};
+ assert.equal(await model.openDocument('new',anchor),'reader');
+ assert.deepEqual(calls,['flush','file','read','open']);
+});

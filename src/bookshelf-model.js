@@ -391,6 +391,11 @@ class BookshelfStore extends EventTarget {
       || conflict.table === 'annotations' && conflict.alternatives.some(change => JSON.parse(change.payload_json).document_id === id))) {
       throw new Error('Resolve this score’s conflicting edits before opening it.');
     }
+    const active = this.scores.active;
+    if (active?.libraryDocumentId === id && !active.disposed && this.scores.navigate) {
+      await this.scores.navigate(active,anchor);
+      return active;
+    }
     await this.ensureFile(id,undefined,{priority:100,front:true});
     const state = await this.call('read', { id });
     return this.scores.open(state,anchor);
