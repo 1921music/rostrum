@@ -12961,12 +12961,13 @@ async function openBridgedLibraryStorage() {
 var LIBRARY_README = `# Rostrum Library
 
 - library.sqlite: Shared library records, edit history and format versions.
+- library-<version-id>.sqlite: Temporary pCloud sync versions. Keep them when copying.
 - scores/: Managed score files (hash prefix and original filename).
 - _sync/: Restore generations and their recovery snapshots. Keep this directory.
 - restore/<unique-name>/: Optional manual replacement requests.
 - README.md: This guide. Device settings and sync caches stay in browser storage.
 
-Normal copy: Copy library.sqlite, scores/ and _sync/ into the library folder.
+Normal copy: Copy all library SQLite versions, scores/ and _sync/ into the library folder.
 Other devices may merge their edits later; this does not force a replacement.
 
 Replace the library: Create restore/<unique-name>/ and copy library.sqlite and
@@ -13083,6 +13084,46 @@ async function holdLibraryLock(name) {
   return release;
 }
 
+// src/bookshelf-format.js
+var LIBRARY_APPLICATION_ID = 1381192781;
+var LIBRARY_SCHEMA_VERSION = 7;
+var LIBRARY_STORAGE_VERSION = 3;
+var LIBRARY_RECORD_VERSION = 4;
+var LIBRARY_BACKUP_VERSION = 2;
+var LibraryFormatError = class extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "LibraryFormatError";
+  }
+};
+var hashLibraryBytes = async (bytes) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((n) => n.toString(16).padStart(2, "0")).join("");
+var isVersionedLibraryName = (name) => /^library-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\.sqlite$/.test(name);
+function scorePath(path) {
+  if (typeof path !== "string" || !/^scores\/[^/\\\x00]+$/.test(path) || path.split("/").some((p) => p === "." || p === "..")) throw new Error("Invalid score path in library package");
+  return path;
+}
+async function libraryEntityId(...parts) {
+  return hashLibraryBytes(new TextEncoder().encode(JSON.stringify(parts)));
+}
+function createScorePath(id, name, otherIds = []) {
+  if (!/^[a-f0-9]{64}$/.test(id)) throw new Error("Invalid score identity");
+  let length = 8;
+  const others = [...otherIds].filter((other) => other !== id);
+  while (length < 64 && others.some((other) => other.startsWith(id.slice(0, length)))) length++;
+  const clean = String(name || "score").normalize("NFC").replace(/[<>\u0022:/\\|?*\x00-\x1f]/g, "_").replace(/[ .]+$/, "") || "score";
+  const extension = clean.match(/\.[a-z0-9]{1,12}$/i)?.[0] || "";
+  let stem = extension ? clean.slice(0, -extension.length) : clean;
+  while (new TextEncoder().encode(stem).length > 160) stem = [...stem].slice(0, -1).join("");
+  return scorePath(`scores/${id.slice(0, length)}_${stem || "score"}${extension}`);
+}
+function checkLibraryEnvelope(value, kind, version) {
+  if (!value || value.format !== kind || value.version !== version) throw new LibraryFormatError("Unsupported library package or sync version. Update Rostrum; pre-versioned data is not imported.");
+  return value;
+}
+function checkRecordVersion(version) {
+  if (version !== LIBRARY_RECORD_VERSION) throw new LibraryFormatError("Unsupported library record version. Update Rostrum.");
+}
+
 // src/bookshelf-storage-bytes-directory.js
 async function openDirectoryBytes({ directory }) {
   if (!directory || directory.kind !== "directory") throw new Error("Choose a library folder first.");
@@ -13114,6 +13155,7 @@ async function openDirectoryBytes({ directory }) {
         const current = await read();
         if ((current && await digest(current)) !== persisted) throw new Error("The library database was changed outside this session. Reopen it before deleting data.");
         await files2.clearLibrary();
+        for (const { name, kind } of await files2.list("")) if (kind === "file" && isVersionedLibraryName(name)) await files2.remove(name);
       },
       close: release
     };
@@ -14576,45 +14618,6 @@ function unzipSync(data, opts) {
   return files2;
 }
 
-// src/bookshelf-format.js
-var LIBRARY_APPLICATION_ID = 1381192781;
-var LIBRARY_SCHEMA_VERSION = 7;
-var LIBRARY_STORAGE_VERSION = 3;
-var LIBRARY_RECORD_VERSION = 4;
-var LIBRARY_BACKUP_VERSION = 2;
-var LibraryFormatError = class extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "LibraryFormatError";
-  }
-};
-var hashLibraryBytes = async (bytes) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))].map((n) => n.toString(16).padStart(2, "0")).join("");
-function scorePath(path) {
-  if (typeof path !== "string" || !/^scores\/[^/\\\x00]+$/.test(path) || path.split("/").some((p) => p === "." || p === "..")) throw new Error("Invalid score path in library package");
-  return path;
-}
-async function libraryEntityId(...parts) {
-  return hashLibraryBytes(new TextEncoder().encode(JSON.stringify(parts)));
-}
-function createScorePath(id, name, otherIds = []) {
-  if (!/^[a-f0-9]{64}$/.test(id)) throw new Error("Invalid score identity");
-  let length = 8;
-  const others = [...otherIds].filter((other) => other !== id);
-  while (length < 64 && others.some((other) => other.startsWith(id.slice(0, length)))) length++;
-  const clean = String(name || "score").normalize("NFC").replace(/[<>\u0022:/\\|?*\x00-\x1f]/g, "_").replace(/[ .]+$/, "") || "score";
-  const extension = clean.match(/\.[a-z0-9]{1,12}$/i)?.[0] || "";
-  let stem = extension ? clean.slice(0, -extension.length) : clean;
-  while (new TextEncoder().encode(stem).length > 160) stem = [...stem].slice(0, -1).join("");
-  return scorePath(`scores/${id.slice(0, length)}_${stem || "score"}${extension}`);
-}
-function checkLibraryEnvelope(value, kind, version) {
-  if (!value || value.format !== kind || value.version !== version) throw new LibraryFormatError("Unsupported library package or sync version. Update Rostrum; pre-versioned data is not imported.");
-  return value;
-}
-function checkRecordVersion(version) {
-  if (version !== LIBRARY_RECORD_VERSION) throw new LibraryFormatError("Unsupported library record version. Update Rostrum.");
-}
-
 // src/bookshelf-transfer.js
 async function exportLibraryPackage({ db: db2, files: files2, tables: tables2 }) {
   const records = Object.fromEntries(Object.keys(tables2).map((table) => [table, db2.exec(`SELECT * FROM ${table}`)]));
@@ -15075,8 +15078,43 @@ async function open() {
   };
   deviceId = getLocal("device") || crypto.randomUUID();
   setLocal("device", deviceId);
+  if (["directory", "opfs"].includes(storageOptions.kind || "opfs")) await mergeCopiedLibrarySnapshots();
   await rawFiles.write("README.md", new Blob([LIBRARY_README], { type: "text/markdown" }));
   initialized = true;
+}
+async function mergeCopiedLibrarySnapshots() {
+  const copies = [];
+  for (const { name, kind } of await rawFiles.list("")) {
+    if (kind !== "file" || !isVersionedLibraryName(name)) continue;
+    const file = await rawFiles.read(name);
+    copies.push({ name, file, data: await readSnapshot(file) });
+  }
+  if (!copies.length) return;
+  const info = sql("SELECT * FROM library_info")[0], local = JSON.parse(info.generation_json);
+  const generations = [local, ...copies.map((copy) => copy.data.generation)];
+  const superseded = new Set(generations.flatMap((generation) => generation.ancestors));
+  const active = new Set(generations.map((generation) => generation.id).filter((id2) => !superseded.has(id2)));
+  if (active.size !== 1) throw new Error("The copied library contains competing replacements.");
+  const [id] = active;
+  const heads2 = copies.filter((copy) => copy.data.generation.id === id);
+  if (local.id !== id) await actions.replaceSnapshot({ file: heads2[0].file });
+  for (const { data } of heads2) await actions.mergeDelta({ changes: data.changes });
+  const updated = sql("SELECT * FROM library_info")[0];
+  const ancestors = new Set([
+    updated.snapshot_id,
+    ...JSON.parse(updated.ancestors_json),
+    ...heads2.flatMap(({ data }) => [data.id, ...data.ancestors])
+  ].filter(Boolean));
+  sql("UPDATE library_info SET snapshot_id=NULL,ancestors_json=? WHERE id=1", [JSON.stringify([...ancestors].sort())]);
+  await db.flush();
+  for (const { name, file } of copies) {
+    try {
+      const current = await rawFiles.read(name);
+      if (await hashLibraryBytes(await current.arrayBuffer()) === await hashLibraryBytes(await file.arrayBuffer())) await rawFiles.remove(name);
+    } catch (error) {
+      if (error.name !== "NotFoundError") throw error;
+    }
+  }
 }
 var importedDocument = (hash) => sql("SELECT * FROM documents WHERE content_hash=? ORDER BY deleted_at IS NOT NULL, replaced_by_id IS NOT NULL, id LIMIT 1", [hash])[0];
 var withOriginalLocation = (metadata, location) => {
@@ -15150,8 +15188,8 @@ var actions = {
     for (const doc of snapshot.documents) await localFile(doc);
     return true;
   },
-  rememberSnapshot({ destination, file, versions, changeIds, coveredVersions }) {
-    setLocal("base:" + destination, { file, versions, changeIds, coveredVersions });
+  rememberSnapshot({ destination, file, versions, changeIds }) {
+    setLocal("base:" + destination, { file, versions, changeIds });
   },
   readManaged: ({ path }) => rawFiles.read(path),
   writeManaged: ({ path, file }) => rawFiles.write(path, file),
@@ -15612,7 +15650,20 @@ self.onmessage = ({ data }) => {
         self.postMessage({ id, value: true });
         return;
       }
-      await open();
+      if (!initialized) {
+        const priorState = { ...deviceState };
+        try {
+          await open();
+        } catch (error) {
+          try {
+            await db?.close();
+          } catch {
+          }
+          db = files = rawFiles = null;
+          deviceState = priorState;
+          throw error;
+        }
+      }
       if (action === "destroyStorage") {
         await db.destroy();
         deviceState = { device: deviceId };
