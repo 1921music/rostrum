@@ -48,7 +48,7 @@ let bytesToBase64DataUrl = async (bytes, type = "application/octet-stream") => {
 let err = (call, msg) => {
   console.warn(`**** Rostrum FileSrc error in call: ${call}`, msg);
   console.trace();
-  throw new Error(msg, { cause: "fileSrc" });
+  throw new Error(msg ?? call, { cause: "fileSrc" });
 };
 
 /**

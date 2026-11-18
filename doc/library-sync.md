@@ -61,6 +61,53 @@ automatically deleted. Different pending requests require keeping only one;
 competing published generations offer explicit choices in Library settings.
 The chosen generation becomes a new child of all observed competing generations.
 
+## Automated conflict tests
+
+Run `mise exec -- npx playwright test tests/library-provider-conflicts.spec.js`.
+The suite uses separate browser contexts (independent IndexedDB stores) and real
+SQLite workers, sync orchestration, transport and FileSrc HTTP adapters. Only
+authentication and the remote HTTP server are replaced. Unexpected external
+requests fail the test; no real cloud account or credentials are used.
+Service workers are blocked so requests cannot bypass interception.
+
+`tests/provider-cloud-server.js` keeps files, revisions and upload sessions in
+memory. One-shot barriers stop requests at precise points instead of relying on
+timing or sleeps. Conditional comparison and publication are atomic in the fake;
+Drive permits independent same-name files; pCloud keeps overwritten revisions.
+
+The same scenarios run against all four providers:
+
+- First-creation races, both publication orders and three independently edited
+  devices; changes arriving during download, upload and acknowledgment.
+- Conflicting edits, edit/delete conflicts and identical deletions, explicit
+  resolution and reload; duplicate score imports, independent score imports,
+  collection memberships, repeated playlist items and annotations.
+- Rejected requests, lost upload responses, failed score uploads, corrupted
+  downloads and recovery after reloading the application.
+- Incomplete/corrupt or competing replacement requests, delayed old-generation
+  writes and explicit resolution of competing published generations.
+- Identical leftover/recreated restore requests, changed content under a used
+  name (cloud and local, including reload), names belonging to ancestor
+  generations, and a new name intentionally restoring the same bytes again.
+  Same-name local/cloud requests must agree before anything is replaced.
+- Failure before recovery-image or activation-marker publication, including
+  orphaned recovery images and a lost response after marker publication;
+  retries and another device recovering after the request directory is removed.
+
+Additional cases exercise Drive pagination, ambiguous creation and cleanup races;
+Dropbox/OneDrive conditional-write retry limits; and pCloud past-revision failure
+and a stale write that finishes last. A separate assertion checks that acknowledged
+revision IDs are already present in the cloud before another device can repair
+them. Each SQLite publication is independently opened to check foreign keys,
+absence of device-state tables and the hashes of referenced score files. Replicas
+are compared using records, full change history and generation, not SQLite bytes.
+
+The smaller `library-provider-snapshots.spec.js`, `library-snapshots.spec.js` and
+`library-uploads.spec.js` suites cover request details, format/restore validation,
+filename collisions and bounded chunk uploads. These mocks check our protocol
+against the modeled API contract; they do not verify live provider behavior,
+OAuth, quotas or actual revision-retention periods.
+
 ## Manual release checks (dedicated test accounts only)
 
 - Exercise login and upload/download on each provider in browser and extension.

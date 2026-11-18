@@ -14,6 +14,8 @@ Other devices may merge their edits later; this does not force a replacement.
 
 Replace the library: Create restore/<unique-name>/ and copy library.sqlite and
 all its scores/ there. Use a NEW name every time, even after deleting a request.
+An already processed request with identical SQLite is ignored. Reusing its name
+with different SQLite is rejected; use a new name for another replacement.
 At the next sync, Rostrum validates the files and publishes a new generation.
 Other devices then discard edits from the previous generation when they sync.
 Incomplete requests wait without replacing the library. Competing requests are
