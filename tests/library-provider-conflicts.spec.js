@@ -399,6 +399,50 @@ for(const provider of ['Drive','Dropbox','OneDrive','pCloud'])test.describe(prov
     });
   }
   if(provider==='pCloud'){
+    test('status check recovers when a parent refresh evicts a pending nested listing',async()=>{
+      const folder=cloud.mkdir(cloud.root,'Library');
+      const sync=cloud.mkdir(folder.id,'_sync');
+      const generations=cloud.mkdir(sync.id,'generations');
+      cloud.mkdir(folder.id,'scores');
+      cloud.mkdir(folder.id,'restore');
+      const gate=cloud.pause('a','listGenerations','other');
+      const handleRequest=cloud.pcloud.bind(cloud);
+      cloud.pcloud=async(id,request,url)=>{
+        if(url.pathname==='/listfolder'&&url.searchParams.get('folderid')===String(generations.id)){
+          await cloud.event(id,'listGenerations','Library/_sync/generations');
+        }
+        return handleRequest(id,request,url);
+      };
+      await a.page.evaluate(()=>{
+        window.realTransport=_bookshelf_.makeCloudTransport('pCloud','Library');
+        window.pendingCheck=_bookshelf_.checkSyncNeeds(realTransport,{interactive:true})
+          .then(()=>_bookshelf_.syncNeeds,error=>({error:error.message}));
+      });
+      await gate.arrived;
+      await a.page.evaluate(()=>realTransport.source.getDir('',true));
+      gate.release();
+      expect(await a.page.evaluate(()=>pendingCheck)).toMatchObject({uploads:0,downloads:0,pending:false});
+    });
+    for (const url of ['/pod.html','/rostrum.html']) test(`status checks report file counts when pCloud refuses version history (${url})`,async({browser})=>{
+      const client=await device(browser,cloud,'status',url);clients.push(client);
+      await a.import('cloud score','Cloud.musicxml');await synced(a);await synced(client);
+      await client.import('local score','Local.musicxml');
+      const commits=cloud.commits.length;
+      const handleRequest=cloud.pcloud.bind(cloud);
+      cloud.pcloud=(id,request,requestUrl)=>requestUrl.pathname==='/listrevisions'
+        ? {result:7010,error:'Invalid link referer.'}
+        : handleRequest(id,request,requestUrl);
+      const check=()=>client.page.evaluate(async()=>{
+        await _bookshelf_.checkSyncNeeds(realTransport,{interactive:true});
+        return _bookshelf_.syncNeeds;
+      });
+      expect(await check()).toMatchObject({uploads:1,downloads:1,historyUnavailable:true,unknown:true});
+      expect((await client.sync()).error).toContain('pCloud did not allow access to library version history (7010)');
+      expect(cloud.commits).toHaveLength(commits);
+      cloud.pcloud=handleRequest;
+      expect(await check()).toMatchObject({uploads:1,downloads:1,historyUnavailable:false,unknown:false});
+      await synced(client);
+    });
     test('an old known upload finishing last is republished to the current file, not left only in revisions',async()=>{
       await a.tag('seed','Base');await synced(a);await synced(b);
       const old=Buffer.from(cloud.sqlite()[0].bytes);await a.tag('a','A');

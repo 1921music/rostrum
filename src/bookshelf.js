@@ -460,7 +460,9 @@ class BookshelfView {
       allSync.disabled = !chosen || busy || !!this.model.checkingCloud || applied && (!known || !needs.pending && !needs.uploads && !needs.downloads);
       checkSync.disabled = !chosen || busy || !!this.model.checkingCloud;
       syncCounts.textContent = this.model.checkingCloud ? 'Checking cloud status…' : known
-        ? `Upload pending: ${needs.uploads} files · Download pending: ${needs.downloads} files` + (needs.pending ? ' · Library changes pending; file counts update after sync.' : '')
+        ? `Upload pending: ${needs.uploads} files · Download pending: ${needs.downloads} files` + (needs.historyUnavailable
+          ? ' · pCloud version history is unavailable. Counts are based on the latest files only.'
+          : needs.pending ? ' · Library changes pending; file counts update after sync.' : '')
         : needs?.error ? 'Could not check cloud status: ' + needs.error : chosen ? 'Check sync status to count pending files.' : 'Choose a sync folder first.';
       cloud.disabled = busy || !!this.model.transferState.size;
     };

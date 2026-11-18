@@ -225,10 +225,10 @@ class BookshelfStore extends EventTarget {
       return transport.writeScore(document,file);
     },{label:JSON.parse(document.metadata_json).originalFilename,direction:'upload'});
   }
-  async refreshSyncNeeds(transport = this.transport) {
+  async refreshSyncNeeds(transport = this.transport,{historyUnavailable = this.syncNeeds?.destination === transport?.id && this.syncNeeds.historyUnavailable} = {}) {
     if (!transport) return;
     const status = await this.call('syncSummary',{destination:transport.id});
-    this.syncNeeds = {...status,destination:transport.id,pending:!!status.unknown || status.pending > 0 || !status.verified,checkedAt:Date.now()};
+    this.syncNeeds = {...status,historyUnavailable,destination:transport.id,pending:!!status.unknown || status.pending > 0 || !status.verified,checkedAt:Date.now()};
     this.updateCloudPending(status,transport.id);
     this.notifyStatus();
   }
@@ -240,7 +240,13 @@ class BookshelfStore extends EventTarget {
       const check = async () => {
         await transport.connect?.();
         const data = await this.call('syncData',{destination:transport.id}), remoteIds = new Set();
-        const [state,scores,generations,requests,localRequests] = await Promise.all([transport.loadSyncState({coveredVersions:data.base?.coveredVersions || []}),transport.listScores(),transport.listGenerations(),transport.restoreRequests(),this.call('listManaged',{path:'restore'})]);
+        // Each provider listing refreshes the shared parent folder cache.
+        const state = await transport.loadSyncState({coveredVersions:data.base?.coveredVersions || [],allowCurrentOnly:true});
+        const scores = await transport.listScores();
+        const generations = await transport.listGenerations();
+        const requests = await transport.restoreRequests();
+        const localRequests = await this.call('listManaged',{path:'restore'});
+        const historyUnavailable = state.snapshots.some(item => item.historyUnavailable);
         const generation = JSON.parse(data.info.generation_json);
         let unknown = [...requests,...localRequests.filter(item => item.kind === 'directory').map(item => ({id:item.name}))].some(request => !generations.some(marker => marker.id === request.id));
         unknown ||= generation.id !== 'initial' && !generations.some(marker => marker.id === generation.id);
@@ -252,10 +258,10 @@ class BookshelfStore extends EventTarget {
         if (state.snapshots.length && !remoteIds.size && data.changes.length) unknown = true;
         if (generations.some(marker => marker.id !== generation.id && !generation.ancestors.includes(marker.id))) unknown = true;
         const known = new Set(data.changes.map(change => change.id));
-        unknown ||= [...remoteIds].some(id => !known.has(id));
+        unknown ||= historyUnavailable || [...remoteIds].some(id => !known.has(id));
         await this.call('remoteInventory',{destination:transport.id,changeIds:[...remoteIds],paths:scores.map(file => file.path),unknown});
         this.syncNeeds = null;
-        await this.refreshSyncNeeds(transport);
+        await this.refreshSyncNeeds(transport,{historyUnavailable});
       };
       try { await (!interactive && transport.background ? transport.background(check) : check()); }
       catch (error) { this.syncNeeds = {destination:transport.id,error:error.message}; throw error; }

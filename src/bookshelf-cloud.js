@@ -46,9 +46,9 @@ class LibraryCloudTransport {
     return this.source.getDir(this.full(path),true);
   }
   scorePath(doc) { return scoreStoragePath(doc.storage_path); }
-  async loadSyncState({coveredVersions = []} = {}) {
+  async loadSyncState({coveredVersions = [],allowCurrentOnly = false} = {}) {
     if (typeof this.source.listLibrarySnapshots !== 'function') throw new Error('This source does not support library synchronization');
-    const expectedState = await this.source.listLibrarySnapshots(this.full(''));
+    const expectedState = await this.source.listLibrarySnapshots(this.full(''),{allowCurrentOnly});
     const snapshots = [], covered = new Set(coveredVersions);
     for (const entry of expectedState) {
       if (this.source.source === 'pCloud' && !entry.current && covered.has(entry.id + ':' + entry.token)) continue;

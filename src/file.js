@@ -56,9 +56,9 @@ let err = (call, msg) => {
    puts error.message in the dialog for cause "fileSrc"; anything else is
    replaced by "Details in console", which is no help on a tablet.
 **/
-let srcErr = (msg) => {
+let srcErr = (msg, details) => {
   console.warn(`**** Rostrum FileSrc error: ${msg}`);
-  throw new Error(msg, { cause: "fileSrc" });
+  throw Object.assign(new Error(msg, { cause: "fileSrc" }), details);
 };
 
 let errDialog = (error, msg) => {
@@ -896,7 +896,7 @@ class CachedSrc extends FileSrc {
 
 
 
-    async getDir(path, force = false) {
+    async getDir(path, force = false, retry = true) {
         checkPath(path);
         await this.auth();
         let dir;
@@ -913,7 +913,13 @@ class CachedSrc extends FileSrc {
         }
         let parentPath = path.substring(0, lastSlashIndex);
         await this.getDir(parentPath, force);
-        return this.putCache(path, await this.getDirSrc(path, this.cache[path]));
+        dir = this.cache[path];
+        if (!dir) err(`getDir(${path})`, "Cloud folder not found: " + path);
+        const data = await this.getDirSrc(path, dir);
+        // A concurrent parent listing may have invalidated this folder entry.
+        if (this.cache[path]?.id === dir.id) return this.putCache(path, data);
+        if (retry) return this.getDir(path, true, false);
+        err(`getDir(${path})`, "Cloud folder changed while checking it. Try again: " + path);
     }
 
     async putDir(path, name) {
@@ -2429,7 +2435,7 @@ class PCloudSrc extends CachedSrc {
     try { payload = await response.json(); }
     catch (_error) { srcErr(`pCloud ${method} returned HTTP ${response.status}.`); }
     if (!response.ok || payload.result !== 0)
-      srcErr(`pCloud ${method} failed: ${payload.error || response.status} (result ${payload.result ?? "n/a"}).`);
+      srcErr(`pCloud ${method} failed: ${payload.error || response.status} (result ${payload.result ?? "n/a"}).`, {pcloudResult:payload.result});
     return payload;
   }
 
@@ -2447,7 +2453,7 @@ class PCloudSrc extends CachedSrc {
       } else {
         this.cache[path].files[obj.name] = {
           isDir: false, name: obj.name, id: obj.fileid,
-          created: Date.parse(obj.created), modified: Date.parse(obj.modified), size: obj.size,
+          created: Date.parse(obj.created), modified: Date.parse(obj.modified), size: obj.size, hash: obj.hash,
         };
       }
     }
@@ -2495,10 +2501,17 @@ class PCloudSrc extends CachedSrc {
      authentication mechanism rather than the platform, so the mechanism decides:
      see PCloudDirectAuth.contentAccess and PCloudOAuthAuth.contentAccess.
   **/
-  async listLibrarySnapshots(path) {
+  async listLibrarySnapshots(path,{allowCurrentOnly = false} = {}) {
     const dir = await this.getDir(path,true), file = dir.files['library.sqlite'];
     if (!file) return [];
-    const result = await this.request('listrevisions',{fileid:file.id});
+    let result;
+    try { result = await this.request('listrevisions',{fileid:file.id}); }
+    catch (error) {
+      if (error.pcloudResult !== 7010) throw error;
+      if (!allowCurrentOnly) throw new Error('pCloud did not allow access to library version history (7010). Sync needs the history to merge edits safely.',{cause:error});
+      if (file.hash == null) throw error;
+      return [{fileId:file.id,token:String(file.hash),size:file.size,current:true,historyUnavailable:true}];
+    }
     const entries = (result.revisions || []).map(revision => ({id:String(file.id) + ':' + revision.revisionid,fileId:file.id,revisionId:revision.revisionid,token:String(revision.hash),size:revision.size}));
     entries.push({id:String(file.id) + ':current:' + result.metadata.hash,fileId:file.id,token:String(result.metadata.hash),size:result.metadata.size,current:true});
     return entries;
@@ -2506,8 +2519,13 @@ class PCloudSrc extends CachedSrc {
   async readLibrarySnapshot(path,item) {
     if (item.current) {
       const bytes = await this.getFileSrc(path,'library.sqlite',null,{id:item.fileId});
-      const latest = (await this.listLibrarySnapshots(path)).find(version => version.current);
-      if (latest?.token !== item.token) throw Object.assign(new Error('pCloud library changed while reading'),{retrySync:true});
+      const latest = item.historyUnavailable
+        ? (await this.getDir(path,true)).files['library.sqlite']
+        : (await this.listLibrarySnapshots(path)).find(version => version.current);
+      const unchanged = item.historyUnavailable
+        ? latest?.id === item.fileId && String(latest.hash) === item.token
+        : latest?.token === item.token;
+      if (!unchanged) throw Object.assign(new Error('pCloud library changed while reading'),{retrySync:true});
       return new Blob([bytes]);
     }
     // revisionid is a documented global parameter of copyfile. Materializing
