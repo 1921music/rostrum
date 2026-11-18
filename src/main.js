@@ -70,6 +70,7 @@ window.pdfjsLib.GlobalWorkerOptions.workerPort = new Worker("pdf.worker.min.mjs"
 // #include src/bookshelf.js minified
 // #include src/bookshelf-import.js minified
 // #include src/bookshelf-sync.js minified
+// #include src/bookshelf-readme.js minified
 // #include src/bookshelf-cloud.js minified
 // #include build/bookshelf-runtime.js
 // #include build/bookshelf-host.js

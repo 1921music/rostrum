@@ -2,11 +2,11 @@ const {test,expect} = require('@playwright/test');
 const {ProviderCloudServer} = require('./provider-cloud-server');
 test.describe.configure({mode:'parallel'});
 
-async function device(browser,cloud,id) {
+async function device(browser,cloud,id,url='/pod.html') {
   const context=await browser.newContext({serviceWorkers:'block'}); await cloud.install(context,id);
   const page=await context.newPage(),errors=[]; page.on('pageerror',error=>errors.push(error.message));
   const initialize=async()=>{
-    await page.goto('/pod.html'); await page.waitForFunction(()=>!!window._bookshelf_&&!!window._menu_);
+    await page.goto(url); await page.waitForFunction(()=>!!window._bookshelf_&&!!window._menu_);
     await page.evaluate(async({provider,id})=>{
       await _bookshelf_.setAutoSync(false);
       await _bookshelf_.configure({kind:'indexeddb',name:'provider-test-'+id});
@@ -90,6 +90,16 @@ for(const provider of ['Drive','Dropbox','OneDrive','pCloud'])test.describe(prov
     for(const client of clients)await client.context.close();
     expect(cloud.unexpected).toEqual([]);
     for(const client of clients)expect(client.errors).toEqual([]);
+  });
+  for(const url of ['/pod.html','/rostrum.html'])test(`empty cloud initializes README, scores and SQLite (${url})`,async({browser})=>{
+    cloud.removeTree('scores');cloud.remove(cloud.at('README.md'));
+    const fresh=await device(browser,cloud,'fresh',url);clients.push(fresh);
+    const doc=await fresh.import();await fresh.tag('seed','Base');await synced(fresh);
+    expect(cloud.at('README.md').bytes.toString()).toContain('restore/<unique-name>/');
+    expect(cloud.at(doc.storage_path).bytes.toString()).toBe('same score');
+    expect(cloud.sqlite()).toHaveLength(1);
+    const before=cloud.commits.length;await synced(fresh);expect(cloud.commits).toHaveLength(before);
+    await synced(b);expect((await b.dump()).records.documents[0].id).toBe(doc.id);
   });
   test('real adapters sync SQLite and score bytes, then perform a no-op',async()=>{
     const doc=await a.import(); await a.tag('seed','Base'); await synced(a); await synced(b);
