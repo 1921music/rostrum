@@ -64,9 +64,9 @@ class ProviderCloudServer {
   }
   remove(node) { if (node) this.nodes.delete(node.id); }
   removeTree(prefix) { const nodes=[...this.nodes.values()].filter(node=>{const path=this.path(node);return path===prefix||path.startsWith(prefix+'/');});for(const node of nodes)this.remove(node); }
-  sqlite() { return this.children(this.root).filter(node => node.name === 'library.sqlite'); }
+  sqlite() { return this.children(this.root).filter(node => this.kind(node.name) === 'sqlite'); }
   kind(path) {
-    if (path === 'library.sqlite') return 'sqlite';
+    if (/^library(?:-[a-f0-9-]{36})?\.sqlite$/.test(path)) return 'sqlite';
     if (/^_sync\/generations\/[a-f0-9]{64}\.json$/.test(path)) return 'marker';
     if (/^_sync\/generations\/[a-f0-9]{64}\.sqlite$/.test(path)) return 'recovery';
     return path.startsWith('scores/') ? 'score' : 'other';
@@ -89,7 +89,7 @@ class ProviderCloudServer {
   async commit(device,parent,name,bytes,options = {}) {
     const path = (this.path(this.nodes.get(parent)) + '/' + name).replace(/^\//,'');
     await this.event(device,'beforeCommit',path,{bytes});
-    if (path === 'library.sqlite') await this.auditSnapshot(bytes);
+    if (this.kind(path) === 'sqlite') await this.auditSnapshot(bytes);
     // Token comparison and mutation are one uninterrupted server operation.
     const previous = this.find(parent,name);
     if (options.condition !== undefined && (options.condition === null ? !!previous : !previous || 'r' + previous.revision !== options.condition)) {
@@ -275,23 +275,33 @@ class ProviderCloudServer {
   async pcloud(device,request,url) {
     const args=Object.fromEntries(url.searchParams), api=url.pathname.slice(1), number=name=>Number(args[name]);
     const node=this.nodes.get(number('fileid'));
-    if (api === 'listfolder') return {result:0,metadata:{...this.metadata(this.nodes.get(number('folderid'))),contents:this.children(number('folderid')).map(node=>this.metadata(node))}};
+    if (api === 'listfolder') {
+      const folder=this.nodes.get(number('folderid'));
+      if (folder.id === this.root) await this.event(device,'beforeList','library.sqlite');
+      return {result:0,metadata:{...this.metadata(folder),contents:this.children(folder.id).map(node=>this.metadata(node))}};
+    }
     if (api === 'createfolder') return {result:0,metadata:this.metadata(this.mkdir(number('folderid'),args.name))};
     if (api === 'listrevisions') {
-      if (!node) return {result:2009,error:'File not found'};
-      await this.event(device,'beforeList',this.path(node),{node});
-      return {result:0,metadata:this.metadata(node),revisions:node.history.map(item=>({revisionid:item.revision,hash:item.hash,size:item.bytes.length}))};
+      return {result:7010,error:'Invalid link referer.'};
     }
+    if (api === 'stat') return node ? {result:0,metadata:this.metadata(node)} : {result:2009,error:'File not found'};
     if (api === 'copyfile') {
-      const version=node?.history.find(item=>item.revision===number('revisionid'));
-      if (!version) return {result:2009,error:'Revision not found'};
-      const copy=this.write(number('tofolderid'),args.toname,version.bytes); copy.originPath=this.path(node);
+      const parent=number('tofolderid'), path=(this.path(this.nodes.get(parent))+'/'+args.toname).replace(/^\//,'');
+      await this.event(device,'beforeCopy',path,{node});
+      if (!node || !this.nodes.has(node.id)) return {result:2009,error:'File not found'};
+      if (args.noover === '1' && this.find(parent,args.toname)) {
+        this.conflicts++;
+        return {result:2004,error:'File or folder already exists.'};
+      }
+      const copy=this.write(parent,args.toname,node.bytes);
+      await this.event(device,'afterCopy',path,{node:copy});
       return {result:0,metadata:this.metadata(copy)};
     }
     if (api === 'getzip') {
       const file=this.nodes.get(Number(args.fileids));
       if (!file) return {result:2009,error:'File not found'};
-      const bytes=await this.read(device,file); return Buffer.from(zipSync({[file.name]:bytes}));
+      try { return Buffer.from(zipSync({[file.name]:await this.read(device,file)})); }
+      catch (error) { if (error.status !== 404) throw error; return {result:2009,error:'File not found'}; }
     }
     if (api === 'uploadfile') {
       const part=multipart(request).find(part=>part.headers.includes('name="file"'));
@@ -299,7 +309,10 @@ class ProviderCloudServer {
       return {result:0,metadata:[this.metadata(await this.commit(device,number('folderid'),name,part.bytes))]};
     }
     if (api === 'renamefile') { if (!node) return {result:2009,error:'File not found'}; return {result:0,metadata:this.metadata(await this.rename(device,node,node.parent,args.toname))}; }
-    if (api === 'deletefile') { await this.removeVersion(device,node); return {result:0}; }
+    if (api === 'deletefile') {
+      if (!node) return {result:2009,error:'File not found'};
+      await this.removeVersion(device,node); return {result:0};
+    }
     throw new Error('Unsupported pCloud request');
   }
 }

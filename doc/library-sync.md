@@ -29,22 +29,24 @@ All provider calls in automated tests are mocked.
   Pagination preserves all candidates. A pre-generated file ID makes uncertain
   creation checkable. Ancestry is inside SQLite, not provider-only metadata.
   Covered snapshots can be removed; unobserved concurrent snapshots survive.
-- pCloud: read the current SQLite and previously unacknowledged revisions; check
-  again after writing. Browser auth reads past versions using `copyfile` with
-  the global `revisionid` parameter, reads the temporary copy through `getzip`,
-  then deletes it. Covered revisions are remembered in device IndexedDB.
-  Recovery through server history depends on pCloud's finite revision retention.
+- pCloud: publish each SQLite to a unique `library-<version-id>.sqlite` and merge
+  independent versions using the ancestry stored inside SQLite. Remove covered
+  versions by file ID. When one version remains, copy it to `library.sqlite`
+  with `copyfile(noover=1)`. Delete the source after verifying the copy.
+  A same-name conflict leaves both versions for the next merge.
+  Direct login can retry a rejected copy with a short-lived pCloud session.
 
 API references: [OneDrive commit](https://learn.microsoft.com/en-us/graph/api/driveitem-createuploadsession),
 [Drive create](https://developers.google.com/workspace/drive/api/guides/manage-uploads),
-[pCloud revision parameter](https://docs.pcloud.com/methods/intro/global_parameters.html),
-[pCloud revisions](https://docs.pcloud.com/methods/revisions/listrevisions.html).
+[pCloud copy](https://docs.pcloud.com/methods/file/copyfile.html),
+[pCloud delete](https://docs.pcloud.com/methods/file/deletefile.html).
 
 ## External copy and replacement
 
 A normal copy of the library directory is readable without provider metadata;
-other devices may later merge their edits. There is one local SQLite regardless
-of how many independent Google Drive snapshots exist temporarily.
+other devices may later merge their edits. Include all pCloud SQLite files if
+copying during sync. On opening a copied directory, Rostrum merges the versions
+and saves the local `library.sqlite` before removing the extra SQLite files.
 
 A replacement request is `restore/<new-name>/library.sqlite` plus its complete
 active `scores/`. Names are never reused. Local and cloud requests are discovered
@@ -73,7 +75,9 @@ Service workers are blocked so requests cannot bypass interception.
 `tests/provider-cloud-server.js` keeps files, revisions and upload sessions in
 memory. One-shot barriers stop requests at precise points instead of relying on
 timing or sleeps. Conditional comparison and publication are atomic in the fake;
-Drive permits independent same-name files; pCloud keeps overwritten revisions.
+Drive permits independent same-name files. The pCloud mock returns 7010 for
+`listrevisions` and models the verified `copyfile(noover=1)` behavior, including
+result 2004 for an existing destination.
 
 The same scenarios run against all four providers:
 
@@ -95,8 +99,9 @@ The same scenarios run against all four providers:
   retries and another device recovering after the request directory is removed.
 
 Additional cases exercise Drive pagination, ambiguous creation and cleanup races;
-Dropbox/OneDrive conditional-write retry limits; and pCloud past-revision failure
-and a stale write that finishes last. A separate assertion checks that acknowledged
+Dropbox/OneDrive conditional-write retry limits; and pCloud copy collisions,
+cleanup retries and opening a copied folder during and after convergence.
+A separate assertion checks that acknowledged
 revision IDs are already present in the cloud before another device can repair
 them. Each SQLite publication is independently opened to check foreign keys,
 absence of device-state tables and the hashes of referenced score files. Replicas
@@ -106,7 +111,7 @@ The smaller `library-provider-snapshots.spec.js`, `library-snapshots.spec.js` an
 `library-uploads.spec.js` suites cover request details, format/restore validation,
 filename collisions and bounded chunk uploads. These mocks check our protocol
 against the modeled API contract; they do not verify live provider behavior,
-OAuth, quotas or actual revision-retention periods.
+OAuth or quotas.
 
 ## Manual release checks (dedicated test accounts only)
 
@@ -114,8 +119,8 @@ OAuth, quotas or actual revision-retention periods.
 - Race two devices with independent edits; interrupt after upload before response.
 - Confirm Dropbox stale rev and OneDrive final-commit stale eTag rejection.
 - Confirm Drive duplicate-name discovery, ambiguous-create recovery and cleanup.
-- Confirm pCloud temporary past-revision copy with browser auth and EU/US hosts;
-  confirm its revision history survives overwriting `library.sqlite`.
+- Confirm pCloud versioned upload and no-overwrite copy with browser auth
+  on EU/US hosts. Verify both snapshots survive a copy collision.
 - Copy a local directory to cloud without the app, and open it on a clean device.
 - Publish a replacement, remove its request, then sync an offline device with
   old edits. Verify the new generation and score hashes, including after restart.

@@ -4,12 +4,13 @@ export { LIBRARY_README };
 const LIBRARY_README = `# Rostrum Library
 
 - library.sqlite: Shared library records, edit history and format versions.
+- library-<version-id>.sqlite: Temporary pCloud sync versions. Keep them when copying.
 - scores/: Managed score files (hash prefix and original filename).
 - _sync/: Restore generations and their recovery snapshots. Keep this directory.
 - restore/<unique-name>/: Optional manual replacement requests.
 - README.md: This guide. Device settings and sync caches stay in browser storage.
 
-Normal copy: Copy library.sqlite, scores/ and _sync/ into the library folder.
+Normal copy: Copy all library SQLite versions, scores/ and _sync/ into the library folder.
 Other devices may merge their edits later; this does not force a replacement.
 
 Replace the library: Create restore/<unique-name>/ and copy library.sqlite and

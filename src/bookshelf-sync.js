@@ -17,13 +17,18 @@ function snapshotHeads(snapshots,generation) {
   return [...new Map(eligible.filter(item => !ancestors.has(item.data.id)).map(item => [item.data.id,item])).values()];
 }
 async function inspectedState(store,transport) {
-  const local = await store.call('syncData',{destination:transport.id});
-  const state = await transport.loadSyncState({coveredVersions:local.base?.coveredVersions || []});
+  const state = await transport.loadSyncState();
   for (const item of state.snapshots) {
     item.data = await store.call('inspectSnapshot',{file:item.file});
     item.data.id ||= 'copy:' + await hashLibraryBytes(await item.file.arrayBuffer());
   }
   return state;
+}
+async function cleanupSnapshots(transport, snapshots, head) {
+  const covered = snapshots.filter(item => head.data.ancestors.includes(item.data.id) ||
+    head.data.generation.ancestors.includes(item.data.generation.id));
+  const copies = snapshots.filter(item => item.data.id === head.data.id);
+  try { await transport.cleanup?.(covered,copies); } catch { /* Retry cleanup on the next sync. */ }
 }
 async function localGenerationMarkers(store) {
   const result = [];
@@ -167,35 +172,32 @@ async function exchangeLibraryChanges(store,transport) {
       for (const doc of required) { await store.uploadFile(doc,null,transport); paths.add(doc.storage_path); uploadedFiles++; }
       const pending = snapshot.changes.filter(change => !remoteIds.has(change.id));
       // One self-contained head already represents all changes: no publication.
-      if (heads.length !== 1 || pending.length || !state.snapshots.some(item => item.current && item.data.id === heads[0]?.data.id) && transport.source?.source === 'pCloud') {
+      if (heads.length !== 1 || pending.length) {
         const publicationId = await transport.reservePublication();
         snapshot = await store.call('captureSnapshot',{id:publicationId,ancestors:[...new Set(heads.flatMap(item => [item.data.id,...item.data.ancestors]))],generation});
         // Uploads can take time; a newly imported score must also precede SQLite.
         for (const doc of snapshot.documents) if (!doc.deleted_at && !doc.replaced_by_id && !paths.has(doc.storage_path)) { await store.uploadFile(doc,null,transport); paths.add(doc.storage_path); uploadedFiles++; }
         if (!await transport.publishSnapshot(snapshot.file,{expectedState:state.expectedState,publicationId})) continue;
         uploadedBatches++; uploadedChanges += pending.length;
-        // Enumerate again, INCLUDING pCloud's overwritten revisions. An equal
-        // latest hash alone cannot tell us whether another branch was lost.
+        // Enumerate again before acknowledging. Another client may have
+        // published a branch while this snapshot was being uploaded.
         const after = await inspectedState(store,transport), afterHeads = snapshotHeads(after.snapshots,generation);
         const known = new Set(snapshot.changes.map(change => change.id));
-        if (afterHeads.some(head => head.data.changes.some(change => !known.has(change.id)))) continue;
-        if (transport.source?.source === 'pCloud') {
-          const current = after.snapshots.find(item => item.current);
-          const currentIds = new Set(current?.data.changes.map(change => change.id) || []);
-          if (current?.data.generation.id !== generation.id || [...known].some(id => !currentIds.has(id))) continue;
-        }
+        const [head] = afterHeads;
+        if (afterHeads.length !== 1) continue;
+        const persisted = new Set(head.data.changes.map(change => change.id));
+        if (persisted.size !== known.size || [...known].some(id => !persisted.has(id))) continue;
         const generations = await transport.listGenerations();
         if (generationHead(generations).id !== generation.id) continue;
-        const covered = after.snapshots.filter(item => item.data.id !== publicationId && snapshot.info && JSON.parse(snapshot.info.ancestors_json).includes(item.data.id));
-        try { await transport.cleanup(covered); } catch { /* Deferred GC; shared data is durable. */ }
-        await store.call('rememberSnapshot',{destination:transport.id,file:snapshot.file,versions:[publicationId],changeIds:[...known],coveredVersions:after.expectedState.map(item => item.id + ':' + item.token)});
+        await cleanupSnapshots(transport,after.snapshots,head);
+        await store.call('rememberSnapshot',{destination:transport.id,file:head.file,versions:[head.data.id],changeIds:[...known]});
         const status = await store.call('remoteInventory',{destination:transport.id,changeIds:[...known],paths:[...paths]});
         return {uploadedBatches,receivedBatches,uploadedChanges,uploadedFiles,downloadFailures:await store.downloadPinned(transport),...status};
       }
       const head = heads[0];
-      await store.call('rememberSnapshot',{destination:transport.id,file:head.file,versions:[head.data.id],changeIds:[...remoteIds],coveredVersions:state.expectedState.map(item => item.id + ':' + item.token)});
+      await store.call('rememberSnapshot',{destination:transport.id,file:head.file,versions:[head.data.id],changeIds:[...remoteIds]});
       const status = await store.call('remoteInventory',{destination:transport.id,changeIds:[...remoteIds],paths:[...paths]});
-      try { await transport.cleanup(state.snapshots.filter(item => head.data.ancestors.includes(item.data.id))); } catch {}
+      await cleanupSnapshots(transport,state.snapshots,head);
       return {uploadedBatches,receivedBatches,uploadedChanges,uploadedFiles,downloadFailures:await store.downloadPinned(transport),...status};
     } catch (error) { if (!error.retrySync) throw error; }
   }

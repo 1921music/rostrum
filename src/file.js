@@ -24,7 +24,7 @@ export { checkUnsaved, escapeHtml, pathJoin, FileSrc, FileListView, FileSystemVi
 import { css, ButtonGroup, clamp, clearChildren, dataIndex, delay, Drag, getBox, helm, iconSvg, listen, dialog, noTranslate, Schedule, strToHash, toast, unlisten } from "./common.js";
 import { Score } from "./score.js";
 import { panels } from "./panel.js";
-import { hashLibraryBytes } from './bookshelf-format.js';
+import { hashLibraryBytes, isVersionedLibraryName } from './bookshelf-format.js';
 // -skip
 
 let scoreFileMimeType = name => name.toLowerCase().endsWith('.sqlite') ? 'application/vnd.sqlite3'
@@ -2135,8 +2135,8 @@ class WebPasswordStore {
  * replaced by an OAuth implementation without changing file operations.
  * The email address is remembered locally. At the user's option the password
  * is kept in chrome.storage.session, which is memory-only and cleared when
- * Chrome exits. pCloud currently authenticates direct requests but does not
- * issue reusable auth tokens, so every request receives a fresh digest.
+ * Chrome exits. Normal direct requests use digest authentication. Library
+ * cleanup can also request a short-lived session if pCloud rejects a copy.
  */
 class PCloudDirectAuth {
   apiHost = localStorage.getItem("pcloud-api-host") || "api.pcloud.com";
@@ -2160,6 +2160,27 @@ class PCloudDirectAuth {
   // well before it.
   static digestMargin = 10000;
   digest = null;
+  librarySession = null;
+
+  async requestLibrarySession() {
+    await this.authenticate();
+    const {apiHost,email,password} = this;
+    if (!PCLOUD_API_HOSTS.has(apiHost)) throw new Error("Invalid pCloud API host.");
+    if (this.librarySession?.apiHost === apiHost && this.librarySession.expires > Date.now()) return this.librarySession.request;
+    const lifetime = 900;
+    const response = await fetch(`https://${apiHost}/login`, {
+      method:"POST", credentials:"omit", redirect:"error", referrerPolicy:"no-referrer",
+      body:new URLSearchParams({getauth:"1",logout:"1",username:email,password,
+        device:"Rostrum library",deviceid:crypto.randomUUID(),os:"4",
+        authexpire:String(lifetime),authinactiveexpire:String(lifetime)}),
+    });
+    const payload = await response.json();
+    if (!response.ok || payload.result !== 0 || typeof payload.auth !== "string" || !payload.auth) throw new Error("pCloud did not issue a session for library cleanup.");
+    if (this.apiHost !== apiHost || this.email !== email || this.password !== password) throw new Error("pCloud sign-in changed.");
+    const request = {apiHost,params:{auth:payload.auth},headers:{}};
+    this.librarySession = {apiHost,request,expires:Date.now() + (lifetime - 60) * 1000};
+    return request;
+  }
 
   async sha1Hex(value) {
     let bytes = typeof value == "string" ? new TextEncoder().encode(value) : value;
@@ -2259,6 +2280,7 @@ class PCloudDirectAuth {
   async forget() {
     this.email = this.password = null;
     this.digest = null;
+    this.librarySession = null;
     localStorage.removeItem("pcloud-email");
     await this.store.clear();
   }
@@ -2325,6 +2347,11 @@ class PCloudAuth {
   async requestAuth() {
     await this.authenticate();
     return this.active.requestAuth();
+  }
+
+  async requestLibrarySession() {
+    await this.authenticate();
+    return this.active === this.direct ? this.direct.requestLibrarySession() : null;
   }
 
   /**
@@ -2417,7 +2444,7 @@ class PCloudSrc extends CachedSrc {
      carrying a header outside the CORS safelist is refused from a web origin.
   **/
   async signed(method, params, options) {
-    let auth = await this.authProvider.requestAuth();
+    let auth = options.auth || await this.authProvider.requestAuth();
     let url = new URL(`https://${auth.apiHost}/${method}`);
     for (let [name, value] of Object.entries({ ...params, ...auth.params }))
       url.searchParams.set(name, String(value));
@@ -2491,59 +2518,78 @@ class PCloudSrc extends CachedSrc {
       let payload;
       try { payload = JSON.parse(new TextDecoder().decode(buffer)); }
       catch (_error) { srcErr(`pCloud ${method} returned unreadable data.`); }
-      srcErr(`pCloud ${method} failed: ${payload.error || response.status} (result ${payload.result ?? "n/a"}).`);
+      srcErr(`pCloud ${method} failed: ${payload.error || response.status} (result ${payload.result ?? "n/a"}).`, {pcloudResult:payload.result});
     }
     return new Uint8Array(buffer);
   }
 
-  /**
-     Reads a file's contents. Which call can do that depends on the
-     authentication mechanism rather than the platform, so the mechanism decides:
-     see PCloudDirectAuth.contentAccess and PCloudOAuthAuth.contentAccess.
-  **/
-  async listLibrarySnapshots(path,{allowCurrentOnly = false} = {}) {
-    const dir = await this.getDir(path,true), file = dir.files['library.sqlite'];
-    if (!file) return [];
-    let result;
-    try { result = await this.request('listrevisions',{fileid:file.id}); }
-    catch (error) {
-      if (error.pcloudResult !== 7010) throw error;
-      if (!allowCurrentOnly) throw new Error('pCloud did not allow access to library version history (7010). Sync needs the history to merge edits safely.',{cause:error});
-      if (file.hash == null) throw error;
-      return [{fileId:file.id,token:String(file.hash),size:file.size,current:true,historyUnavailable:true}];
-    }
-    const entries = (result.revisions || []).map(revision => ({id:String(file.id) + ':' + revision.revisionid,fileId:file.id,revisionId:revision.revisionid,token:String(revision.hash),size:revision.size}));
-    entries.push({id:String(file.id) + ':current:' + result.metadata.hash,fileId:file.id,token:String(result.metadata.hash),size:result.metadata.size,current:true});
-    return entries;
-  }
-  async readLibrarySnapshot(path,item) {
-    if (item.current) {
-      const bytes = await this.getFileSrc(path,'library.sqlite',null,{id:item.fileId});
-      const latest = item.historyUnavailable
-        ? (await this.getDir(path,true)).files['library.sqlite']
-        : (await this.listLibrarySnapshots(path)).find(version => version.current);
-      const unchanged = item.historyUnavailable
-        ? latest?.id === item.fileId && String(latest.hash) === item.token
-        : latest?.token === item.token;
-      if (!unchanged) throw Object.assign(new Error('pCloud library changed while reading'),{retrySync:true});
-      return new Blob([bytes]);
-    }
-    // revisionid is a documented global parameter of copyfile. Materializing
-    // a temporary copy lets browser auth read revisions through same-origin getzip.
-    const dir = await this.getDir(path,true), name = '.rostrum-' + crypto.randomUUID() + '.pending';
-    const result = await this.request('copyfile',{fileid:item.fileId,revisionid:item.revisionId,tofolderid:dir.id,toname:name,noover:1});
-    try {
-      if (item.token !== undefined && String(result.metadata.hash) !== item.token) throw new Error('pCloud returned a different file revision. Retry synchronization.');
-      return new Blob([await this.getFileSrc(path,name,dir,{id:result.metadata.fileid})]);
-    }
-    finally { await this.request('deletefile',{fileid:result.metadata.fileid}).catch(() => {}); }
-  }
-  async publishLibrarySnapshot(path,file) {
+  async listLibrarySnapshots(path) {
     const dir = await this.getDir(path,true);
-    await this.putFileSrc(path,'library.sqlite',file,dir,dir.files['library.sqlite']);
-    return true; // The engine must enumerate revisions AGAIN before acknowledging.
+    return Object.values(dir.files).filter(file => file.name === 'library.sqlite' || isVersionedLibraryName(file.name))
+      .map(file => ({id:file.id,name:file.name,token:String(file.hash),size:file.size}));
   }
 
+  async readLibrarySnapshot(path,item) {
+    try {
+      const bytes = await this.getFileSrc(path,item.name,null,item);
+      const {metadata} = await this.request('stat',{fileid:item.id});
+      if (String(metadata.hash) !== item.token || metadata.size !== item.size || bytes.byteLength !== item.size) {
+        throw Object.assign(new Error('pCloud library changed while reading'),{retrySync:true});
+      }
+      return new Blob([bytes]);
+    } catch (error) {
+      if (error.pcloudResult === 2009) error.retrySync = true;
+      throw error;
+    }
+  }
+
+  async publishLibrarySnapshot(path,file,expected,id) {
+    const dir = await this.getDir(path,true);
+    await this.putFileSrc(path,'library-' + id + '.sqlite',file,dir);
+    return true;
+  }
+
+  async removeLibrarySnapshot(path,item) {
+    try { await this.request('deletefile',{fileid:item.id}); }
+    catch (error) { if (error.pcloudResult !== 2009) throw error; }
+  }
+
+  async compactLibrarySnapshots(path,head) {
+    const versions = await this.listLibrarySnapshots(path);
+    const numbered = versions.filter(file => isVersionedLibraryName(file.name));
+    const version = numbered.find(file => file.id === head.id);
+    if (numbered.length !== 1 || !version || version.token !== head.token || version.size !== head.size) return;
+    let canonical = versions.find(file => file.name === 'library.sqlite');
+    if (!canonical) {
+      const dir = await this.getDir(path);
+      try {
+        const {metadata} = await this.copyLibrarySnapshot(dir.id,version.id);
+        canonical = {id:metadata.fileid,name:metadata.name,token:String(metadata.hash),size:metadata.size};
+      } catch (error) {
+        if (error.pcloudResult === 2004 || error.pcloudResult === 2009) return;
+        throw error;
+      }
+    }
+    // Recover a copy whose acknowledgment was lost. Compare the bytes before
+    // deleting the source, including when another client created the copy.
+    if (canonical.token !== version.token || canonical.size !== version.size) return;
+    const copy = await this.readLibrarySnapshot(path,canonical);
+    if (await hashLibraryBytes(await copy.arrayBuffer()) !== await hashLibraryBytes(await head.file.arrayBuffer())) return;
+    await this.removeLibrarySnapshot(path,version);
+  }
+
+  async copyLibrarySnapshot(folderId,fileId) {
+    const params = {fileid:fileId,tofolderid:folderId,toname:'library.sqlite',noover:1};
+    try { return await this.request('copyfile',params); }
+    catch (error) {
+      if (![1000,7010].includes(error.pcloudResult)) throw error;
+      const auth = await this.authProvider.requestLibrarySession?.();
+      if (!auth) throw error;
+      return this.request('copyfile',params,{auth});
+    }
+  }
+
+  // The authenticated provider selects the endpoint used to download contents.
   async getFileSrc(_path, _name, _dir, file) {
     await this.authProvider.authenticate();
     return this.authProvider.contentAccess == "zip"

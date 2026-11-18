@@ -1,5 +1,6 @@
 import { DirectoryLibraryFiles, libraryDirectory } from './bookshelf-files.js';
 import { holdLibraryLock } from './bookshelf-storage-lock.js';
+import { isVersionedLibraryName } from './bookshelf-format.js';
 
 export async function openDirectoryBytes({ directory }) {
   if (!directory || directory.kind !== 'directory') throw new Error('Choose a library folder first.');
@@ -22,6 +23,7 @@ export async function openDirectoryBytes({ directory }) {
         const current = await read();
         if ((current && await digest(current)) !== persisted) throw new Error('The library database was changed outside this session. Reopen it before deleting data.');
         await files.clearLibrary();
+        for (const {name,kind} of await files.list('')) if (kind === 'file' && isVersionedLibraryName(name)) await files.remove(name);
       }, close: release };
   } catch (error) { release(); throw error; }
 }

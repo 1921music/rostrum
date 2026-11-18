@@ -5,7 +5,7 @@ import { openLibraryStorage } from './bookshelf-storage.js';
 import { openConfiguredLibraryStorage } from './bookshelf-storage-policy.js';
 import { unzipSync } from 'fflate';
 import { exportLibraryPackage, readLibraryPackage, hashBytes, scorePath } from './bookshelf-transfer.js';
-import { LIBRARY_SCHEMA_VERSION, LIBRARY_RECORD_VERSION, createScorePath, checkRecordVersion, libraryEntityId } from './bookshelf-format.js';
+import { LIBRARY_SCHEMA_VERSION, LIBRARY_RECORD_VERSION, createScorePath, checkRecordVersion, libraryEntityId, isVersionedLibraryName, hashLibraryBytes } from './bookshelf-format.js';
 import { initializeLibrarySchema, libraryTables } from './bookshelf-schema.js';
 
 // All database and file mutations run serially in this worker. A second tab
@@ -247,8 +247,38 @@ async function open() {
   };
   deviceId = getLocal('device') || crypto.randomUUID();
   setLocal('device',deviceId);
+  if (['directory','opfs'].includes(storageOptions.kind || 'opfs')) await mergeCopiedLibrarySnapshots();
   await rawFiles.write('README.md',new Blob([LIBRARY_README],{type:'text/markdown'}));
   initialized = true;
+}
+async function mergeCopiedLibrarySnapshots() {
+  const copies = [];
+  for (const {name,kind} of await rawFiles.list('')) {
+    if (kind !== 'file' || !isVersionedLibraryName(name)) continue;
+    const file = await rawFiles.read(name);
+    copies.push({name,file,data:await readSnapshot(file)});
+  }
+  if (!copies.length) return;
+  const info = sql('SELECT * FROM library_info')[0], local = JSON.parse(info.generation_json);
+  const generations = [local,...copies.map(copy => copy.data.generation)];
+  const superseded = new Set(generations.flatMap(generation => generation.ancestors));
+  const active = new Set(generations.map(generation => generation.id).filter(id => !superseded.has(id)));
+  if (active.size !== 1) throw new Error('The copied library contains competing replacements.');
+  const [id] = active;
+  const heads = copies.filter(copy => copy.data.generation.id === id);
+  if (local.id !== id) await actions.replaceSnapshot({file:heads[0].file});
+  for (const {data} of heads) await actions.mergeDelta({changes:data.changes});
+  const updated = sql('SELECT * FROM library_info')[0];
+  const ancestors = new Set([updated.snapshot_id,...JSON.parse(updated.ancestors_json),
+    ...heads.flatMap(({data}) => [data.id,...data.ancestors])].filter(Boolean));
+  sql('UPDATE library_info SET snapshot_id=NULL,ancestors_json=? WHERE id=1',[JSON.stringify([...ancestors].sort())]);
+  await db.flush();
+  for (const {name,file} of copies) {
+    try {
+      const current = await rawFiles.read(name);
+      if (await hashLibraryBytes(await current.arrayBuffer()) === await hashLibraryBytes(await file.arrayBuffer())) await rawFiles.remove(name);
+    } catch (error) { if (error.name !== 'NotFoundError') throw error; }
+  }
 }
 const importedDocument = hash => sql('SELECT * FROM documents WHERE content_hash=? ORDER BY deleted_at IS NOT NULL, replaced_by_id IS NOT NULL, id LIMIT 1', [hash])[0];
 const withOriginalLocation = (metadata, location) => {
@@ -312,8 +342,8 @@ const actions = {
     for (const doc of snapshot.documents) await localFile(doc);
     return true;
   },
-  rememberSnapshot({destination,file,versions,changeIds,coveredVersions}) {
-    setLocal('base:' + destination,{file,versions,changeIds,coveredVersions});
+  rememberSnapshot({destination,file,versions,changeIds}) {
+    setLocal('base:' + destination,{file,versions,changeIds});
   },
   readManaged:({path}) => rawFiles.read(path),
   writeManaged:({path,file}) => rawFiles.write(path,file),
@@ -708,7 +738,16 @@ self.onmessage = ({ data }) => {
         db = files = rawFiles = null; initialized = false;
         self.postMessage({ id, value: true }); return;
       }
-      await open();
+      if (!initialized) {
+        const priorState = {...deviceState};
+        try { await open(); }
+        catch (error) {
+          try { await db?.close(); } catch { /* Keep the opening error. */ }
+          db = files = rawFiles = null;
+          deviceState = priorState;
+          throw error;
+        }
+      }
       if (action === 'destroyStorage') {
         await db.destroy(); deviceState = {device:deviceId}; await flushDeviceState(); db = files = rawFiles = null; initialized = false;
         self.postMessage({id,value:true}); return;

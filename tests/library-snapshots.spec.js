@@ -52,16 +52,14 @@ test('a failed conditional write merges the new remote state before retrying',as
  });expect(result).toEqual({attempts:2,pending:0,names:['Other','Own']});
 });
 
-test('pCloud checks overwritten revisions even when its own upload was latest',async({page})=>{
+test('a successful publication rechecks for an independent concurrent snapshot',async({page})=>{
  const result=await page.evaluate(async()=>{
   await _bookshelf_.configure(b);await _bookshelf_.sync(deltaCloud.transport);
   await _bookshelf_.call('update',{table:'tags',values:{id:'other',name:'Other'}});
   const other=await _bookshelf_.call('captureSnapshot',{id:'other-publication',ancestors:[],generation:{id:'initial',ancestors:[]}});
   await _bookshelf_.configure(a);await _bookshelf_.call('update',{table:'tags',values:{id:'own',name:'Own'}});
-  const transport=deltaCloud.transport,load=transport.loadSyncState,publish=transport.publishSnapshot;let current=[...deltaCloud.batches.keys()].at(-1),attempts=0;
-  transport.source={source:'pCloud'};
-  transport.loadSyncState=async()=>{const state=await load();state.snapshots.forEach(item=>item.current=item.id===current);return state;};
-  transport.publishSnapshot=async(file,options)=>{if(!attempts++)deltaCloud.batches.set('other-publication',other.file);await publish(file,options);current=options.publicationId;return true;};
+  const transport=deltaCloud.transport,publish=transport.publishSnapshot;let attempts=0;
+  transport.publishSnapshot=async(file,options)=>{if(!attempts++)deltaCloud.batches.set('other-publication',other.file);return publish(file,options);};
   await _bookshelf_.sync(transport);
   return {attempts,names:(await _bookshelf_.records('tags')).map(row=>row.name).sort()};
  });expect(result).toEqual({attempts:2,names:['Other','Own']});
@@ -223,16 +221,18 @@ test('an ordinary older directory copy can merge the last synced base instead of
  });expect(result).toEqual({before:0,names:['Keep acknowledged edit'],generation:'initial'});
 });
 
-test('pCloud republishes when a late upload restores an older known version over its result',async({page})=>{
+test('a late copy of an already incorporated snapshot can be cleaned up',async({page})=>{
  const result=await page.evaluate(async()=>{
-  const transport=deltaCloud.transport,load=transport.loadSyncState,publish=transport.publishSnapshot;
-  const older=[...deltaCloud.batches.keys()][0];let current=older,attempts=0;
-  transport.source={source:'pCloud'};
-  transport.loadSyncState=async()=>{const state=await load();state.snapshots.forEach(item=>item.current=item.id===current);return state;};
-  transport.publishSnapshot=async(file,options)=>{await publish(file,options);current=++attempts===1?older:options.publicationId;return true;};
+  const transport=deltaCloud.transport,publish=transport.publishSnapshot;
+  const [older]=deltaCloud.batches.values();let attempts=0;
+  transport.publishSnapshot=async(file,options)=>{
+   if(!attempts++)deltaCloud.batches.set('late-copy',older);
+   return publish(file,options);
+  };
+  transport.cleanup=async versions=>{for(const item of versions)deltaCloud.batches.delete(item.id);};
   await _bookshelf_.call('update',{table:'tags',values:{id:'own',name:'Keep current'}});
   const synced=await _bookshelf_.sync(transport);
-  const latest=await _bookshelf_.call('inspectSnapshot',{file:deltaCloud.batches.get(current)});
-  return {attempts,pending:synced.pending,names:latest.records.tags.map(row=>row.name)};
- });expect(result).toEqual({attempts:2,pending:0,names:['Keep current']});
+  const [file]=deltaCloud.batches.values(),latest=await _bookshelf_.call('inspectSnapshot',{file});
+  return {attempts,pending:synced.pending,count:deltaCloud.batches.size,names:latest.records.tags.map(row=>row.name)};
+ });expect(result).toEqual({attempts:1,pending:0,count:1,names:['Keep current']});
 });

@@ -1,5 +1,4 @@
 const {test,expect}=require('@playwright/test');
-const {zipSync}=require('fflate');
 test.beforeEach(async({page})=>{
  page.external=[];
  await page.route('**/*',r=>{if(r.request().url().startsWith('http://127.0.0.1:9876/'))return r.continue();page.external.push(r.request().url());return r.abort();});
@@ -57,21 +56,35 @@ test('Drive lists every same-name version and verifies an ambiguous create by re
  });expect(result).toEqual({ids:['one','two'],success:true});expect(pages).toBe(2);expect(creates).toBe(1);
 });
 
-test('pCloud browser reads a past revision by copying it temporarily and using getzip',async({page})=>{
- const calls=[],archive=zipSync({'snapshot.sqlite':new TextEncoder().encode('sqlite revision')});
- await page.route('https://api.pcloud.com/**',r=>{
-  const url=new URL(r.request().url());calls.push({method:url.pathname,revision:url.searchParams.get('revisionid'),file:url.searchParams.get('fileid')});
-  if(url.pathname==='/copyfile')return r.fulfill({json:{result:0,metadata:{fileid:99,hash:'revision-hash'}}});
-  if(url.pathname==='/getzip')return r.fulfill({contentType:'application/zip',body:Buffer.from(archive)});
-  if(url.pathname==='/deletefile')return r.fulfill({json:{result:0}});
-  throw new Error('Unexpected pCloud operation');
+test('pCloud can retry a rejected digest-auth copy using a form-POST session',async({page})=>{
+ const calls=[];
+ await page.route('https://api.pcloud.com/**',async route=>{
+  const request=route.request(),url=new URL(request.url()),params=url.searchParams;
+  calls.push(url.pathname);
+  if(url.pathname==='/getdigest')return route.fulfill({json:{result:0,digest:'test-digest',expires:new Date(Date.now()+30000).toUTCString()}});
+  if(url.pathname==='/login'){
+   expect(request.method()).toBe('POST');expect(url.search).toBe('');
+   const form=new URLSearchParams(request.postData());
+   expect(form.get('password')).toBe('test-password');expect(form.get('getauth')).toBe('1');
+   return route.fulfill({json:{result:0,auth:'test-session'}});
+  }
+  expect(url.pathname).toBe('/copyfile');expect(params.get('fileid')).toBe('12');
+  expect(params.get('tofolderid')).toBe('7');expect(params.get('toname')).toBe('library.sqlite');
+  expect(params.get('noover')).toBe('1');
+  if(!params.has('auth')){
+   expect(params.has('passworddigest')).toBe(true);
+   return route.fulfill({json:{result:7010,error:'Invalid link referer.'}});
+  }
+  expect(params.get('auth')).toBe('test-session');expect(params.has('passworddigest')).toBe(false);
+  return route.fulfill({json:{result:0,metadata:{fileid:99,name:'library.sqlite',hash:'copied-hash',size:32}}});
  });
- expect(await page.evaluate(async()=>{
-  const source=_FileSrc_.get('pCloud');source.getDir=async()=>({id:7});
-  source.authProvider={contentAccess:'zip',authenticate:async()=>{},requestAuth:async()=>({apiHost:'api.pcloud.com',params:{auth:'mock'},headers:{}})};
-  const blob=await source.readLibrarySnapshot('/Library',{fileId:12,revisionId:34,token:'revision-hash'});return blob.text();
- })).toBe('sqlite revision');
- expect(calls.map(call=>call.method)).toEqual(['/copyfile','/getzip','/deletefile']);expect(calls[0]).toMatchObject({revision:'34',file:'12'});
+ const result=await page.evaluate(async()=>{
+  const auth=new window._PCloudDirectAuth_();
+  Object.assign(auth,{apiHost:'api.pcloud.com',email:'test@example.invalid',password:'test-password',sessionRestored:true});
+  return new window._PCloudSrc_(auth).copyLibrarySnapshot(7,12);
+ });
+ expect(result).toMatchObject({result:0,metadata:{fileid:99}});
+ expect(calls).toEqual(['/getdigest','/copyfile','/login','/copyfile']);
 });
 
 for(const url of ['/pod.html','/rostrum.html'])test(`Dropbox encodes Japanese stored names safely in HTTP headers (${url})`,async({page})=>{

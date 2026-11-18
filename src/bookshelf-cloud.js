@@ -46,12 +46,11 @@ class LibraryCloudTransport {
     return this.source.getDir(this.full(path),true);
   }
   scorePath(doc) { return scoreStoragePath(doc.storage_path); }
-  async loadSyncState({coveredVersions = [],allowCurrentOnly = false} = {}) {
+  async loadSyncState() {
     if (typeof this.source.listLibrarySnapshots !== 'function') throw new Error('This source does not support library synchronization');
-    const expectedState = await this.source.listLibrarySnapshots(this.full(''),{allowCurrentOnly});
-    const snapshots = [], covered = new Set(coveredVersions);
+    const expectedState = await this.source.listLibrarySnapshots(this.full(''));
+    const snapshots = [];
     for (const entry of expectedState) {
-      if (this.source.source === 'pCloud' && !entry.current && covered.has(entry.id + ':' + entry.token)) continue;
       if (entry.size > 256 * 1024 * 1024) throw new Error('Cloud SQLite exceeds the supported 256 MiB size');
       snapshots.push({...entry,file:await this.source.readLibrarySnapshot(this.full(''),entry)});
     }
@@ -61,9 +60,13 @@ class LibraryCloudTransport {
   async publishSnapshot(file,{expectedState,publicationId}) {
     return this.source.publishLibrarySnapshot(this.full(''),file,expectedState,publicationId);
   }
-  async cleanup(versions) {
+  async cleanup(versions,headCopies = []) {
     if (!this.source.removeLibrarySnapshot) return;
     for (const item of versions) await this.source.removeLibrarySnapshot(this.full(''),item);
+    if (this.source.compactLibrarySnapshots) {
+      const numbered = headCopies.find(item => item.name !== 'library.sqlite');
+      if (numbered) await this.source.compactLibrarySnapshots(this.full(''),numbered);
+    }
   }
   async listGenerations() {
     const directory = await this.directory('_sync/generations');

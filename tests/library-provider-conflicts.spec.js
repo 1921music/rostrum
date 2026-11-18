@@ -20,7 +20,11 @@ async function device(browser,cloud,id,url='/pod.html') {
   };
   await initialize();
   return {
-    id,page,context,errors,reload:initialize,
+    id,page,context,errors,
+    reload:async()=>{
+      await page.evaluate(()=>_bookshelf_.call('close'));
+      await initialize();
+    },
     tag:(id,name,deleted_at)=>page.evaluate(({id,name,deleted_at})=>_bookshelf_.call('update',{table:'tags',values:{id,...(name===undefined?{}:{name}),...(deleted_at===undefined?{}:{deleted_at})}}),{id,name,deleted_at}),
     import:(text='same score',name='曲集.musicxml')=>page.evaluate(({text,name})=>_bookshelf_.call('importFile',{file:new File([text],name),entries:[]}),{text,name}),
     sync:()=>page.evaluate(async()=>{try{return {result:await _bookshelf_.sync(realTransport)};}catch(error){return {error:error.message};}}),
@@ -50,16 +54,11 @@ async function converge(clients) {
 }
 async function remoteChanges(client) {
   return client.page.evaluate(async()=>{
-    let versions;
-    if(realTransport.source.source==='pCloud'){
-      const path=realTransport.full(''),current=(await realTransport.source.listLibrarySnapshots(path)).find(item=>item.current);
-      versions={snapshots:current?[{...current,file:await realTransport.source.readLibrarySnapshot(path,current)}]:[]};
-    }else versions=await realTransport.loadSyncState();
+    const versions=await realTransport.loadSyncState();
     const markers=await realTransport.listGenerations(),parents=new Set(markers.flatMap(marker=>marker.ancestors));
     const generation=markers.find(marker=>!parents.has(marker.id))?.id || 'initial';
     const ids=new Set();
     for(const item of versions.snapshots){
-      if(realTransport.source.source==='pCloud'&&!item.current)continue;
       const data=await _bookshelf_.call('inspectSnapshot',{file:item.file});
       if(data.generation.id===generation)for(const change of data.changes)ids.add(change.id);
     }
@@ -106,8 +105,8 @@ for(const provider of ['Drive','Dropbox','OneDrive','pCloud'])test.describe(prov
     const state=await converge([a,b]);expect(state.records.documents).toHaveLength(1);expect(state.records.tags[0].name).toBe('Base');
     await b.page.evaluate(id=>_bookshelf_.ensureFile(id,realTransport),doc.id);
     expect(await b.page.evaluate(id=>_bookshelf_.call('fileInfo',{id,verify:true}).then(info=>info.file.text()),doc.id)).toBe('same score');
-    const before=cloud.commits.filter(item=>item.path==='library.sqlite').length;await synced(a);
-    expect(cloud.commits.filter(item=>item.path==='library.sqlite')).toHaveLength(before);
+    const before=cloud.commits.filter(item=>cloud.kind(item.path)==='sqlite').length;await synced(a);
+    expect(cloud.commits.filter(item=>cloud.kind(item.path)==='sqlite')).toHaveLength(before);
   });
   test('stale simultaneous publications preserve both independent edits',async()=>{
     await a.tag('seed','Base');await synced(a);await synced(b);
@@ -190,9 +189,9 @@ for(const provider of ['Drive','Dropbox','OneDrive','pCloud'])test.describe(prov
   });
   test('a rejected write leaves local edits durable across a page reload',async()=>{
     await a.tag('seed','Base');await synced(a);await a.tag('a','A');
-    const before=cloud.commits.filter(item=>item.path==='library.sqlite').length;
+    const before=cloud.commits.filter(item=>cloud.kind(item.path)==='sqlite').length;
     cloud.fault('a','beforeCommit','sqlite',403);expect((await a.sync()).error).toBeTruthy();
-    expect(cloud.commits.filter(item=>item.path==='library.sqlite')).toHaveLength(before);
+    expect(cloud.commits.filter(item=>cloud.kind(item.path)==='sqlite')).toHaveLength(before);
     await a.reload();expect((await a.dump()).records.tags.map(row=>row.name).sort()).toEqual(['A','Base']);
     await synced(a);await converge([a,b]);
   });
@@ -201,16 +200,16 @@ for(const provider of ['Drive','Dropbox','OneDrive','pCloud'])test.describe(prov
     const expected=(await a.dump()).changes.map(change=>change.id);
     cloud.fault('a','afterCommit','sqlite','abort');const first=await a.sync();
     if(provider==='Drive')expect(first.error).toBeUndefined();else expect(first.error).toBeTruthy();
-    const commits=cloud.commits.filter(item=>item.path==='library.sqlite').length;
+    const commits=cloud.commits.filter(item=>cloud.kind(item.path)==='sqlite').length;
     await assertRemoteContains(a,expected);await a.reload();await synced(a);
-    expect(cloud.commits.filter(item=>item.path==='library.sqlite')).toHaveLength(commits);await converge([a,b]);
+    expect(cloud.commits.filter(item=>cloud.kind(item.path)==='sqlite')).toHaveLength(commits);await converge([a,b]);
   });
   test('failed score transfers never publish dangling SQLite and retry succeeds',async()=>{
     await a.tag('seed','Base');await synced(a);const doc=await a.import();
-    const commits=cloud.commits.filter(item=>item.path==='library.sqlite').length;
+    const commits=cloud.commits.filter(item=>cloud.kind(item.path)==='sqlite').length;
     cloud.fault('a','beforeCommit','score',503);const failure=await a.sync();expect(failure.error).toBeTruthy();
     if(provider==='OneDrive')expect(failure.error).toContain('putFileSrc');
-    expect(cloud.commits.filter(item=>item.path==='library.sqlite')).toHaveLength(commits);
+    expect(cloud.commits.filter(item=>cloud.kind(item.path)==='sqlite')).toHaveLength(commits);
     await a.reload();await synced(a);await converge([a,b]);expect(cloud.at(doc.storage_path).bytes.toString()).toBe('same score');
   });
   test('a corrupt download stays unavailable and a subsequent verified download succeeds',async()=>{
@@ -249,10 +248,10 @@ for(const provider of ['Drive','Dropbox','OneDrive','pCloud'])test.describe(prov
   });
   for(const phase of ['beforeList','beforeRead'])test(`failed remote ${phase==='beforeList'?'listing':'download'} is not acknowledged and retries cleanly`,async()=>{
     await a.tag('seed','Base');await synced(a);await a.tag('a','A');
-    const commits=cloud.commits.filter(item=>item.path==='library.sqlite').length;
+    const commits=cloud.commits.filter(item=>cloud.kind(item.path)==='sqlite').length;
     cloud.fault('a',phase,'sqlite',403);const failure=await a.sync();expect(failure.error).toBeTruthy();
     if(provider==='OneDrive'&&phase==='beforeRead')expect(failure.error).toContain('getFileSrc');
-    expect(cloud.commits.filter(item=>item.path==='library.sqlite')).toHaveLength(commits);
+    expect(cloud.commits.filter(item=>cloud.kind(item.path)==='sqlite')).toHaveLength(commits);
     const status=await a.page.evaluate(()=>_bookshelf_.call('syncStatus',{destination:realTransport.id}));expect(status.pending).toBeGreaterThan(0);
     await synced(a);await converge([a,b]);
   });
@@ -269,9 +268,9 @@ for(const provider of ['Drive','Dropbox','OneDrive','pCloud'])test.describe(prov
     await a.tag('seed','Base');await synced(a);
     const bytes=await a.page.evaluate(async()=>[...new Uint8Array(await (await _bookshelf_.call('captureSnapshot')).file.arrayBuffer())]);
     cloud.put('restore/one/library.sqlite',bytes);cloud.put('restore/two/library.sqlite',bytes);
-    const before=cloud.commits.filter(item=>item.path==='library.sqlite').length;
+    const before=cloud.commits.filter(item=>cloud.kind(item.path)==='sqlite').length;
     expect((await a.sync()).error).toContain('More than one');expect((await a.dump()).generation.id).toBe('initial');
-    expect(cloud.commits.filter(item=>item.path==='library.sqlite')).toHaveLength(before);
+    expect(cloud.commits.filter(item=>cloud.kind(item.path)==='sqlite')).toHaveLength(before);
     cloud.removeTree('restore/two');
     await synced(a);expect((await a.dump()).generation.id).toBe('one');
   });
@@ -392,9 +391,9 @@ for(const provider of ['Drive','Dropbox','OneDrive','pCloud'])test.describe(prov
   }
   if(['Dropbox','OneDrive'].includes(provider)){
     test('repeated conditional conflicts are bounded and a later retry preserves local edits',async()=>{
-      await a.tag('seed','Base');await synced(a);await a.tag('a','A');const before=cloud.commits.filter(item=>item.path==='library.sqlite').length;
+      await a.tag('seed','Base');await synced(a);await a.tag('a','A');const before=cloud.commits.filter(item=>cloud.kind(item.path)==='sqlite').length;
       for(let i=0;i<8;i++)cloud.fault('a','beforeCommit','sqlite',provider==='Dropbox'?409:412);
-      expect((await a.sync()).error).toContain('still changing');expect(cloud.commits.filter(item=>item.path==='library.sqlite')).toHaveLength(before);
+      expect((await a.sync()).error).toContain('still changing');expect(cloud.commits.filter(item=>cloud.kind(item.path)==='sqlite')).toHaveLength(before);
       await a.reload();await synced(a);const state=await converge([a,b]);expect(state.records.tags.map(row=>row.name).sort()).toEqual(['A','Base']);
     });
   }
@@ -423,42 +422,94 @@ for(const provider of ['Drive','Dropbox','OneDrive','pCloud'])test.describe(prov
       gate.release();
       expect(await a.page.evaluate(()=>pendingCheck)).toMatchObject({uploads:0,downloads:0,pending:false});
     });
-    for (const url of ['/pod.html','/rostrum.html']) test(`status checks report file counts when pCloud refuses version history (${url})`,async({browser})=>{
+    for (const url of ['/pod.html','/rostrum.html']) test(`sync and status work with the public pCloud history restriction (${url})`,async({browser})=>{
       const client=await device(browser,cloud,'status',url);clients.push(client);
       await a.import('cloud score','Cloud.musicxml');await synced(a);await synced(client);
       await client.import('local score','Local.musicxml');
-      const commits=cloud.commits.length;
-      const handleRequest=cloud.pcloud.bind(cloud);
-      cloud.pcloud=(id,request,requestUrl)=>requestUrl.pathname==='/listrevisions'
-        ? {result:7010,error:'Invalid link referer.'}
-        : handleRequest(id,request,requestUrl);
       const check=()=>client.page.evaluate(async()=>{
         await _bookshelf_.checkSyncNeeds(realTransport,{interactive:true});
         return _bookshelf_.syncNeeds;
       });
-      expect(await check()).toMatchObject({uploads:1,downloads:1,historyUnavailable:true,unknown:true});
-      expect((await client.sync()).error).toContain('pCloud did not allow access to library version history (7010)');
-      expect(cloud.commits).toHaveLength(commits);
-      cloud.pcloud=handleRequest;
-      expect(await check()).toMatchObject({uploads:1,downloads:1,historyUnavailable:false,unknown:false});
+      expect(await check()).toMatchObject({uploads:1,downloads:1,unknown:false});
       await synced(client);
+      expect(cloud.sqlite().map(node=>node.name)).toEqual(['library.sqlite']);
+      expect(cloud.requests.some(({url})=>new URL(url).pathname==='/listrevisions')).toBe(false);
     });
-    test('an old known upload finishing last is republished to the current file, not left only in revisions',async()=>{
-      await a.tag('seed','Base');await synced(a);await synced(b);
-      const old=Buffer.from(cloud.sqlite()[0].bytes);await a.tag('a','A');
-      cloud.once('a','afterCommit','sqlite',()=>cloud.write(cloud.root,'library.sqlite',old));
-      await synced(a);await assertRemoteContains(a,(await a.dump()).changes.map(change=>change.id));
-      const state=await converge([a,b]);expect(state.records.tags.map(row=>row.name).sort()).toEqual(['A','Base']);
-    });
-    test('expired revision download fails without acknowledging unsent edits and can be retried',async()=>{
-      await a.tag('seed','Base');await synced(a);await synced(b);await b.tag('b','B');await synced(b);await a.tag('a','A');
-      const copy=cloud.pcloud.bind(cloud);let failed=false;
-      cloud.pcloud=async(device,request,url)=>{
-        if(device==='a'&&url.pathname==='/copyfile'&&!failed){failed=true;const node=cloud.nodes.get(Number(url.searchParams.get('fileid')));node.history=node.history.filter(item=>item.revision!==Number(url.searchParams.get('revisionid')));return {result:2009,error:'Revision expired during download'};}
-        return copy(device,request,url);
+    test('copyfile noover collision preserves both snapshots and local copies open before and after convergence',async({browser})=>{
+      const docA=await a.import('score A','A.musicxml'),docB=await b.import('score B','B.musicxml');
+      await a.tag('a','A');await b.tag('b','B');
+      const gate=cloud.pause('a','beforeCopy');
+      await a.start();const {node:versionA}=await gate.arrived;
+      const bytesA=Buffer.from(versionA.bytes);
+      const bBytes=await snapshotBytes(b);
+      cloud.put(docB.storage_path,Buffer.from('score B'));
+      const versionB=cloud.put('library-11111111-1111-4111-8111-111111111111.sqlite',bBytes);
+      const copyB=await b.page.evaluate(fileId=>realTransport.source.copyLibrarySnapshot(0,fileId),versionB.id);
+      gate.release();
+      expect(copyB.result).toBe(0);
+      expect((await a.finish()).error).toBeUndefined();
+      expect(cloud.conflicts).toBe(1);
+      expect(cloud.at('library.sqlite').id).toBe(copyB.metadata.fileid);
+      expect(cloud.at('library.sqlite').bytes).toEqual(Buffer.from(bBytes));
+      expect(cloud.at(versionA.name).bytes).toEqual(bytesA);
+      const copyToLocal=async(name,nodes,docs)=>{
+        const client=await device(browser,cloud,name);clients.push(client);
+        const files=[...nodes.map(node=>[node.name,[...node.bytes]]),[docA.storage_path,[...cloud.at(docA.storage_path).bytes]],[docB.storage_path,[...cloud.at(docB.storage_path).bytes]]];
+        return client.page.evaluate(async({name,files,docs})=>{
+          const root=await(await navigator.storage.getDirectory()).getDirectoryHandle(name,{create:true});
+          for(const [path,bytes] of files){
+            const [parent,filename]=path.includes('/')?path.split('/'):[null,path];
+            const storage=parent?await root.getDirectoryHandle(parent,{create:true}):root;
+            const writer=await(await storage.getFileHandle(filename,{create:true})).createWritable();
+            await writer.write(Uint8Array.from(bytes));await writer.close();
+          }
+          await _bookshelf_.configure({kind:'directory',directory:root});
+          const tags=(await _bookshelf_.records('tags')).map(row=>row.name).sort();
+          const scores=[];
+          for(const id of docs){const {file}=await _bookshelf_.call('fileInfo',{id,verify:true});scores.push(await file.text());}
+          const sqlite=(await _bookshelf_.call('listManaged',{path:''})).filter(item=>item.name.endsWith('.sqlite')).map(item=>item.name);
+          return {tags,scores,sqlite};
+        },{name,files,docs});
       };
-      expect((await a.sync()).error).toContain('Revision expired');
-      await synced(a);const state=await converge([a,b]);expect(state.records.tags).toHaveLength(3);
+      const expected={tags:['A','B'],scores:['score A','score B'],sqlite:['library.sqlite']};
+      expect(await copyToLocal('numbered-only',[versionA],[docA.id])).toEqual({tags:['A'],scores:['score A'],sqlite:['library.sqlite']});
+      expect(await copyToLocal('during-copy',cloud.sqlite(),[docA.id,docB.id])).toEqual(expected);
+      const state=await converge([a,b]);
+      expect(state.records.tags.map(row=>row.name).sort()).toEqual(['A','B']);
+      expect(cloud.sqlite().map(node=>node.name)).toEqual(['library.sqlite']);
+      expect(await copyToLocal('after-copy',cloud.sqlite(),[docA.id,docB.id])).toEqual(expected);
+      const copies=cloud.requests.map(({url})=>new URL(url)).filter(url=>url.pathname==='/copyfile');
+      expect(copies.length).toBeGreaterThanOrEqual(2);
+      expect(copies.every(url=>url.searchParams.get('noover')==='1' && !url.searchParams.has('revisionid'))).toBe(true);
+    });
+    test('a lost copy acknowledgment keeps both files until a later cleanup',async()=>{
+      await a.tag('a','A');cloud.fault('a','afterCopy','sqlite','abort');
+      await synced(a);
+      expect(cloud.sqlite()).toHaveLength(2);
+      const canonical=cloud.at('library.sqlite');
+      expect(cloud.sqlite().map(node=>node.bytes)).toEqual([canonical.bytes,canonical.bytes]);
+      const before=cloud.commits.length;
+      await a.reload();await synced(a);
+      expect(cloud.sqlite().map(node=>node.id)).toEqual([canonical.id]);
+      expect(cloud.commits).toHaveLength(before);
+    });
+    test('a deleted snapshot during getzip restarts discovery safely',async()=>{
+      await a.tag('seed','Base');await synced(a);await synced(b);
+      await a.tag('a','A');await b.tag('b','B');
+      const gate=cloud.pause('a','beforeRead');await a.start();await gate.arrived;
+      await synced(b);gate.release();
+      expect((await a.finish()).error).toBeUndefined();
+      const state=await converge([a,b]);expect(state.records.tags.map(row=>row.name).sort()).toEqual(['A','B','Base']);
+      expect(cloud.sqlite().map(node=>node.name)).toEqual(['library.sqlite']);
+    });
+    test('failed deletion leaves the covered version for a no-op sync to clean up',async()=>{
+      await a.tag('seed','Base');await synced(a);
+      await a.tag('a','A');cloud.fault('a','beforeDelete','sqlite',503);await synced(a);
+      expect(cloud.sqlite()).toHaveLength(2);
+      const before=cloud.commits.length;
+      await synced(a);
+      expect(cloud.commits).toHaveLength(before);
+      expect(cloud.sqlite().map(node=>node.name)).toEqual(['library.sqlite']);
     });
   }
 

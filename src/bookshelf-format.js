@@ -2,7 +2,7 @@
 export { LIBRARY_APPLICATION_ID, LIBRARY_SCHEMA_VERSION, LIBRARY_STORAGE_VERSION,
   LIBRARY_RECORD_VERSION, LIBRARY_BACKUP_VERSION, LibraryFormatError,
   scorePath, createScorePath, scoreStoragePath, validateLibraryGeneration,
-  listStoredScores, isManagedScoreName, checkRecordVersion, hashLibraryBytes, libraryEntityId, checkLibraryEnvelope };
+  listStoredScores, isManagedScoreName, checkRecordVersion, hashLibraryBytes, libraryEntityId, checkLibraryEnvelope, isVersionedLibraryName };
 // -skip
 
 const LIBRARY_APPLICATION_ID = 0x5253544d;
@@ -14,6 +14,7 @@ class LibraryFormatError extends Error {
   constructor(message) { super(message); this.name = 'LibraryFormatError'; }
 }
 const hashLibraryBytes = async bytes => [...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(n => n.toString(16).padStart(2,'0')).join('');
+const isVersionedLibraryName = name => /^library-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\.sqlite$/.test(name);
 // Filenames are shared; IDs and history remain independent of presentation names.
 function scorePath(path) {
   if (typeof path !== 'string' || !/^scores\/[^/\\\x00]+$/.test(path) || path.split('/').some(p => p === '.' || p === '..')) throw new Error('Invalid score path in library package');
