@@ -1,212 +1,86 @@
-// Rostrum Service Worker
-// Enables offline functionality and PWA installation
+const deployment = {"entry":"./assets/modules/index.41861bf6d4ce45d1234f.html","core":["./assets/modules/bookshelf-host.00a7671a0556eaa59a39.js","./assets/modules/fabric.min.48f8f0915beb512fc7fe.js","./assets/modules/browser-fs-access.60763e216a842a67b3f8.js","./assets/modules/BravuraText.otf.ccd0fd1f2764e9c670fb.gz","./assets/modules/Vercetti-Regular.otf.c73ab8426d266a0a608f.gz","./assets/modules/app.a49d7d46dbe3d2c28098.js","./assets/modules/pages-runtime.948ca826c82fc5aab3c7.js","./assets/modules/asset-manifest.d0edf25f9a825d601f17.js","./assets/modules/index.41861bf6d4ce45d1234f.html","./manifest.webmanifest?v=d179e219ade9d2056e7e","./icon192.png?v=086eb9ea6f7f3ec6ef4e","./icon512.png?v=407a641d968e4a380677","./podauth.html?v=7b19bd7b800893cf15c3"],"offline":["./assets/modules/mscz-engine.5a7c7996cb86e173cecb.js","./assets/modules/text-fonts.5eceed3c309eb8baf308.js","./assets/modules/mscz.fbc23ee32587e2550aad.js","./assets/modules/mscz-engine.627281f0ce5bf80d94bd.wasm","./assets/modules/mscz-synth.1638e484123481b58073.js","./assets/modules/playback-worker.243b0bce7a08200b38c0.js","./assets/modules/playback.0f87a42906fa90210fad.js","./assets/modules/mscz-synth.5a46e84d2e5336169a8b.wasm","./assets/modules/score-00-harmony_to_diagram.xml.a8573517c4865bbe7648.gz","./assets/modules/score-01-instruments.xml.264758a92e9f68a4b7aa.gz","./assets/modules/score-02-orders.xml.9d82e452c8e008a80606.gz","./assets/modules/score-03-string_tunings_presets.json.24014838527f2659aa99.gz","./assets/modules/score-04-cchords_muse.xml.e88375d10b38b24c4e01.gz","./assets/modules/score-05-cchords_nrb.xml.a374882b66842717aa23.gz","./assets/modules/score-06-cchords_rb.xml.e54da967500a9c43a9cf.gz","./assets/modules/score-07-cchords_sym.xml.88d08f07b1c106a795d2.gz","./assets/modules/score-08-chords.xml.fcb43ebc28aab6cc57a8.gz","./assets/modules/score-09-chords_jazz.xml.59a89db16fe9f3c93d5d.gz","./assets/modules/score-10-chords_legacy.xml.d7e888c8d1465b9b5903.gz","./assets/modules/score-11-chords_std.xml.c45cc2fca531f02ac566.gz","./assets/modules/score-12-gp-style.mss.20d86d9f711a236b07fa.gz","./assets/modules/score-13-jazzchords.xml.bfdfc601d29cbe2622cd.gz","./assets/modules/score-14-legacy-style-defaults-v1.mss.574fd0522fa02eb4afa2.gz","./assets/modules/score-15-legacy-style-defaults-v2.mss.0089b7fc22c75f9ed824.gz","./assets/modules/score-16-legacy-style-defaults-v3.mss.e543ed321a3750a99877.gz","./assets/modules/score-17-legacy-style-defaults-v302.mss.2eaa8a37a99f3bc29497.gz","./assets/modules/score-18-legacy-style-defaults-v450.mss.e3c682998c96aa68d6c8.gz","./assets/modules/score-19-migration-306-style-Edwin.mss.942203b960e69f18d1b0.gz","./assets/modules/score-20-migration-306-style-Leland.mss.60b2fbe1d5b6c7fe08fb.gz","./assets/modules/score-21-stdchords.xml.247e296fbb5f7bd110a6.gz","./assets/modules/score-22-Campania.otf.054ed0851710a5031bcb.gz","./assets/modules/score-23-Edwin-BdIta.otf.060fe8d3c3a69ddbd776.gz","./assets/modules/score-24-Edwin-Bold.otf.448efa022d62135df351.gz","./assets/modules/score-25-Edwin-Italic.otf.67dcd87965dc324dfd59.gz","./assets/modules/score-26-Edwin-Roman.otf.db6706153478a6215200.gz","./assets/modules/score-27-fonts_figuredbass.xml.e66fdbec48fda2912e42.gz","./assets/modules/score-28-fonts_tablature.xml.0a66fe299eefa2c0358e.gz","./assets/modules/score-29-Leland.otf.4a807c17e3c529be50c4.gz","./assets/modules/score-30-LelandText.otf.5ca45ddc8bcf2be31cb5.gz","./assets/modules/score-31-metadata.json.cfcdb8a58fa34e374562.gz","./assets/modules/score-32-mscore-BC.ttf.be629ee4cce409d11a27.gz","./assets/modules/score-33-mscoreTab.ttf.eaa0e43cf566b46556e5.gz","./assets/modules/score-34-MuseJazz.otf.a94f531d8921cb2fd41d.gz","./assets/modules/score-35-MuseJazzText.otf.c1060c6bd138578084de.gz","./assets/modules/score-36-metadata.json.e9f10f999b8c71907dfc.gz","./assets/modules/score-37-classes.json.1a265c1845709e1d649e.gz","./assets/modules/score-38-glyphnames.json.159e130e6f3aa59b03a2.gz","./assets/modules/score-39-ranges.json.4b770d40e23071f8eb14.gz","./assets/modules/score-resources.e2e5bc9e565de2c3a6a5.json","./assets/modules/pdf.min.c46382a2b7161f3a4a6f.mjs","./assets/modules/pdf.worker.min.5adc1a8eef45946e8996.mjs","./assets/modules/pdf-lib.min.e407401e1d27c95af336.js","./assets/modules/fontkit.umd.min.0918b6856d336ed7e318.js","./assets/modules/sqlite3.b8a92a19f441a90ff233.wasm","./assets/modules/bookshelf-worker.f4b67b528d75fe853186.js","./assets/modules/bookshelf-host.00a7671a0556eaa59a39.js","./assets/modules/fabric.min.48f8f0915beb512fc7fe.js","./assets/modules/browser-fs-access.60763e216a842a67b3f8.js","./assets/modules/BravuraText.otf.ccd0fd1f2764e9c670fb.gz","./assets/modules/Vercetti-Regular.otf.c73ab8426d266a0a608f.gz","./assets/modules/PatrickHand-Regular.ttf.687e73585a011da9a8fd.gz","./assets/modules/NotoSansJP-subset.otf.00f6de0056cf009f51f2.gz","./assets/modules/piano-30.53353c82c3f1a896e608.mp3","./assets/modules/piano-33.5e795cab2f7c4a71b970.mp3","./assets/modules/piano-36.eb7e2caf7a844f61d4f2.mp3","./assets/modules/piano-39.0f334cf60f30bec2cc55.mp3","./assets/modules/piano-42.a0c5d8169013c5cc93f4.mp3","./assets/modules/piano-45.c0f7bd208e9794bc039d.mp3","./assets/modules/piano-48.18449e08a1700a96c73b.mp3","./assets/modules/piano-51.0f8c3a9b658ed0186177.mp3","./assets/modules/piano-54.bbe34af17197600c32ef.mp3","./assets/modules/piano-57.84a03f4f46e6a3626cc4.mp3","./assets/modules/piano-60.ef10fef712b2bb1caf68.mp3","./assets/modules/piano-63.2cef0ceb8c11c7e69de9.mp3","./assets/modules/piano-66.7927e10296712b250ae0.mp3","./assets/modules/piano-69.db9828218879b9a64eff.mp3","./assets/modules/piano-72.9792dd7e201167945b72.mp3","./assets/modules/piano-75.be9d857749536ef4a8a5.mp3","./assets/modules/piano-78.9da38724e875ee2812d0.mp3","./assets/modules/piano-81.7f8630716eb673e60fbc.mp3","./assets/modules/piano-84.7086a7ef8116a4259ea8.mp3","./assets/modules/piano-87.968ff80fa7e6af103094.mp3","./assets/modules/piano-samples.a89c447bc93614a9126c.json","./assets/modules/app.a49d7d46dbe3d2c28098.js","./assets/modules/pages-runtime.948ca826c82fc5aab3c7.js","./assets/modules/asset-manifest.d0edf25f9a825d601f17.js","./assets/modules/index.41861bf6d4ce45d1234f.html","./manifest.webmanifest?v=d179e219ade9d2056e7e","./icon192.png?v=086eb9ea6f7f3ec6ef4e","./icon512.png?v=407a641d968e4a380677","./podauth.html?v=7b19bd7b800893cf15c3","./Guidebook.ja.html?v=6389288a622a19233032","./assets/appabout.webp?v=259e273bde43e450c1ab","./assets/appcells.webp?v=22cb414df60044ef3199","./assets/appcurtain.webp?v=d8420070f86ce85ea5c1","./assets/appscreen.webp?v=3bbb46c5f8ba8ce7294e","./assets/appstorage.webp?v=2ef3e9ca5a929a4881c9","./assets/appwakelock.webp?v=2894e0e7a6423c2704a5","./assets/imslp.webp?v=0cd4ff0452085bdfc359","./assets/inkcells.webp?v=de1adc935caee14ac20c","./assets/inkedit.webp?v=cc3e490b570fdbd46fa3","./assets/inkgrid.webp?v=88748a806499f6b0d8e5","./assets/inkpencilpen.webp?v=0ab11b5e069fa5864002","./assets/inkrastrum.webp?v=130874bd01d0da2f5993","./assets/inksymbols.webp?v=b226d85a99715f96b7de","./assets/inktext.webp?v=66d32df9710b8c904d9f","./assets/inktransform1.webp?v=f66c43f4c36f8912e7e2","./assets/inktransform2.webp?v=10ed8831c4f7cc2a8960","./assets/interfacelocking.webp?v=011e03b473cab993b542","./assets/interfacerotating.webp?v=7d98fc68bc9368a39035","./assets/interfacesliders.webp?v=aefe58fac9db7c24af7c","./assets/layoutbook.webp?v=a1a0f0c3005241f3c459","./assets/layoutcells.webp?v=a08759391cdba677796e","./assets/layouthorizontal.webp?v=b64dcdaa8f9760d6c86d","./assets/layoutphone.webp?v=f06aa81816433dbdd679","./assets/layouttable.webp?v=fdd03effc53e733a3b1a","./assets/layoutvertical.webp?v=024013901203e011d229","./assets/morecells.webp?v=befe19a3861526d410e0","./assets/moredetach.webp?v=5634dc42e14d812ce67b","./assets/morekeyboard.webp?v=8dfd537398036fcd1bae","./assets/moremetronome.webp?v=5d005f02204e89bcdfc5","./assets/moremetronomeopts.webp?v=084f1251a0e4a7e22915","./assets/morepiano.webp?v=383dc4b99bc6d22f82a4","./assets/morepianodetect.webp?v=e931b338d7b6f6b37c84","./assets/morepianooptions.webp?v=55e10eeaf3c9b3cb4712","./assets/moreprogressive.webp?v=5c4638159bc2b633dc2b","./assets/morereviewoptions.webp?v=6e113826675fc1a68744","./assets/morereviewvideo.webp?v=41f2291c60d2f427111e","./assets/morereviewwave.webp?v=a3e4f05061dd0db2c7d0","./assets/morestopwatch.webp?v=8156eb71662f4ab815bc","./assets/pageadd.webp?v=843132c4ecc65f150f30","./assets/pagecells.webp?v=5631ce9f08bba7be3c38","./assets/pageimport.webp?v=e14af2fff1eabadecea9","./assets/pagemagnify.webp?v=45f790f2e3c37d5c032e","./assets/pagemagnifymordent.webp?v=3d01da77bbdd94aa8d00","./assets/pagenumbers.webp?v=054f87c850af3191b521","./assets/pwa.webp?v=ab7f9ec3ee6eced89bcb","./assets/quickannotate.webp?v=1085179f74d3ac9571d0","./assets/quicklayout1.webp?v=b348c2719ce1fd745108","./assets/quicklayout2.webp?v=c0a2b0652a53a495df99","./assets/quicklayout3.webp?v=f3b6cfdef7ec4e4319db","./assets/quicklayout4.webp?v=e48ef85931e204b5d98c","./assets/quickmenu.webp?v=f2f5ee4355a1e37a7e5e","./assets/quickopen.webp?v=7dbe35bcddc1fa4fccef","./assets/quickpage.webp?v=4c1b7d220226b40c6bcb","./assets/quicksave.webp?v=16017f0771cb75c4d51d","./assets/quicktools.webp?v=7a22011f73865ecbc8fd","./assets/rostrum-icon.webp?v=f5f1c84a9eb23e62b225","./assets/scorecells.webp?v=01afdfa8e68f0d657259","./assets/scoredetails.webp?v=dbae623720dcab10afeb","./assets/scorenew.webp?v=bf542a217a3e7bcc1883","./assets/scoreopen.webp?v=74a90af47fb4aceb01f7","./assets/scoreprint.webp?v=a2d94b9cc009c4b14946","./assets/scoresave.webp?v=aeb9d2955386ab9b159f"],"aliases":{"./manifest.webmanifest":"./manifest.webmanifest?v=d179e219ade9d2056e7e","./icon192.png":"./icon192.png?v=086eb9ea6f7f3ec6ef4e","./icon512.png":"./icon512.png?v=407a641d968e4a380677","./podauth.html":"./podauth.html?v=7b19bd7b800893cf15c3","./Guidebook.ja.html":"./Guidebook.ja.html?v=6389288a622a19233032","./assets/appabout.webp":"./assets/appabout.webp?v=259e273bde43e450c1ab","./assets/appcells.webp":"./assets/appcells.webp?v=22cb414df60044ef3199","./assets/appcurtain.webp":"./assets/appcurtain.webp?v=d8420070f86ce85ea5c1","./assets/appscreen.webp":"./assets/appscreen.webp?v=3bbb46c5f8ba8ce7294e","./assets/appstorage.webp":"./assets/appstorage.webp?v=2ef3e9ca5a929a4881c9","./assets/appwakelock.webp":"./assets/appwakelock.webp?v=2894e0e7a6423c2704a5","./assets/imslp.webp":"./assets/imslp.webp?v=0cd4ff0452085bdfc359","./assets/inkcells.webp":"./assets/inkcells.webp?v=de1adc935caee14ac20c","./assets/inkedit.webp":"./assets/inkedit.webp?v=cc3e490b570fdbd46fa3","./assets/inkgrid.webp":"./assets/inkgrid.webp?v=88748a806499f6b0d8e5","./assets/inkpencilpen.webp":"./assets/inkpencilpen.webp?v=0ab11b5e069fa5864002","./assets/inkrastrum.webp":"./assets/inkrastrum.webp?v=130874bd01d0da2f5993","./assets/inksymbols.webp":"./assets/inksymbols.webp?v=b226d85a99715f96b7de","./assets/inktext.webp":"./assets/inktext.webp?v=66d32df9710b8c904d9f","./assets/inktransform1.webp":"./assets/inktransform1.webp?v=f66c43f4c36f8912e7e2","./assets/inktransform2.webp":"./assets/inktransform2.webp?v=10ed8831c4f7cc2a8960","./assets/interfacelocking.webp":"./assets/interfacelocking.webp?v=011e03b473cab993b542","./assets/interfacerotating.webp":"./assets/interfacerotating.webp?v=7d98fc68bc9368a39035","./assets/interfacesliders.webp":"./assets/interfacesliders.webp?v=aefe58fac9db7c24af7c","./assets/layoutbook.webp":"./assets/layoutbook.webp?v=a1a0f0c3005241f3c459","./assets/layoutcells.webp":"./assets/layoutcells.webp?v=a08759391cdba677796e","./assets/layouthorizontal.webp":"./assets/layouthorizontal.webp?v=b64dcdaa8f9760d6c86d","./assets/layoutphone.webp":"./assets/layoutphone.webp?v=f06aa81816433dbdd679","./assets/layouttable.webp":"./assets/layouttable.webp?v=fdd03effc53e733a3b1a","./assets/layoutvertical.webp":"./assets/layoutvertical.webp?v=024013901203e011d229","./assets/morecells.webp":"./assets/morecells.webp?v=befe19a3861526d410e0","./assets/moredetach.webp":"./assets/moredetach.webp?v=5634dc42e14d812ce67b","./assets/morekeyboard.webp":"./assets/morekeyboard.webp?v=8dfd537398036fcd1bae","./assets/moremetronome.webp":"./assets/moremetronome.webp?v=5d005f02204e89bcdfc5","./assets/moremetronomeopts.webp":"./assets/moremetronomeopts.webp?v=084f1251a0e4a7e22915","./assets/morepiano.webp":"./assets/morepiano.webp?v=383dc4b99bc6d22f82a4","./assets/morepianodetect.webp":"./assets/morepianodetect.webp?v=e931b338d7b6f6b37c84","./assets/morepianooptions.webp":"./assets/morepianooptions.webp?v=55e10eeaf3c9b3cb4712","./assets/moreprogressive.webp":"./assets/moreprogressive.webp?v=5c4638159bc2b633dc2b","./assets/morereviewoptions.webp":"./assets/morereviewoptions.webp?v=6e113826675fc1a68744","./assets/morereviewvideo.webp":"./assets/morereviewvideo.webp?v=41f2291c60d2f427111e","./assets/morereviewwave.webp":"./assets/morereviewwave.webp?v=a3e4f05061dd0db2c7d0","./assets/morestopwatch.webp":"./assets/morestopwatch.webp?v=8156eb71662f4ab815bc","./assets/pageadd.webp":"./assets/pageadd.webp?v=843132c4ecc65f150f30","./assets/pagecells.webp":"./assets/pagecells.webp?v=5631ce9f08bba7be3c38","./assets/pageimport.webp":"./assets/pageimport.webp?v=e14af2fff1eabadecea9","./assets/pagemagnify.webp":"./assets/pagemagnify.webp?v=45f790f2e3c37d5c032e","./assets/pagemagnifymordent.webp":"./assets/pagemagnifymordent.webp?v=3d01da77bbdd94aa8d00","./assets/pagenumbers.webp":"./assets/pagenumbers.webp?v=054f87c850af3191b521","./assets/pwa.webp":"./assets/pwa.webp?v=ab7f9ec3ee6eced89bcb","./assets/quickannotate.webp":"./assets/quickannotate.webp?v=1085179f74d3ac9571d0","./assets/quicklayout1.webp":"./assets/quicklayout1.webp?v=b348c2719ce1fd745108","./assets/quicklayout2.webp":"./assets/quicklayout2.webp?v=c0a2b0652a53a495df99","./assets/quicklayout3.webp":"./assets/quicklayout3.webp?v=f3b6cfdef7ec4e4319db","./assets/quicklayout4.webp":"./assets/quicklayout4.webp?v=e48ef85931e204b5d98c","./assets/quickmenu.webp":"./assets/quickmenu.webp?v=f2f5ee4355a1e37a7e5e","./assets/quickopen.webp":"./assets/quickopen.webp?v=7dbe35bcddc1fa4fccef","./assets/quickpage.webp":"./assets/quickpage.webp?v=4c1b7d220226b40c6bcb","./assets/quicksave.webp":"./assets/quicksave.webp?v=16017f0771cb75c4d51d","./assets/quicktools.webp":"./assets/quicktools.webp?v=7a22011f73865ecbc8fd","./assets/rostrum-icon.webp":"./assets/rostrum-icon.webp?v=f5f1c84a9eb23e62b225","./assets/scorecells.webp":"./assets/scorecells.webp?v=01afdfa8e68f0d657259","./assets/scoredetails.webp":"./assets/scoredetails.webp?v=dbae623720dcab10afeb","./assets/scorenew.webp":"./assets/scorenew.webp?v=bf542a217a3e7bcc1883","./assets/scoreopen.webp":"./assets/scoreopen.webp?v=74a90af47fb4aceb01f7","./assets/scoreprint.webp":"./assets/scoreprint.webp?v=a2d94b9cc009c4b14946","./assets/scoresave.webp":"./assets/scoresave.webp?v=aeb9d2955386ab9b159f"}};
+// The build supplies immutable asset URLs, plus stable aliases for the guide.
+const scope = new URL(self.registration.scope);
+const cacheName = `rostrum-pages:${scope.href}:assets-v1`;
+const offlinePreference = new URL('.offline-preference', scope).href;
+const modules = new URL('assets/modules/', scope).pathname;
+const nestedApp = new URL('wink-page-turn/', scope).pathname;
+const aliases = new Map(Object.entries(deployment.aliases).map(([path, url]) => [new URL(path, scope).pathname, url]));
+const downloads = new Map();
 
-let CACHE_NAME = 'rostrum-v1.0.0-8b4b7cf65524';
-// Cache Storage is shared by every app on this origin; isolate each deployment.
-const CACHE_SCOPE = 'rostrum-scope:' + self.registration.scope + ':';
-// Relative to this script, so Rostrum works when served from a subdirectory.
-// The packaged page is rostrum.html where Rostrum is deployed alongside the rest
-// of the site, and index.html where the deployment is Rostrum alone, so try both
-// and keep whichever exists: addAll would reject the whole install if either
-// were missing.
-let urlsToCache = [
-  './',
-  './index.html',
-];
-// The static-host build replaces this with the guidebook and its images, which
-// that deployment carries, so the guidebook reads offline like the rest of the
-// app. The videos are deliberately absent: they are 11.5 MB against 2.5 MB for
-// every image, they are already preload="none" in the guidebook, and the fetch
-// handler below leaves media to the network entirely.
-const docToCache = [
-  './Guidebook.ja.html',
-  './assets/appabout.webp',
-  './assets/appcells.webp',
-  './assets/appcurtain.webp',
-  './assets/appscreen.webp',
-  './assets/appstorage.webp',
-  './assets/appwakelock.webp',
-  './assets/imslp.webp',
-  './assets/inkcells.webp',
-  './assets/inkedit.webp',
-  './assets/inkgrid.webp',
-  './assets/inkpencilpen.webp',
-  './assets/inkrastrum.webp',
-  './assets/inksymbols.webp',
-  './assets/inktext.webp',
-  './assets/inktransform1.webp',
-  './assets/inktransform2.webp',
-  './assets/interfacelocking.webp',
-  './assets/interfacerotating.webp',
-  './assets/interfacesliders.webp',
-  './assets/layoutbook.webp',
-  './assets/layoutcells.webp',
-  './assets/layouthorizontal.webp',
-  './assets/layoutphone.webp',
-  './assets/layouttable.webp',
-  './assets/layoutvertical.webp',
-  './assets/morecells.webp',
-  './assets/moredetach.webp',
-  './assets/morekeyboard.webp',
-  './assets/moremetronome.webp',
-  './assets/moremetronomeopts.webp',
-  './assets/morepiano.webp',
-  './assets/morepianodetect.webp',
-  './assets/morepianooptions.webp',
-  './assets/moreprogressive.webp',
-  './assets/morereviewoptions.webp',
-  './assets/morereviewvideo.webp',
-  './assets/morereviewwave.webp',
-  './assets/morestopwatch.webp',
-  './assets/pageadd.webp',
-  './assets/pagecells.webp',
-  './assets/pageimport.webp',
-  './assets/pagemagnify.webp',
-  './assets/pagemagnifymordent.webp',
-  './assets/pagenumbers.webp',
-  './assets/pwa.webp',
-  './assets/quickannotate.webp',
-  './assets/quicklayout1.webp',
-  './assets/quicklayout2.webp',
-  './assets/quicklayout3.webp',
-  './assets/quicklayout4.webp',
-  './assets/quickmenu.webp',
-  './assets/quickopen.webp',
-  './assets/quickpage.webp',
-  './assets/quicksave.webp',
-  './assets/quicktools.webp',
-  './assets/rostrum-icon.webp',
-  './assets/scorecells.webp',
-  './assets/scoredetails.webp',
-  './assets/scorenew.webp',
-  './assets/scoreopen.webp',
-  './assets/scoreprint.webp',
-  './assets/scoresave.webp',
-  './bookshelf-worker.js',
-  './sqlite3.wasm',
-];
+async function asset(path) {
+  const url = new URL(path, scope).href;
+  const cache = await caches.open(cacheName);
+  let pending = downloads.get(url);
+  if (!pending) {
+    pending = (async () => {
+      if (await cache.match(url)) return;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`Could not download ${new URL(url).pathname} (${response.status})`);
+      await cache.put(url, response);
+    })().finally(() => downloads.delete(url));
+    downloads.set(url, pending);
+  }
+  await pending;
+  return cache.match(url);
+}
 
-// Install event - cache resources
-self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches.open(CACHE_SCOPE + CACHE_NAME)
-      .then((cache) => {
-        console.log('Rostrum: Cache opened');
-        return Promise.all([...urlsToCache, ...docToCache]
-          .map(async (url) => {
-            try {
-              const response = await fetch(new Request(url, { cache: 'reload' }));
-              if (response.ok) await cache.put(url, response);
-            } catch { /* Keep optional/offline resources from blocking installation. */ }
-          }));
-      })
-      .then(() => self.skipWaiting())
-  );
+async function download(paths) {
+  // Bound concurrent downloads, including on a slower mobile connection.
+  const queue = paths[Symbol.iterator]();
+  const results = await Promise.allSettled(Array.from({ length: 6 }, async () => {
+    for (const path of queue) await asset(path);
+  }));
+  const failure = results.find(result => result.status === 'rejected');
+  if (failure) throw failure.reason;
+}
+
+self.addEventListener('install', event => {
+  event.waitUntil((async () => {
+    await download(deployment.core);
+    const cache = await caches.open(cacheName);
+    if (await cache.match(offlinePreference)) await download(deployment.offline);
+    await self.skipWaiting();
+  })());
 });
 
-// Activate event - clean up old caches
-self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys().then((cacheNames) => {
-      return Promise.all(
-        cacheNames.map((cacheName) => {
-          if (cacheName.startsWith(CACHE_SCOPE) && cacheName !== CACHE_SCOPE + CACHE_NAME) {
-            console.log('Rostrum: Deleting old cache:', cacheName);
-            return caches.delete(cacheName);
-          }
-        })
-      );
-    })
-    .then(() => self.clients.claim())
-  );
+self.addEventListener('activate', event => event.waitUntil(self.clients.claim()));
+
+self.addEventListener('message', event => {
+  if (event.data !== 'prepare-offline' || !event.ports[0]) return;
+  event.waitUntil((async () => {
+    try {
+      const cache = await caches.open(cacheName);
+      await cache.put(offlinePreference, new Response('enabled'));
+      const keys = new Set((await cache.keys()).map(request => request.url));
+      const missing = deployment.offline.some(path => !keys.has(new URL(path, scope).href));
+      if (missing) event.ports[0].postMessage({ preparing: true });
+      await download(deployment.offline);
+      event.ports[0].postMessage({ ready: true, downloaded: missing });
+    } catch (error) {
+      event.ports[0].postMessage({ error: error.message });
+    }
+  })());
 });
 
-// Fetch event - fresh HTML with offline fallback; cache-first for other assets.
-self.addEventListener('fetch', (event) => {
-  // Only handle GET requests — never intercept POST/PUT/etc. (e.g. OAuth token exchanges)
-  if (event.request.method !== 'GET') return;
-  // A nested experimental deployment has its own worker and cache.
-  if (new URL(event.request.url).pathname.startsWith(
-      new URL('wink-page-turn/', self.registration.scope).pathname)) return;
-
-  // Reloads must reach the published HTML even when this worker has not changed.
-  // Bypass the HTTP cache as well as Cache Storage; retain the last successful
-  // response for offline use. Query-string restart URLs refresh the canonical
-  // app entry without accumulating one cache entry per restart.
-  if (event.request.mode === 'navigate' && new URL(event.request.url).origin === self.location.origin) {
+self.addEventListener('fetch', event => {
+  if (event.request.headers.has('range')) return;
+  const url = new URL(event.request.url);
+  if (url.origin !== scope.origin || url.pathname.startsWith(nestedApp)) return;
+  if (event.request.method === 'HEAD' && !url.search && aliases.has(url.pathname)) {
     event.respondWith((async () => {
-      const cache = await caches.open(CACHE_SCOPE + CACHE_NAME);
-      const url = new URL(event.request.url);
-      const entry = urlsToCache.some(path => new URL(path, self.registration.scope).pathname === url.pathname);
-      const key = new URL(url);
-      if (entry) key.search = '';
-      try {
-        const response = await fetch(event.request, { cache: 'no-store' });
-        if (response.ok) {
-          if (!url.search || entry) await cache.put(key.href, response.clone());
-          return response;
-        }
-        return await cache.match(key.href) || response;
-      } catch (error) {
-        const saved = await cache.match(key.href);
-        if (saved) return saved;
-        throw error;
-      }
+      const cache = await caches.open(cacheName);
+      const saved = await cache.match(new URL(aliases.get(url.pathname), scope));
+      return saved ? new Response(null, { headers: saved.headers }) : fetch(event.request);
     })());
     return;
   }
-
-  // Leave media alone: do not answer it, do not cache it. A <video> is fetched
-  // with Range requests, which arrive as 206 responses, and the Cache API
-  // rejects those outright in cache.put(); worse, caches.match() ignores the
-  // Range header, so a whole-file entry would be handed back as the answer to a
-  // request for one byte range. Returning without respondWith() leaves the
-  // browser's own media stack to do it, which is the only thing here that
-  // understands partial content. The guidebook's videos are online-only by
-  // design -- see docToCache above.
-  if (event.request.destination === 'video' || event.request.destination === 'audio' ||
-      /\.(webm|mp4|m4a|ogg|mp3|wav)$/i.test(new URL(event.request.url).pathname)) return;
-
-  // Never cache the manifest - always fetch fresh
-  if (event.request.url.endsWith('manifest.json') || event.request.url.endsWith('manifest.webmanifest')) {
-    event.respondWith(fetch(event.request, { cache: 'no-store' }));
-    return;
+  if (event.request.method !== 'GET') return;
+  if (event.request.mode === 'navigate' && (url.pathname === scope.pathname || url.pathname === `${scope.pathname}index.html`)) {
+    event.respondWith(asset(deployment.entry));
+  } else if (!url.search && url.pathname.startsWith(modules)) {
+    event.respondWith(asset(url.href));
+  } else if (!url.search && aliases.has(url.pathname)) {
+    event.respondWith(asset(aliases.get(url.pathname)));
   }
-
-  event.respondWith(
-    caches.open(CACHE_SCOPE + CACHE_NAME).then(cache => cache.match(event.request))
-      .then((response) => {
-        // Cache hit - return response from cache
-        if (response) {
-          return response;
-        }
-        // Clone the request
-        let fetchRequest = event.request.clone();
-
-        return fetch(fetchRequest).then((response) => {
-          // Check if valid response
-          if (!response || response.status !== 200 || response.type !== 'basic') {
-            return response;
-          }
-
-          // Clone the response
-          let responseToCache = response.clone();
-
-          // Only cache same-origin requests (not external PDFs), and never a
-          // request carrying a query string (e.g. the "?t=" cache-buster the
-          // in-app restart button appends): caching those would accumulate a
-          // new, never-reused entry in Cache Storage on every restart. Skipping
-          // them keeps the canonical (no-query) entry set only at install time,
-          // so it stays pinned until a real service worker update ships.
-          if (event.request.url.startsWith(self.location.origin) && !new URL(event.request.url).search) {
-            caches.open(CACHE_SCOPE + CACHE_NAME)
-              .then((cache) => {
-                cache.put(event.request, responseToCache);
-              });
-          }
-
-          return response;
-        });
-      })
-  );
 });
