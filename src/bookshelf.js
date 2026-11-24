@@ -1,11 +1,13 @@
 // +skip
 import { Score } from './score.js';
 import { checkUnsaved, FileSrc } from './file.js';
-import { toast, css, listen, iconSvg } from './common.js';
+import { toast, css, dialog, listen, iconSvg } from './common.js';
+import { openBookCatalog, openBookLoadSong, openBookSearchKey, openBookSourceUrl } from './openbook.js';
 import { BookshelfStore } from './bookshelf-model.js';
 import { LibraryCloudTransport } from './bookshelf-cloud.js';
 import { reviewScoreImport } from './bookshelf-import.js';
 import { CloudFolderPicker } from './cloud-folder-picker.js';
+export { addOpenBookScore, requireOpenBookLibrary };
 // -skip
 
 const librarySearchKey = 'rostrum-library-search';
@@ -24,13 +26,52 @@ const bookshelfStore = new BookshelfStore({
     navigate: (score,anchor) => score.goToLibraryAnchor(anchor),
     async open(state,anchor) {
       const settings = JSON.parse(state.document.settings_json);
-      const name = JSON.parse(state.document.metadata_json).originalFilename;
-      const score = await new Score().init(null,null,name,
+      const metadata = JSON.parse(state.document.metadata_json);
+      const name = metadata.originalFilename;
+      const score = Object.assign(new Score(), { openBook: metadata.openBook });
+      await score.init(null,null,name,
         /\.pdf$/i.test(name) ? state.file : await state.file.arrayBuffer(),true,{...state,settings,anchor});
       return score;
     },
   },
 });
+
+function addOpenBookScore(score) {
+  if (!score?.openBookPreview || score.libraryDocumentId) return Promise.resolve(score);
+  return score.openBookImport ??= (async () => {
+    const { song, source, musicXml } = score.openBookPreview;
+    const versions = await bookshelfStore.call('openBookVersions');
+    let documentId = versions.find(version => version.path === song.path && version.sha === song.sha)?.id;
+    if (!documentId) {
+      const openBook = { path: song.path, sha: song.sha };
+      const bytes = await bookshelfStore.call('packOpenBook', { filename: song.filename, source, musicXml, openBook });
+      const file = new File([bytes], song.filename.replace(/\.ly\.tera$/, '.mxl'));
+      const result = await bookshelfStore.import(file, { openBook, displayName: song.title });
+      const saved = result.document ?? result;
+      if (saved.deleted_at || saved.replaced_by_id) throw new Error('This OpenBook score already exists in Library history.');
+      documentId = saved.id;
+    }
+    if (Score.activeScore !== score) return null;
+    const pageIndex = Math.max(0, Number(score.numbers.pn || 1) - 1);
+    const anchor = score.music.info.anchors.find(anchor => anchor.page === pageIndex);
+    return bookshelfStore.openDocument(documentId, { type: 'music', pageIndex, key: anchor?.key, staff: anchor?.staff });
+  })().finally(() => { score.openBookImport = null; });
+}
+
+function requireOpenBookLibrary(score) {
+  if (!score?.openBookPreview || score.libraryDocumentId) return Promise.resolve(score);
+  return score.openBookWritePrompt ??= (async () => {
+    const confirmed = await new Promise(resolve => {
+      const prompt = dialog('Add this OpenBook score to the Library to write on it.',
+        { 'Add to Library': { svg: 'OK' }, Cancel: { svg: 'Cancel' } },
+        (_event, _property, tag, controls) => { controls.close(); resolve(tag === 'Add to Library'); });
+      prompt.addEventListener('close', () => resolve(false), { once: true });
+    });
+    if (!confirmed || Score.activeScore !== score) return null;
+    try { return await addOpenBookScore(score); }
+    catch (error) { toast(error.message); return null; }
+  })().finally(() => { score.openBookWritePrompt = null; });
+}
 // Application integration: reader lifecycle and presentation, never storage decisions.
 bookshelfStore.addEventListener('warning',event => toast(event.detail.message));
 bookshelfStore.addEventListener('contentchange',() => {
@@ -128,6 +169,7 @@ class BookshelfView {
     .Bookshelf__nav button span { display:inline-block; width:26px; opacity:.7; }
     .Bookshelf__main { display:flex; flex-direction:column; min-width:0; min-height:0; }
     .Bookshelf__toolbar { display:flex; gap:12px; align-items:center; padding:24px 32px 16px; flex:none; }
+    .Bookshelf__openbook-filter { display:flex; align-items:center; gap:8px; align-self:flex-start; margin:0 32px 12px; cursor:pointer; }
     .LibraryWindow .Bookshelf__search { border:0 !important; background:var(--library-surface) !important; border-radius:12px !important; height:46px; }
     .Bookshelf__heading { display:flex; justify-content:space-between; align-items:baseline; gap:16px; padding:0 32px 16px; }
     .Bookshelf__heading h2 { font-size:20px; font-weight:600; margin:0; letter-spacing:-.3px; }
@@ -140,6 +182,7 @@ class BookshelfView {
     .Bookshelf__row { display:grid; grid-template-columns:44px minmax(0,1fr) 40px; column-gap:14px; padding:16px 0; border-bottom:1px solid var(--library-line); align-items:center; cursor:pointer; }
     .Bookshelf__row[data-selected=true] { background:var(--library-selected); border-radius:10px; padding-left:12px; padding-right:12px; }
     .Bookshelf__type { grid-row:1 / span 4; width:42px; height:50px; display:grid; place-items:center; border:1px solid var(--library-line); border-radius:7px; background:var(--library-surface); font-size:10px; font-weight:700; color:var(--library-muted); letter-spacing:.5px; }
+    .Bookshelf__openbook-results > p { color:var(--library-muted); padding:0 12px; }
     .LibraryWindow .Bookshelf__open { grid-column:2; padding:0; border:0; border-radius:3px; min-height:26px; background:none; text-align:left; font-weight:600; overflow-wrap:anywhere; }
     .LibraryWindow .Bookshelf__open:hover { color:var(--library-brand); }
     .Bookshelf__row > div:not(.Bookshelf__type) { grid-column:2; color:var(--library-muted); font-size:12px; overflow-wrap:anywhere; }
@@ -258,6 +301,13 @@ class BookshelfView {
     input.setAttribute('aria-label', 'Import scores');
     const search = document.createElement('input');
     search.type = 'search'; search.placeholder = 'Search songs'; search.setAttribute('aria-label', 'Search songs');
+    const includeOpenBook = document.createElement('input');
+    includeOpenBook.type = 'checkbox'; includeOpenBook.checked = window._viewState_.openBook.include;
+    includeOpenBook.onchange = () => {
+      window._viewState_.openBook.include = includeOpenBook.checked;
+      window._viewState_.schedule(0);
+      this.refresh();
+    };
     panel.listeners.push(listen(this.model,'contentchange',() => {
       search.value = ''; this.refresh?.();
     }));
@@ -581,6 +631,9 @@ class BookshelfView {
     };
     let generation = 0;
     this.refresh = () => run(async () => {
+      this.openBookFilter.hidden = mode.value !== 'entries';
+      const openBookRequest = mode.value === 'entries' && includeOpenBook.checked
+        ? openBookCatalog().then(songs => ({ songs }), error => ({ error })) : null;
       if (this.model.storageDeleted) {
         results.replaceChildren(); const message = document.createElement('p');
         message.textContent = 'Library deletion was incomplete. Choose its storage location again in Library settings.'; results.append(message);
@@ -605,6 +658,7 @@ class BookshelfView {
       for (const group of groups) collection.add(new Option(label(group), group.id));
       collection.value = groups.some(g => g.id === selected) ? selected : '';
       const filters = {query:search.value,tagIds:selectedTags,matchAll:tagMatch.value === 'all'};
+      const showOpenBook = openBookRequest && !selectedTags.length;
       search.placeholder = ['documents','bookshelves'].includes(mode.value) ? 'Search scores' : 'Search songs';
       const rows = await this.model.query({mode:mode.value,collection:collection.value,filters});
       if (current !== generation) return;
@@ -636,9 +690,10 @@ class BookshelfView {
         const openButton = document.createElement('button');
         const metadata = JSON.parse(row.metadata_json);
         const documentMetadata = row.document_id ? JSON.parse(row.document_metadata || '{}') : metadata;
+        if (documentMetadata.openBook) kind.textContent = '♪';
         const cloudLocations = (documentMetadata.originalLocations || []).filter(location =>
           [Score.sources.gdrive,Score.sources.dbx,Score.sources.odrive,Score.sources.pcloud].includes(location.source) && typeof location.path === 'string');
-        const fileLabel = cloudLocations.length
+        const fileLabel = documentMetadata.openBook ? 'OpenBook · Saved to Library' : cloudLocations.length
           ? cloudLocations.map(location => location.source + ' · ' + (location.path.replace(/\/+$/,'') || '') + '/' + location.name).join('\n')
           : documentMetadata.originalFilename || '';
         openButton.textContent = metadata.title || metadata.displayName;
@@ -793,7 +848,7 @@ class BookshelfView {
         }
         recordSection('Delete').append(deleteButton);
       }
-      if (!rows.length) {
+      if (!rows.length && !showOpenBook) {
         const empty = document.createElement('div'); empty.className = 'Bookshelf__empty';
         empty.textContent = ['bookshelves', 'playlists'].includes(mode.value) && !collection.value ? 'Choose or create a collection' : 'No scores found';
         const mark = document.createElement('div'); mark.className = 'Bookshelf__empty-mark'; mark.textContent = '▥'; mark.setAttribute('aria-hidden','true');
@@ -803,6 +858,85 @@ class BookshelfView {
       }
       if (this.selectedRecord && this.rowViews.has(this.selectedRecord)) this.showRecord(this.selectedRecord, expanded.has(this.selectedRecord));
       else this.closeRecord();
+      if (showOpenBook) {
+        const external = document.createElement('section');
+        external.setAttribute('aria-label', 'OpenBook results');
+        external.className = 'Bookshelf__openbook-results';
+        results.append(external);
+        const loading = document.createElement('p');
+        loading.setAttribute('role', 'status');
+        loading.textContent = 'Loading OpenBook…';
+        external.append(loading);
+        const { songs, error } = await openBookRequest;
+        if (current !== generation) return;
+        if (error) {
+          loading.textContent = error.message;
+          const retry = document.createElement('button');
+          retry.type = 'button'; retry.textContent = 'Retry OpenBook';
+          retry.onclick = () => { void openBookCatalog(true).catch(() => {}); this.refresh(); };
+          external.append(retry);
+          return;
+        }
+        const versions = await this.model.call('openBookVersions');
+        if (current !== generation) return;
+        external.replaceChildren();
+        const query = openBookSearchKey(filters.query.trim());
+        const localIds = new Set(rows.map(row => row.document_id));
+        const saved = new Map();
+        for (const version of versions) {
+          const list = saved.get(version.path) || [];
+          list.push(version);
+          saved.set(version.path, list);
+        }
+        const matches = songs.filter(song => song.search.includes(query)).filter(song =>
+          !saved.get(song.path)?.some(version => version.sha === song.sha && localIds.has(version.id)));
+        this.updateNavigation(mode.value, collection, rows.length + matches.length, selectedTags.length);
+        if (!matches.length && !rows.length) {
+          loading.textContent = 'No songs found'; external.append(loading);
+        }
+        let visible = 0;
+        const showMore = () => {
+          more.remove();
+          for (const song of matches.slice(visible, visible + 50)) {
+            const revisions = saved.get(song.path) || [];
+            const existing = revisions.find(version => version.sha === song.sha);
+            const card = document.createElement('div'); card.className = 'Bookshelf__row';
+            const kind = document.createElement('div'); kind.className = 'Bookshelf__type';
+            kind.setAttribute('aria-hidden', 'true'); kind.textContent = '♪';
+            const category = document.createElement('div');
+            category.textContent = ['OpenBook', song.category, existing ? 'Saved to Library' : revisions.length ? 'New version on GitHub' : ''].filter(Boolean).join(' · ');
+            const open = document.createElement('button'); open.className = 'Bookshelf__open'; open.textContent = song.title;
+            const feedback = document.createElement('div'); feedback.setAttribute('role', 'status'); feedback.hidden = true;
+            card.append(kind, open, category, feedback);
+            external.append(card);
+            open.onclick = async () => {
+              if (this.openingOpenBook) return;
+              this.openingOpenBook = true; open.disabled = true; feedback.hidden = true;
+              const previous = Score.activeScore;
+              try {
+                if (!await checkUnsaved()) return;
+                if (existing) await this.model.openDocument(existing.id);
+                else {
+                  const preview = await openBookLoadSong(song);
+                  if (previous !== Score.activeScore) return;
+                  const score = Object.assign(new Score(), { openBook: song, openBookPreview: preview });
+                  await score.init(null, null, song.filename.replace(/\.ly\.tera$/, '.musicxml'), preview.musicXml);
+                }
+                panel.hide();
+              } catch (error) {
+                const link = document.createElement('a'); link.href = openBookSourceUrl(song);
+                link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = 'Open on GitHub';
+                feedback.replaceChildren(document.createTextNode(error.message + ' '), link); feedback.hidden = false;
+              } finally { this.openingOpenBook = false; open.disabled = false; }
+            };
+          }
+          visible += 50;
+          if (visible < matches.length) external.append(more);
+        };
+        const more = document.createElement('button'); more.type = 'button'; more.textContent = 'Show more OpenBook songs';
+        more.onclick = showMore;
+        showMore();
+      }
     }, false);
     input.onchange = () => run(async () => {
       input.disabled = true;
@@ -831,13 +965,17 @@ class BookshelfView {
       await this.model.createCollection(mode.value,name);
       createName.value = ''; await this.refresh();
     });
-    const updateCurrent = () => { importCurrent.disabled = !window._score_; };
+    const updateCurrent = () => {
+      importCurrent.disabled = !window._score_;
+      importCurrent.textContent = window._score_?.openBookPreview ? 'Add OpenBook score to Library' : 'Import current score';
+    };
     panel.listeners.push(listen(document, 'scoreOpened', updateCurrent), listen(document, 'scoreClosed', updateCurrent));
     updateCurrent();
     importCurrent.onclick = () => run(async () => {
       if (!_score_) throw new Error('Open a score first');
       importCurrent.disabled = true;
       try {
+        if (_score_.openBookPreview) { await addOpenBookScore(_score_); await this.refresh(); return; }
         const name = _score_.saveName;
         const originalLocation = _score_.libraryDocumentId ? null : {source:_score_.source || Score.sources.local,path:_score_.source === Score.sources.local ? null : _score_.path ?? null,name:_score_.name || name};
         const bytes = await _score_.toFile();
@@ -846,7 +984,7 @@ class BookshelfView {
         if (imported?.alreadyImported) status.textContent = 'Score already imported; skipped. Previous or deleted scores remain in history.';
       } finally { importCurrent.disabled = false; }
     });
-    this.buildWorkspace({ input, search, status, deviceStatus, cloudStatus, permission, results, importCurrent,
+    this.buildWorkspace({ input, search, includeOpenBook, status, deviceStatus, cloudStatus, permission, results, importCurrent,
       tagFilter, tagMatch, mode, collection, createName, create, transfers, sync });
   }
   buildWorkspace(controls) {
@@ -885,7 +1023,10 @@ class BookshelfView {
     const compact = element('div','Bookshelf__context Bookshelf__compact-mode'); compact.append(this.mode);
     const context = element('div','Bookshelf__context'); context.append(this.collection,this.createName,this.create);
     this.results.className = 'Bookshelf__results'; this.results.setAttribute('aria-label','Library results');
-    main.append(toolbar,compact,heading,context,this.results);
+    this.openBookFilter = element('label','Bookshelf__openbook-filter');
+    this.openBookFilter.hidden = this.mode.value !== 'entries';
+    this.openBookFilter.append(this.includeOpenBook, document.createTextNode(' Include OpenBook'));
+    main.append(toolbar,this.openBookFilter,compact,heading,context,this.results);
     this.inspector = element('aside','Bookshelf__inspector'); this.inspector.hidden = true;
     this.inspector.setAttribute('aria-label','Score details');
     this.workspace.append(sidebar,main,this.inspector);

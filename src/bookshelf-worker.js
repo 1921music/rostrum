@@ -3,7 +3,7 @@ import { openSnapshotDatabase } from './bookshelf-storage-snapshot.js';
 import { LIBRARY_README } from './bookshelf-readme.js';
 import { openLibraryStorage } from './bookshelf-storage.js';
 import { openConfiguredLibraryStorage } from './bookshelf-storage-policy.js';
-import { unzipSync } from 'fflate';
+import { strToU8, unzipSync, zipSync } from 'fflate';
 import { exportLibraryPackage, readLibraryPackage, hashBytes, scorePath } from './bookshelf-transfer.js';
 import { LIBRARY_SCHEMA_VERSION, LIBRARY_RECORD_VERSION, createScorePath, checkRecordVersion, libraryEntityId, isVersionedLibraryName, hashLibraryBytes } from './bookshelf-format.js';
 import { initializeLibrarySchema, libraryTables } from './bookshelf-schema.js';
@@ -516,7 +516,23 @@ const actions = {
     return Object.fromEntries(Object.entries(selected).map(([name, bytes]) => [name, new TextDecoder().decode(bytes)]));
   },
   async open() { await open(); return { version: LIBRARY_SCHEMA_VERSION }; },
-  async importFile({ file, entries, maxWidth, maxHeight, displayName = file.name, replacesId = null, derivedFromId = null, originalLocation = null }) {
+  openBookVersions() {
+    return sql("SELECT id, metadata_json FROM documents WHERE deleted_at IS NULL AND replaced_by_id IS NULL AND json_type(metadata_json, '$.openBook') = 'object'")
+      .map(({ id, metadata_json }) => ({ id, ...JSON.parse(metadata_json).openBook }));
+  },
+  packOpenBook({ filename, source, musicXml, openBook }) {
+    // The compressed MusicXML container is the library's original file. Keep
+    // the exact upstream bytes alongside the frozen conversion in that file.
+    const container = '<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="score.musicxml" media-type="application/vnd.recordare.musicxml+xml"/></rootfiles></container>';
+    return zipSync({
+      mimetype: [strToU8('application/vnd.recordare.musicxml'), { level: 0 }],
+      'META-INF/container.xml': strToU8(container),
+      'META-INF/rostrum-openbook.json': strToU8(JSON.stringify(openBook)),
+      'score.musicxml': musicXml,
+      ['source/' + filename]: source,
+    }, { mtime: new Date(2000, 0, 1) });
+  },
+  async importFile({ file, entries, maxWidth, maxHeight, displayName = file.name, replacesId = null, derivedFromId = null, originalLocation = null, openBook = null }) {
     const bytes = await file.arrayBuffer();
     const hash = await hashBytes(bytes);
     const id = hash;
@@ -542,7 +558,9 @@ const actions = {
       await files.write(path, bytes,file.name);
       return transaction(() => {
         const document = save('documents', { id, content_hash: hash, storage_path: path, size_bytes: file.size,
-          settings_json: JSON.stringify({ maxWidth, maxHeight }), metadata_json: JSON.stringify(withOriginalLocation({ displayName, originalFilename: file.name, format: file.name.split('.').pop().toLowerCase() },originalLocation)) });
+          settings_json: JSON.stringify({ maxWidth, maxHeight }), metadata_json: JSON.stringify(withOriginalLocation({
+            displayName, originalFilename: file.name, format: file.name.split('.').pop().toLowerCase(), ...(openBook && { openBook }),
+          },originalLocation)) });
         setFileState(id,{ present:true,localPath:path });
         for (const entry of entries) save('entries', { id: entry.id, document_id: id, parent_id: entry.parent_id || null,
           anchor_json: JSON.stringify(entry.anchor), metadata_json: JSON.stringify(entry.metadata), deleted_at: entry.deleted_at || null });

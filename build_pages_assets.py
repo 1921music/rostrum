@@ -69,6 +69,9 @@ class PagesAssets:
             "await bytes('mscz-synth.wasm')": "await bytes(assets?.wasmURL || 'mscz-synth.wasm')",
         })
         self.add('mscz-synth.wasm', gzip.decompress(base64.b64decode(payload['playback']['wasm'])))
+        self.copy('lib/score-engine/lilypond.mjs')
+        self.add('lilypond.wasm.gz', base64.b64decode(payload['openBook']['lilypond']))
+        self.add('lilypond-tera.wasm.gz', base64.b64decode(payload['openBook']['tera']))
         resources = []
         for index, item in enumerate(payload['resources']):
             name = f'score-{index:02d}-{Path(item["name"]).name}'

@@ -22,6 +22,7 @@
 
 import { animate, clamp, css, dataIndex, delay, delayMs, dialog, Drag, fontMap, getBox, helm, hide, listen, mergeRecent, numb, Schedule, schedule, svgWrap, toast, unlisten } from "./common.js";
 import { checkUnsaved, FileSrc } from "./file.js";
+import { requireOpenBookLibrary } from "./bookshelf.js";
 import { iconPaths } from "./icon.js";
 import { Layout } from "./layout.js";
 import { panels, EditPanel } from "./panel.js";
@@ -1448,6 +1449,15 @@ class Menu {
   }
 
   activateCell(cell, fallbackRing = null) {
+    if (cell?.ring === this.rings.ink && _score_?.openBookPreview) {
+      void requireOpenBookLibrary(_score_).then(score => {
+        if (score && Score.activeScore === score) {
+          this.activateRing(this.rings.ink);
+          this.activateCell(cell);
+        }
+      });
+      return;
+    }
     // Overlay a div onto given cell of active ring visually mark it as active.
     // Call with cell = null to deactivate active cell (if any) on the active ring
     // (or, if a cell's own ring isn't otherwise known, on fallbackRing - needed
@@ -1787,6 +1797,7 @@ class Menu {
   // the menu.
 
   async pgEvent(opts, pg) {
+    if (pg.score.openBookPreview) return;
 
     let canvas = pg.canvas;
 
@@ -2038,6 +2049,7 @@ class Menu {
   }
 
   pgUpEvent(opts, pg) {
+    if (_score_?.openBookPreview) return;
     this.autoOff.run(); // extend activation of active cell
 
     _score_.setDirty(true);

@@ -19,6 +19,7 @@ function sharedViewSettings(menu) {
 class DeviceViewState {
   constructor(menu) {
     this.menu = menu; this.state = null; this.loading = 0; this.writes = Promise.resolve();
+    this.openBook = { include: true, showLyrics: true, font: 'musejazz' };
     this.journalKey = 'rostrum-device-view-pending';
     this.viewport = {w:innerWidth,h:innerHeight};
     this.defaults = JSON.parse(menu.stashDefaults);
@@ -71,6 +72,11 @@ class DeviceViewState {
       quality:number(source.quality,.5,6) ? source.quality : display.quality,
       bkColorIdx:Number.isInteger(source.bkColorIdx) && number(source.bkColorIdx,0,63) ? source.bkColorIdx : display.bkColorIdx};
     state.magnify.zoom = number(raw.magnify?.zoom,.25,5) ? raw.magnify.zoom : 2;
+    state.openBook = {
+      include: raw.openBook?.include !== false,
+      showLyrics: raw.openBook?.showLyrics !== false,
+      font: choice(raw.openBook?.font, ['musejazz', 'original'], 'musejazz'),
+    };
     return state;
   }
   async load() {
@@ -82,6 +88,7 @@ class DeviceViewState {
     try { pending = this.normalize(JSON.parse(localStorage.getItem(this.journalKey) || 'null')); }
     catch { /* IndexedDB still works if localStorage is unavailable. */ }
     if (pending) this.state = pending;
+    if (this.state) this.openBook = { ...this.state.openBook };
     this.apply();
     // Final interactions commit on the next task, after click/change handlers;
     // continuous slider/wheel input is coalesced. Keep the DB open so pagehide
@@ -138,7 +145,7 @@ class DeviceViewState {
     }
     return this.normalize({version:1,active:rings.layout.stash.active,
       layouts:Object.fromEntries(Object.entries(rings.layout.cells).filter(([key])=>['book','horizontal','vertical','table'].includes(key)).map(([key,cell])=>[key,cell.stash])),
-      display:rings.score.cells.details.stash,magnify:rings.page.cells.magnify.stash,menu});
+      display:rings.score.cells.details.stash,magnify:rings.page.cells.magnify.stash,menu,openBook:this.openBook});
   }
   schedule(delay = 100) {
     if (this.loading) return;

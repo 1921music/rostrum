@@ -64,8 +64,8 @@ self.addEventListener('activate', (event) => {
 
 // Fetch event - start the versioned app from cache; allow explicit refreshes.
 self.addEventListener('fetch', (event) => {
-  // Only handle GET requests — never intercept POST/PUT/etc. (e.g. OAuth token exchanges)
-  if (event.request.method !== 'GET') return;
+  // Only app assets and navigations belong to the offline worker.
+  if (event.request.method !== 'GET' || new URL(event.request.url).origin !== self.location.origin) return;
   // A nested experimental deployment has its own worker and cache.
   if (new URL(event.request.url).pathname.startsWith(
       new URL('wink-page-turn/', self.registration.scope).pathname)) return;

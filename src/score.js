@@ -1601,7 +1601,8 @@ class Score {
 
   async goToLibraryAnchor(anchor) {
     if (!anchor || !Number.isInteger(anchor.pageIndex)) return;
-    const index = anchor.type === 'pdf' ? this.pgs.findIndex(pg => pg.mozPn === anchor.pageIndex + 1) : anchor.pageIndex;
+    const musicAnchor = anchor.key && this.music?.anchor(anchor.key, anchor.staff);
+    const index = anchor.type === 'pdf' ? this.pgs.findIndex(pg => pg.mozPn === anchor.pageIndex + 1) : musicAnchor?.page ?? anchor.pageIndex;
     if (index < 0 || index >= this.pgs.length) throw new Error('The indexed page is not present in this score view');
     if (Layout.activeLayout?.score === this) await Layout.activeLayout.pgGoTo(index + 1,false);
     else _menu_.rings.page.cells.numbers.stash.pn = index + 1;
@@ -1642,6 +1643,11 @@ class Score {
     if (Number.isInteger(settings.transpose) && settings.transpose >= -12 && settings.transpose <= 12) {
       this.music.native.setViewTransposeSemitones(settings.transpose, settings.spelling === 'preserve' ? 'preserve' : 'readable', settings.preserveSystemBreaks !== false);
       this.music.transpose = settings.transpose;
+      this.music.refresh();
+    }
+    if (this.openBook) {
+      const { showLyrics, font } = window._viewState_.openBook;
+      this.music.native.setViewAppearance({ showLyrics, font });
       this.music.refresh();
     }
     await this.buildMusicPages(records);
@@ -1776,21 +1782,43 @@ class Score {
 
   async transposeMusic(semitones, spelling = this.music.native.viewTransposeSpelling,
     preserveSystemBreaks = this.music.native.viewPreserveSystemBreaks) {
-    if (this.musicBusy) return;
+    const changed = await this.changeMusicView(music => {
+      music.native.setViewTransposeSemitones(semitones, spelling, preserveSystemBreaks);
+      music.transpose = semitones;
+    });
+    if (changed && !this.openBookPreview) this.setDirty();
+  }
+
+  async setOpenBookAppearance(appearance) {
+    const changed = await this.changeMusicView(music => music.native.setViewAppearance(appearance), true);
+    if (changed) {
+      Object.assign(window._viewState_.openBook, appearance);
+      window._viewState_.schedule(0);
+    }
+    return changed;
+  }
+
+  async changeMusicView(change, keepPosition = false) {
+    if (this.musicBusy) return false;
     this.musicBusy = true;
     const music = this.music;
     try {
+      const page = Math.max(0, Number(this.numbers.pn || 1) - 1);
+      const position = keepPosition && music.info.anchors.find(anchor => anchor.page === page);
       const records = await this.musicRecords();
       music.player.stop();
-      music.native.setViewTransposeSemitones(semitones, spelling, preserveSystemBreaks);
-      music.transpose = semitones;
+      change(music);
       music.refresh();
       Layout.activeLayout?.destructor(); Layout.activeLayout = null;
       for (const pg of this.pgs) pg.deflate(true);
       await this.buildMusicPages(records);
       music.player.setScore(music.native, true);
+      if (keepPosition) {
+        const updatedPage = position ? music.anchor(position.key, position.staff)?.page : null;
+        this.numbers.pn = (updatedPage ?? Math.min(page, this.pgs.length - 1)) + 1;
+      }
       await Layout.open(_menu_.rings.layout.cells[_menu_.rings.layout.stash.active || 'book']);
-      this.setDirty();
+      return true;
     } finally { this.musicBusy = false; document.dispatchEvent(new Event('musicPlayback')); }
   }
 

@@ -1,4 +1,14 @@
+const openBookCatalogUrl = 'https://api.github.com/repos/veltzer/book-openbook/git/trees/master?recursive=1';
+
+async function mockEmptyOpenBook(page) {
+  await page.route(url => url.href === openBookCatalogUrl, route => route.fulfill({
+    headers: { 'access-control-allow-origin': '*' },
+    json: { truncated: false, tree: [] },
+  }));
+}
+
 async function selectLibraryView(page, value) {
+  if (value === 'entries') await mockEmptyOpenBook(page);
   const back = page.getByRole('button', { name:'Back to list', exact:false });
   if (await back.isVisible()) await back.click();
   const select = page.getByLabel('Library view', { exact:true });
@@ -8,4 +18,4 @@ async function selectLibraryView(page, value) {
     await page.getByRole('button', { name:names[value], exact:true }).click();
   }
 }
-module.exports = { selectLibraryView };
+module.exports = { mockEmptyOpenBook, openBookCatalogUrl, selectLibraryView };

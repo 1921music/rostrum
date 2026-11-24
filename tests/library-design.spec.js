@@ -1,4 +1,5 @@
 const { test, expect } = require('@playwright/test');
+const { mockEmptyOpenBook } = require('./library-ui-helpers');
 
 test.beforeEach(async ({ page }) => {
   page.external = []; page.errors = [];
@@ -8,6 +9,7 @@ test.beforeEach(async ({ page }) => {
     if (url.origin === 'http://127.0.0.1:9876' || ['data:', 'blob:'].includes(url.protocol)) return route.continue();
     page.external.push(url.href); return route.abort();
   });
+  await mockEmptyOpenBook(page);
 });
 test.afterEach(async ({ page }) => { expect(page.external).toEqual([]); expect(page.errors).toEqual([]); });
 const surface = page => page.locator('.LibraryWindow');

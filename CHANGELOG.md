@@ -1,5 +1,19 @@
 # Changelog / 変更履歴
 
+## 1.1.0 — OpenBook
+
+- Search OpenBook song titles and categories from Library → Songs. OpenBook is
+  included by default, and the checkbox is remembered on each device.
+- Preview and play a song from GitHub before adding it to the Library. Adding a
+  score saves the original LilyPond template and converted MusicXML together.
+  Annotations require a Library copy, and newer upstream versions can be added
+  separately.
+- Set the OpenBook lyrics and score font in View → Display settings. The defaults
+  are visible lyrics and MuseJazz. Each device remembers its choices.
+- Bundle the conversion code in the standalone HTML and installed PWA. Live
+  catalog searches and previews require an internet connection. Library copies
+  on the device open offline.
+
 ## 1.0.1 — MSCZ support
 
 - Treat MSCZ work titles `無題のスコア` and `Untitled score` as unset when

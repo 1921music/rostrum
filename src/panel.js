@@ -1,4 +1,5 @@
 // +skip
+import { addOpenBookScore } from "./bookshelf.js";
 
 /**
   Copyright 2025 Glendon Diener
@@ -4304,6 +4305,38 @@ class DisplaySettingsPanel extends MenuGroupPanel {
     if (_score_) {
       this.controls = new ScoreDisplayControls(_menu_.rings.score.cells.details);
       score.append(helm('<div>Page Fit</div>'), this.controls.fitGroup.elm, this.controls.qualityGroup.elm);
+      if (_score_.openBook) {
+        const openBookScore = _score_;
+        const lyrics = document.createElement('input');
+        lyrics.type = 'checkbox';
+        const font = document.createElement('select');
+        font.add(new Option('MuseJazz', 'musejazz'));
+        font.add(new Option('Original', 'original'));
+        const lyricsLabel = document.createElement('label');
+        lyricsLabel.append(lyrics, document.createTextNode(' Show lyrics'));
+        const fontLabel = document.createElement('label');
+        fontLabel.append(document.createTextNode('Score font '), font);
+        const sync = () => {
+          lyrics.checked = openBookScore.music.native.viewShowLyrics;
+          font.value = openBookScore.music.native.viewScoreFont;
+        };
+        sync();
+        const change = async () => {
+          lyrics.disabled = font.disabled = true;
+          try { await openBookScore.setOpenBookAppearance({ showLyrics: lyrics.checked, font: font.value }); }
+          catch (error) { toast(error.message); }
+          finally {
+            if (!openBookScore.disposed) sync();
+            lyrics.disabled = font.disabled = false;
+          }
+        };
+        lyrics.onchange = font.onchange = change;
+        score.append(lyricsLabel, fontLabel);
+        if (openBookScore.openBookPreview) this.action(score, 'Add OpenBook score to Library', async () => {
+          try { await addOpenBookScore(openBookScore); }
+          catch (error) { toast(error.message); }
+        });
+      }
       this.action(score, 'Layout, margins and page-number bands', () => {
         const ring = _menu_.rings.layout;
         _menu_.showPanel(ring.cells[ring.stash.active || 'book']);
