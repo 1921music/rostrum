@@ -110,7 +110,8 @@ After changing engine sources, run in a WSL environment with the pinned tools:
 ```sh
 cd engine
 mise install
-BUILD_DIR=/absolute/path/to/rostrum-wasm mise exec -- bash scripts/build-wasm.sh
+MSCZ_CMAKE_EXTRA="-DMSCZ_EMBED_SVG_FONT_SUBSETS=OFF -DMSCZ_TRIM_FREETYPE_OPTIONS=ON" \
+  BUILD_DIR=/absolute/path/to/rostrum-wasm mise exec -- bash scripts/build-wasm.sh
 mise exec -- python ../build_score_engine.py --web /absolute/path/to/rostrum-wasm/web
 cd ..
 mise exec -- python build.py --rostrum
