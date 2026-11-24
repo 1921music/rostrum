@@ -314,7 +314,8 @@ release checklist. Automated tests mock every provider request.
 
 `mise exec -- node build_browser_fs.mjs` builds the bundled library dependencies,
 including the bookshelf Worker, host adapter and SQLite WASM. The normal packaged, extension
-and Pages builds include those assets; the Pages worker precaches them offline.
+and Pages builds include those assets. Pages loads SQLite when first used and
+stores it during PWA offline preparation.
 No CDN is required. Run focused checks with:
 
 ```powershell
@@ -424,8 +425,9 @@ running browser tests; direct source development uses the command shown above.
 
 #### Static-host deployment
 
-`--pages` writes `build/pages/`: the packaged page as `index.html`, plus
-`manifest.webmanifest`, `sw.js`, `podauth.html` and the two PWA icons. Upload
+`--pages` writes `build/pages/` with a small `index.html`, content-addressed
+files under `assets/modules/`, `manifest.webmanifest`, `sw.js`, `podauth.html`
+and the two PWA icons. Upload
 the directory anywhere static — GitHub Pages, for instance — and Rostrum
 installs as a PWA from it. Everything is referenced relatively, so it works from
 any subdirectory and the directory may be renamed.
@@ -469,7 +471,7 @@ it.
 `--doc` derives `build/doc-assets/` from `doc/assets/`, which is 42 MB of
 capture-resolution screenshots and screen recordings: images become WebP at
 1280px wide (13.5 MB → 2.5 MB) and clips become AV1 at 1280px wide (28.7 MB →
-11.5 MB). The service worker precaches the guidebook and its images, so it reads
+11.5 MB). PWA offline preparation caches the guidebook and its images, so it reads
 offline; the videos are fetched when played, which is also why `sw.js` leaves
 media requests to the browser rather than intercepting them — media arrives as
 Range requests, and the Cache API cannot store the 206 responses that answer
@@ -521,10 +523,13 @@ so an optional model from a wink build is not carried into the stable build.
 Git tree without pushing. The deployer verifies that the built source commit is
 the checked-out commit and preserves the other published variant.
 
-HTML navigations fetch with `cache: 'no-store'` and refresh the offline copy;
-offline/network failures and HTTP errors fall back to the last cached document.
-Worker installation also bypasses the HTTP cache. An older cache-first worker
-can be migrated by opening the app once with a new query string.
+Normal Pages app launches read the installed shell from Cache Storage and
+check `sw.js` in the background. The worker tracks separate startup and full
+offline asset lists. New versions use cached files with the same content URL
+and become active after the required files arrive. App → Reload checks for an
+update before restarting, using the active cached version if the update fails.
+The deployer retains previously published content URLs for tabs that still run
+an older build. `--rostrum` continues to build the single HTML for Releases.
 
 Service worker caches are isolated by registration scope. Installing or updating
 one variant does not delete the other's offline cache. The two apps share the

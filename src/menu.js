@@ -1880,6 +1880,10 @@ class Menu {
 
       case "text": { // actually, a fabric textbox obj
         let { font, size, height, rgb, alpha } = activeCell.stash;
+        if (globalThis._rostrumPages_) {
+          try { await globalThis._rostrumPages_.font(font); }
+          catch (error) { toast(error.message); return; }
+        }
         let color = fabric.Color.fromHex(rgb);
         color.setAlpha(alpha);
         let rgba = color.toRgba();

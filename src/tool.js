@@ -535,7 +535,7 @@ class Piano {
         }
       }
     });
-    this.buildAudio();
+    this.buildAudio().catch(error => toast(error.message));
     this.buildOptions();
   }
 
@@ -564,12 +564,14 @@ class Piano {
     if (actx.state === 'suspended') actx.resume().catch(() => {});
 
     // decode audio samples, if not already decoded: we check only middle C
-    if(!(pianoSamples[60] instanceof AudioBuffer)) Object.keys(pianoSamples).forEach(async (key) => {
-      let noteSamples = pianoSamples[key];
+    const pages = globalThis._rostrumPages_;
+    const samples = pages ? await pages.piano(actx) : pianoSamples;
+    if(!pages && !(samples[60] instanceof AudioBuffer)) Object.keys(samples).forEach(async (key) => {
+      let noteSamples = samples[key];
       let len = noteSamples.length;
       let bytes = new Uint8Array(len);
       for (let i = 0; i < len; i++) bytes[i] = noteSamples.charCodeAt(i);
-      actx.decodeAudioData(bytes.buffer, (res) => (pianoSamples[key] = res));
+      actx.decodeAudioData(bytes.buffer, (res) => (samples[key] = res));
     });
 
     let noteOff = (tag, force=false) => {
@@ -604,7 +606,7 @@ class Piano {
       // define the source node: oscillator or audio buffer:
       if (piano) {
        source = new AudioBufferSourceNode(actx);
-       source.buffer = pianoSamples[midiNum];
+       source.buffer = samples[midiNum];
       }
       else
         source = new OscillatorNode(actx, {

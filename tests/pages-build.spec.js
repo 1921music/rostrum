@@ -24,6 +24,7 @@ test.afterEach(async ({ page }) => expect(page.external).toEqual([]));
 // when it has not been built.
 const pagesDir = path.join(__dirname, "..", "build", "pages");
 const pageFile = path.join(pagesDir, "index.html");
+const manifestForWorker = () => JSON.parse(fs.readFileSync(path.join(pagesDir, 'sw.js'), 'utf8').split('\n')[0].slice('const deployment = '.length, -1));
 
 test.skip(!fs.existsSync(pageFile), "build/pages/index.html is missing; run build.py --pages");
 
@@ -62,10 +63,10 @@ test("the service worker takes the subdirectory as its scope", async ({ page }) 
 
 test("the static-host build references everything relatively", async () => {
   const html = fs.readFileSync(pageFile, "utf8");
-  expect(html).toContain('<link rel="manifest" data-href="manifest.webmanifest" />');
-  expect(html).toContain("document.querySelector('link[rel=manifest]').href = 'manifest.webmanifest'");
+  expect(html).toContain('<link rel="manifest" href="manifest.webmanifest" />');
   expect(html).toContain('<link rel="apple-touch-icon" href="icon192.png">');
-  expect(html).toContain("navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })");
+  expect(html).toMatch(/<script type="module" src="\.\/assets\/modules\/app\.[a-f0-9]+\.js"><\/script>/);
+  expect(html).not.toContain('globalThis._scoreEngineAssets_');
   // The deployment's own URL is not known at build time, so claiming another
   // site as canonical would be wrong.
   expect(html).not.toContain('rel="canonical"');
@@ -80,9 +81,9 @@ test("the static-host build references everything relatively", async () => {
     expect(fs.existsSync(path.join(pagesDir, icon.src))).toBe(true);
   }
 
-  const worker = fs.readFileSync(path.join(pagesDir, "sw.js"), "utf8");
-  expect(worker).not.toMatch(/urlsToCache\s*=\s*\[[^\]]*['"]\//);
-  expect(worker).not.toContain("'./rostrum.html'");
+  const deployment = manifestForWorker();
+  expect(deployment.core.every(url => url.startsWith('./'))).toBe(true);
+  expect(deployment.entry).toMatch(/^\.\/assets\/modules\/index\.[a-f0-9]+\.html$/);
   expect(fs.existsSync(path.join(pagesDir, "podauth.html"))).toBe(true);
 });
 
@@ -123,7 +124,7 @@ test("the About panel names the build's commit both ways", async ({ page }) => {
     text: await face.textContent(),
     commit: await page.evaluate(() => window._rostrumCommit_),
   };
-  expect(shown.text).toContain("Version 1.0.0");
+  expect(shown.text).toContain(`Version ${require('../package.json').version}`);
   expect(shown.text).toContain("Based on Podium 2.3.1");
   const dirty = shown.commit.endsWith("-dirty");
   const hash = dirty ? shown.commit.slice(0, -6) : shown.commit;
@@ -270,11 +271,10 @@ test("every deployed screenshot decodes, and so does a re-encoded clip", async (
 });
 
 test("the worker precaches the guidebook and its images, but no video", async () => {
-  const worker = fs.readFileSync(path.join(pagesDir, "sw.js"), "utf8");
-  const listed = [...worker.matchAll(/^\s*'(\.\/[^']*)',$/gm)].map(m => m[1]);
-  const precached = listed.filter(url => url !== "./rostrum.html" && url !== "./index.html"); // absent by design
+  const deployment = manifestForWorker();
+  const precached = deployment.offline.map(url => url.split('?')[0]);
 
-  expect(precached).toContain("./");
+  expect(deployment.core).not.toContain(deployment.aliases['./Guidebook.ja.html']);
   expect(precached).toContain("./Guidebook.ja.html");
   expect(precached.filter(url => url.endsWith(".webp"))).toHaveLength(62);
   // 11.5 MB of video against 2.5 MB for every image, and the guidebook already
@@ -287,52 +287,75 @@ test("the worker precaches the guidebook and its images, but no video", async ()
   }
 });
 
-test("the service worker's cache name follows everything it serves", async () => {
-  // A deployment whose sw.js is byte-identical to the last one goes unnoticed:
-  // the browser sees no new worker, never reinstalls, and keeps answering from
-  // the old cache. The digest is what makes changed content a changed worker --
-  // and it covers the whole precached set, because a corrected screenshot with
-  // an unchanged page would otherwise never reach a device that had installed.
-  const worker = fs.readFileSync(path.join(pagesDir, "sw.js"), "utf8");
-  const precached = [...worker.matchAll(/^\s*'(\.\/[^']*)',$/gm)]
-    .map(m => m[1]).filter(url => url !== "./rostrum.html" && url !== "./index.html");
-  const hash = crypto.createHash("sha256").update(fs.readFileSync(pageFile));
-  for (const url of precached)
-    if (url !== "./") hash.update(fs.readFileSync(path.join(pagesDir, url.slice(2))));
-  const digest = hash.digest("hex").slice(0, 12);
-
-  expect(worker).toContain(`let CACHE_NAME = 'rostrum-v1.0.0-${digest}';`);
-  // The source must stay unstamped, or the build would have nothing to replace.
-  const source = fs.readFileSync(path.join(__dirname, "..", "src", "sw.js"), "utf8");
-  expect(source).toContain("let CACHE_NAME = 'rostrum-v1.0.0';");
-  expect(source).toContain("const docToCache = [];");
+test("the service worker tracks the exact content of every offline file", async () => {
+  for (const url of manifestForWorker().offline) {
+    const file = fs.readFileSync(path.join(pagesDir, url.split('?')[0]));
+    expect(url).toContain(crypto.createHash('sha256').update(file).digest('hex').slice(0, 20));
+  }
 });
 
-test("installing the worker really stores the guidebook", async ({ page }) => {
-  // The list being right is not the same as the install succeeding: it opens 64
-  // entries, and an install that rejects leaves a device with no offline
-  // guidebook at all. Each entry is added on its own and allowed to fail, so
-  // only counting what landed in the cache proves it.
+test("offline preparation stores the guidebook, images and every module", async ({ page }) => {
   await page.goto("/pages/index.html");
   const stored = await page.evaluate(async () => {
-    const registration = await navigator.serviceWorker.register("sw.js");
-    await navigator.serviceWorker.ready;
-    const name = (await caches.keys()).find(key => key.startsWith("rostrum-"));
+    await window._rostrumPages_.prepareOffline();
+    const name = (await caches.keys()).find(key => key.startsWith("rostrum-pages:"));
     const cache = await caches.open(name);
-    const keys = (await cache.keys()).map(request => new URL(request.url).pathname);
+    const keys = (await cache.keys()).map(request => request.url);
     return { name, keys };
   });
 
   try {
-    expect(stored.name).toMatch(/^rostrum-scope:.*:rostrum-v1\.0\.0-[0-9a-f]{12}$/);
-    expect(stored.keys).toContain("/pages/Guidebook.ja.html");
-    expect(stored.keys.filter(p => p.endsWith(".webp"))).toHaveLength(62);
-    expect(stored.keys.filter(p => p.endsWith(".webm"))).toEqual([]);
+    expect(stored.name).toMatch(/^rostrum-pages:.*:assets-v1$/);
+    for (const url of manifestForWorker().offline) expect(stored.keys).toContain(new URL(url, page.url()).href);
   } finally {
     await page.evaluate(async () => {
       for (const registration of await navigator.serviceWorker.getRegistrations())
         await registration.unregister();
       for (const key of await caches.keys()) await caches.delete(key);
     });
+  }
+});
+
+test('score engine and synth load in separate steps and run offline', async ({ page, context }) => {
+  const requests = [];
+  context.on('request', request => requests.push(new URL(request.url()).pathname));
+  await page.goto('/pages/index.html');
+  await page.waitForFunction(() => window._Score_ && window._menu_ && navigator.serviceWorker.controller);
+  const engraving = /\/mscz-engine\.[a-f0-9]+\.wasm$/;
+  const synth = /\/mscz-synth\.[a-f0-9]+\.wasm$/;
+  expect(requests.some(url => engraving.test(url) || synth.test(url) || /\.webp$/.test(url))).toBe(false);
+  const xml = fs.readFileSync(path.join(__dirname, 'fixtures/anchor-score.musicxml'), 'utf8');
+  const open = () => page.evaluate(async xml => {
+    window.testScore = await new _Score_().init('Local', null, 'test.musicxml', new TextEncoder().encode(xml));
+    return testScore.music.numPages;
+  }, xml);
+  expect(await open()).toBeGreaterThan(0);
+  expect(requests.some(url => engraving.test(url))).toBe(true);
+  expect(requests.some(url => synth.test(url))).toBe(false);
+  await page.evaluate(() => testScore.music.player.play());
+  expect(await page.evaluate(() => testScore.music.player.error)).toBe('');
+  expect(requests.some(url => synth.test(url))).toBe(true);
+  await page.evaluate(() => window._rostrumPages_.prepareOffline());
+  await context.setOffline(true);
+  try {
+    await page.reload();
+    await page.waitForFunction(() => window._Score_ && window._menu_ && navigator.serviceWorker.controller);
+    expect(await open()).toBeGreaterThan(0);
+    const verified = await page.evaluate(async () => {
+      await testScore.music.player.play();
+      const pdf = await testScore.toPdf('pdf');
+      const guide = await fetch('Guidebook.ja.html', { method: 'HEAD' });
+      const library = await window._bookshelf_.call('list');
+      const samples = await window._rostrumPages_.piano(new OfflineAudioContext(1, 44100, 44100));
+      return { error: testScore.music.player.error, pdf: pdf.byteLength, guide: guide.ok,
+        library: Array.isArray(library), piano: samples[60].duration };
+    });
+    expect(verified.error).toBe('');
+    expect(verified.pdf).toBeGreaterThan(1000);
+    expect(verified.guide).toBe(true);
+    expect(verified.library).toBe(true);
+    expect(verified.piano).toBeGreaterThan(0);
+  } finally {
+    await context.setOffline(false);
   }
 });

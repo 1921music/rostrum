@@ -1304,6 +1304,7 @@ class GuidePanel extends Panel {
     if (window._rostrumGuideJa_) return this.urls = { ja: new URL(window._rostrumGuideJa_, location.href).href };
     if (this.isExtension) return this.urls = { en: this.publishedUrl };
     let urls = {};
+    let offline = false;
     for (let [language, name] of Object.entries(this.localNames)) {
       let url = new URL(name, location.href).href;
       // A 404 is an answer and is remembered. A fetch that fails outright is
@@ -1311,11 +1312,11 @@ class GuidePanel extends Panel {
       // forbidden, would otherwise pin the published copy for the rest of the
       // session -- even on the site that publishes its own guidebook.
       let found = await fetch(url, { method: "HEAD" }).then(r => r.ok, () => null);
-      if (found === null) return { en: this.publishedUrl };
+      if (found === null) offline = true;
       if (found) urls[language] = url;
     }
     urls.en ??= this.publishedUrl;
-    return this.urls = urls;
+    return offline ? urls : (this.urls = urls);
   }
 
   content = helm(
@@ -1874,6 +1875,10 @@ class StoragePanel extends Panel {
               (e, prop, tag, args) => {
                 args.close();
                 if (tag == "Restart") {
+                  if (globalThis._rostrumPages_) {
+                    globalThis._rostrumPages_.reload();
+                    return;
+                  }
                   let url = new URL(location.href);
                   url.searchParams.set("t", Date.now());
                   location.replace(url.href);
@@ -2407,11 +2412,16 @@ class TextPanel extends PencilPanel {
     super.sync();
   }
 
-  update(fontName) {
+  async update(fontName) {
     // @fontName is given only when a font has been selected: the sliders, the
     // color picker, show() and sync() all call update() without it.
     if (fontName) this.cell.stash.font = fontName;
     let { font, size, height, rgb, alpha } = this.cell.stash;
+    if (globalThis._rostrumPages_) {
+      try { await globalThis._rostrumPages_.font(font); }
+      catch (error) { toast(error.message); return; }
+      if (this.cell.stash.font !== font) return;
+    }
     let changed = this.changed();
     this.text.style.fontSize = size / _pxPerEm_ + "em";
     this.text.style.lineHeight = height / _pxPerEm_ + "em";

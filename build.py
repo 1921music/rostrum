@@ -306,7 +306,7 @@ class Packager(object):
     inString = False
     inTemplateLiteral = False
 
-    def __init__(self, inFileName, inFileObj, outFileObj):
+    def __init__(self, inFileName, inFileObj, outFileObj, external=()):
         if args.verbose: print(f'packaging {inFileName}') ;
         lineNumber = 0
         for line in inFileObj:
@@ -341,11 +341,13 @@ class Packager(object):
             # When found, include the given file in the output.
             if "// #include " in line: 
                 includedFilePath = line.split()[2] ;
+                if includedFilePath in external:
+                    continue
                 if args.verbose: print("including ", includedFilePath) ;
                 outFileObj.write(line.replace("#include","#inclusion", 1)) ;
                 with open(includedFilePath, encoding='utf-8') as includedFileObj:
                     if "minified" in line:
-                        Packager(includedFilePath, includedFileObj, outFileObj)
+                        Packager(includedFilePath, includedFileObj, outFileObj, external)
                     elif "deflateAs" in line:
                         stringName = line.split()[-1] ;
                         self.deflateAs(stringName, includedFilePath, outFileObj) ;
@@ -500,6 +502,7 @@ def rostrum_page_patches(canonical):
      "            navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })\n"
      '              .then(registration => {\n'
      "                console.log('Rostrum: Service Worker registered with scope:', registration.scope);\n"
+     '                if (navigator.serviceWorker.controller) registration.update().catch(() => {});\n'
      '              })\n'
      '              .catch(error => {\n'
      "                console.log('Rostrum: Service Worker registration failed:', error);\n"
@@ -563,9 +566,9 @@ def bundle_local_guide(destination, extension=False):
         target.write(guide)
 
 
-def build_rostrum_page(outFileName, canonical="https://1921music.github.io/rostrum/"):
+def build_rostrum_page(outFileName, canonical="https://1921music.github.io/rostrum/", pages=None):
     subprocess.run(['node', 'build_browser_fs.mjs'], check=True)
-    for asset in ('bookshelf-worker.js', 'sqlite3.wasm'):
+    for asset in (() if pages else ('bookshelf-worker.js', 'sqlite3.wasm')):
         source = os.path.join('build', asset)
         destination = os.path.join(os.path.dirname(outFileName), asset)
         if os.path.abspath(source) != os.path.abspath(destination):
@@ -584,7 +587,8 @@ def build_rostrum_page(outFileName, canonical="https://1921music.github.io/rostr
     head, tail = page.split(ROSTRUM_PAGE_INCLUDE)
     packaged = StringIO()
     packaged.write(head)
-    Packager("src/pod.html", StringIO(ROSTRUM_PAGE_INCLUDE), packaged)
+    Packager("src/pod.html", StringIO(ROSTRUM_PAGE_INCLUDE), packaged,
+             external=pages.external if pages else ())
     packaged.write(tail)
     # Stamp the build so the Version panel can say which one is running. The
     # version alone cannot answer that, and it is the question every PWA update
@@ -603,6 +607,8 @@ def build_rostrum_page(outFileName, canonical="https://1921music.github.io/rostr
             stamped, count=1)
         if count != 1:
             sys.exit('Error: window.%s = "dev" not found in the packaged page.' % name)
+    if pages:
+        stamped = pages.split(stamped)
     with open(outFileName, "w", encoding='utf-8', newline='\n') as outFileObj:
         outFileObj.write(stamped)
 
@@ -816,7 +822,9 @@ if args.pages:
     os.makedirs(pages_dir, exist_ok=True)
     # The entry is index.html, so the URL is just the directory, which is what
     # the manifest's "./" start_url and scope resolve to.
-    build_rostrum_page(os.path.join(pages_dir, 'index.html'), canonical=None)
+    from build_pages_assets import PagesAssets
+    pages = PagesAssets(pages_dir)
+    build_rostrum_page(os.path.join(pages_dir, 'index.html'), canonical=None, pages=pages)
     for name in ('manifest.webmanifest', 'podauth.html'):
         shutil.copyfile(os.path.join('src', name), os.path.join(pages_dir, name))
 
@@ -872,36 +880,6 @@ if args.pages:
         # passes media straight through.
         doc_to_cache = ['./Guidebook.ja.html'] + [f'./assets/{name}' for name in doc_images]
 
-    # The service worker serves the page from its cache, so a deployment whose
-    # sw.js is byte-identical to the last one would go unnoticed: the browser
-    # sees no new worker, never reinstalls, and keeps answering from the old
-    # cache. Stamp the cache name with the digest of everything the worker
-    # precaches, so a change to any of it changes the worker, which reinstalls
-    # and (see its activate handler) drops every cache that is not the current
-    # one. Taking the digest of the page alone would miss a changed guidebook.
-    digest = hashlib.sha256()
-    doc_to_cache += ['./bookshelf-worker.js', './sqlite3.wasm']
-    for relative in ['./index.html'] + doc_to_cache:
-        with open(os.path.join(pages_dir, relative[2:]), 'rb') as f:
-            digest.update(f.read())
-    page_digest = digest.hexdigest()[:12]
-    with open(os.path.join('src', 'sw.js'), encoding='utf-8') as f:
-        worker = f.read()
-    stamp = "let CACHE_NAME = 'rostrum-v1.0.0';"
-    if worker.count(stamp) != 1:
-        sys.exit(f'Error: cache name not found exactly once in src/sw.js: {stamp!r}')
-    worker = worker.replace(stamp, f"let CACHE_NAME = 'rostrum-v1.0.0-{page_digest}';")
-    worker, replaced = re.subn(r'let urlsToCache = \[.*?\];', "let urlsToCache = [\n  './',\n  './index.html',\n];", worker, count=1, flags=re.DOTALL)
-    if replaced != 1:
-        sys.exit('Error: app precache list not found in src/sw.js')
-    doc_stamp = 'const docToCache = [];'
-    if worker.count(doc_stamp) != 1:
-        sys.exit(f'Error: precache list not found exactly once in src/sw.js: {doc_stamp!r}')
-    if doc_to_cache:
-        listed = ''.join(f"\n  '{url}'," for url in doc_to_cache)
-        worker = worker.replace(doc_stamp, f'const docToCache = [{listed}\n];')
-    with open(os.path.join(pages_dir, 'sw.js'), 'w', encoding='utf-8', newline='\n') as f:
-        f.write(worker)
     # The manifest names the icons as siblings, so that is where they must go.
     missing_icons = []
     for size in (192, 512):
@@ -912,6 +890,7 @@ if args.pages:
             missing_icons.append(f'icon{size}.png')
     if missing_icons:
         print(f'  NOTE: {", ".join(missing_icons)} missing; run build.py --rostrum to generate them.')
+    pages.worker(doc_to_cache)
     if args.verbose: print(f'-- {pages_dir} (re)built.')
 
 if(args.cert):

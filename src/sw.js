@@ -14,6 +14,8 @@ let urlsToCache = [
   './rostrum.html',
   './index.html',
 ];
+// The Pages build sets a single, versioned file for both app entry URLs.
+const appEntry = null;
 // The static-host build replaces this with the guidebook and its images, which
 // that deployment carries, so the guidebook reads offline like the rest of the
 // app. The videos are deliberately absent: they are 11.5 MB against 2.5 MB for
@@ -27,12 +29,16 @@ self.addEventListener('install', (event) => {
     caches.open(CACHE_SCOPE + CACHE_NAME)
       .then((cache) => {
         console.log('Rostrum: Cache opened');
-        return Promise.all([...urlsToCache, ...docToCache]
+        return Promise.all([...(appEntry ? [appEntry] : urlsToCache), ...docToCache]
           .map(async (url) => {
             try {
               const response = await fetch(new Request(url, { cache: 'reload' }));
-              if (response.ok) await cache.put(url, response);
-            } catch { /* Keep optional/offline resources from blocking installation. */ }
+              if (!response.ok) throw new Error(`Could not precache ${url}: ${response.status}`);
+              await cache.put(url, response);
+            } catch (error) {
+              // Keep the active offline copy if the new app failed to download.
+              if (url === appEntry) throw error;
+            }
           }));
       })
       .then(() => self.skipWaiting())
@@ -56,7 +62,7 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch event - fresh HTML with offline fallback; cache-first for other assets.
+// Fetch event - start the versioned app from cache; allow explicit refreshes.
 self.addEventListener('fetch', (event) => {
   // Only handle GET requests — never intercept POST/PUT/etc. (e.g. OAuth token exchanges)
   if (event.request.method !== 'GET') return;
@@ -64,17 +70,19 @@ self.addEventListener('fetch', (event) => {
   if (new URL(event.request.url).pathname.startsWith(
       new URL('wink-page-turn/', self.registration.scope).pathname)) return;
 
-  // Reloads must reach the published HTML even when this worker has not changed.
-  // Bypass the HTTP cache as well as Cache Storage; retain the last successful
-  // response for offline use. Query-string restart URLs refresh the canonical
-  // app entry without accumulating one cache entry per restart.
   if (event.request.mode === 'navigate' && new URL(event.request.url).origin === self.location.origin) {
     event.respondWith((async () => {
       const cache = await caches.open(CACHE_SCOPE + CACHE_NAME);
       const url = new URL(event.request.url);
       const entry = urlsToCache.some(path => new URL(path, self.registration.scope).pathname === url.pathname);
-      const key = new URL(url);
+      const key = entry && appEntry ? new URL(appEntry, self.registration.scope) : new URL(url);
       if (entry) key.search = '';
+      const refresh = url.searchParams.has('t') || ['reload', 'no-cache'].includes(event.request.cache);
+      if (entry && appEntry && !refresh) {
+        const saved = await cache.match(key.href);
+        if (saved) return saved;
+      }
+      // Explicit reloads can fetch newer HTML even before a new worker activates.
       try {
         const response = await fetch(event.request, { cache: 'no-store' });
         if (response.ok) {
@@ -127,12 +135,8 @@ self.addEventListener('fetch', (event) => {
           // Clone the response
           let responseToCache = response.clone();
 
-          // Only cache same-origin requests (not external PDFs), and never a
-          // request carrying a query string (e.g. the "?t=" cache-buster the
-          // in-app restart button appends): caching those would accumulate a
-          // new, never-reused entry in Cache Storage on every restart. Skipping
-          // them keeps the canonical (no-query) entry set only at install time,
-          // so it stays pinned until a real service worker update ships.
+          // Cache only same-origin assets without a query string. App navigations
+          // use the canonical entry above, including the in-app restart URL.
           if (event.request.url.startsWith(self.location.origin) && !new URL(event.request.url).search) {
             caches.open(CACHE_SCOPE + CACHE_NAME)
               .then((cache) => {

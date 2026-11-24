@@ -21,11 +21,10 @@ test('stable and wink deployments keep separate workers and offline caches', asy
   await wink.goto('/variants/wink-page-turn/index.html');
   await wink.waitForFunction(() => navigator.serviceWorker.controller?.scriptURL.endsWith('/wink-page-turn/sw.js'));
   const verify = async () => {
-    await expect.poll(() => stable.evaluate(async () => (await caches.keys()).filter(name => name.startsWith('rostrum-scope:')))).toEqual(
-      expect.arrayContaining([
-        expect.stringMatching(new RegExp('^rostrum-scope:' + root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ':rostrum-v1\\.0\\.0-')),
-        expect.stringMatching(new RegExp('^rostrum-scope:' + (root + 'wink-page-turn/').replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ':rostrum-v1\\.0\\.0-')),
-      ]));
+    await expect.poll(() => stable.evaluate(async scopes => {
+      const names = await caches.keys();
+      return scopes.every(scope => names.some(name => name.startsWith(`rostrum-scope:${scope}:`) || name.startsWith(`rostrum-pages:${scope}:`)));
+    }, [root, root + 'wink-page-turn/'])).toBe(true);
     expect(await stable.evaluate(async () => (await caches.open('another-app')).match('/sentinel').then(r => r.text()))).toBe('keep');
   };
   await verify();
@@ -40,7 +39,7 @@ test('stable and wink deployments keep separate workers and offline caches', asy
     for (const page of [stable, wink]) {
       await page.waitForFunction(() => !!window._menu_);
       await page.evaluate(() => _menu_.notify('app/about/up'));
-      await expect(page.getByText('Version 1.0.0', { exact:true })).toBeVisible();
+      await expect(page.getByText(/^Version 1\.0\.\d+$/)).toBeVisible();
     }
     expect(await stable.evaluate(() => typeof window._WinkJudge_)).toBe('undefined');
     await verify();

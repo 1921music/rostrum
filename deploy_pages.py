@@ -23,17 +23,49 @@ def directory_tree(repo, directory):
     return git(repo, 'mktree', data=''.join(entries).encode())
 
 
+def entries(repo, tree):
+    return {line.split('\t', 1)[1]: line for line in git(repo, 'ls-tree', tree).splitlines()}
+
+
+def write_tree(repo, records):
+    return git(repo, 'mktree', data=('\n'.join(records.values()) + '\n').encode())
+
+
+def retain_modules(repo, built, old):
+    """An already-open tab may still request a module from its original build."""
+    root = entries(repo, built)
+    previous = entries(repo, old)
+    # The last single-HTML Pages release loaded the library from these URLs.
+    for name in ('bookshelf-worker.js', 'sqlite3.wasm'):
+        if name in previous:
+            root.setdefault(name, previous[name])
+    if 'assets' not in root or 'assets' not in previous:
+        return write_tree(repo, root)
+    assets = entries(repo, built + ':assets')
+    old_assets = entries(repo, old + ':assets')
+    if 'modules' not in assets or 'modules' not in old_assets:
+        return write_tree(repo, root)
+    modules = entries(repo, old + ':assets/modules')
+    modules.update(entries(repo, built + ':assets/modules'))
+    assets['modules'] = f'040000 tree {write_tree(repo, modules)}\tmodules'
+    root['assets'] = f'040000 tree {write_tree(repo, assets)}\tassets'
+    return write_tree(repo, root)
+
+
 def compose_tree(repo, directory, parent, target=''):
     """Root updates retain the wink build; wink updates retain the entire root."""
     built = directory_tree(repo, directory)
-    old = git(repo, 'ls-tree', parent).splitlines()
+    old = entries(repo, parent)
     if target:
-        entries = [line for line in old if line.split('\t', 1)[1] != target]
-        entries.append(f'040000 tree {built}\t{target}')
+        if target in old:
+            built = retain_modules(repo, built, f'{parent}:{target}')
+        old[target] = f'040000 tree {built}\t{target}'
+        return write_tree(repo, old)
     else:
-        entries = git(repo, 'ls-tree', built).splitlines()
-        entries.extend(line for line in old if line.split('\t', 1)[1] == 'wink-page-turn')
-    return git(repo, 'mktree', data=('\n'.join(entries) + '\n').encode())
+        root = entries(repo, retain_modules(repo, built, parent))
+        if 'wink-page-turn' in old:
+            root['wink-page-turn'] = old['wink-page-turn']
+        return write_tree(repo, root)
 
 
 def main():

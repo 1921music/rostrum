@@ -417,7 +417,7 @@ class BookshelfStore extends EventTarget {
       this.setPermissionRequired(false);
       const deviceStateKey = await this.services.host.deviceStateKey(this.storage || {});
       const deviceState = await this.services.host.loadDeviceState(deviceStateKey) || {};
-      let url = new URL('bookshelf-worker.js', location.href).href;
+      let url = globalThis._rostrumPages_?.url('bookshelf-worker.js') ?? new URL('bookshelf-worker.js', location.href).href;
       if (location.protocol === 'file:') {
         this.hostStorage = await this.services.host.openHostStorage(this.storage || {});
         const runtime = this.services.runtime;

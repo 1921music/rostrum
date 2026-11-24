@@ -440,6 +440,7 @@ class Pg {
       }, { cssOnly: true } );
   
       if (this.json) {
+        if (globalThis._rostrumPages_) await globalThis._rostrumPages_.fontsIn(JSON.stringify(this.json));
         await new Promise((resolve, reject) =>
           canvas.loadFromJSON(this.json, () => resolve()));
         Pg.applyFlatten(canvas);
@@ -932,6 +933,10 @@ class Pg {
           // bundled font can show is collected for toPdfAux to warn about,
           // since otherwise it would just go missing from the saved score.
           let drawnText = obj.textLines ? obj.textLines.join("\n") : obj.text;
+          if (globalThis._rostrumPages_) {
+            await globalThis._rostrumPages_.font(requestedFont);
+            if (/[^\x00-\x7f]/.test(drawnText ?? '')) await globalThis._rostrumPages_.font(FALLBACK_PDF_FONT);
+          }
           let { pdfFontName, missing } = resolveTextFont(drawnText ?? "", requestedFont);
           for (let codePoint of missing)
             this.score.missingGlyphs?.add(String.fromCodePoint(codePoint));
@@ -1426,7 +1431,8 @@ class Score {
       await this.initMusic(activate);
     } else if (pdfData) {
       this.size = pdfData.size ?? pdfData.byteLength;
-      if (!window.pdfjsLib) {
+      if (globalThis._rostrumPages_) await globalThis._rostrumPages_.pdfReader();
+      else if (!window.pdfjsLib) {
         // mozilla pdfjsLib is loaded from mozSrc and mozWorkerSrc (strings
         // (base64-encoded-gzipped strings defined globally) on demand
         let pdfUrl = URL.createObjectURL(await inflate(mozSrc));
@@ -1907,6 +1913,7 @@ class Score {
   }
 
   async bindScore(pdfData, pn = null) {
+    if (globalThis._rostrumPages_) await globalThis._rostrumPages_.pdfWriter();
     // bind all pages from a given score to this score: i.e. given some score's
     // @pdfData, append all of its pages to this score.
     // @pn one-based index of where to insert the pages from pdfData.
@@ -2320,6 +2327,7 @@ class Score {
     //    pdf bytes that it produces is returned.
     // @pns array of page numbers (1-based) to include, or null for all pgs
     try {
+      if (globalThis._rostrumPages_) await globalThis._rostrumPages_.pdfWriter();
       // When shade is cancelled, set cancelPdf. This will interrupt lib-pdf when
       // it next calls waitForTick by calling our monkey-patched setTimeout
       _shade_.onCancel = () => { window.cancelPdf = true; };

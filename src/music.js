@@ -10,6 +10,17 @@ let musicEnginePromise;
 let musicSvgSequence = 0;
 async function musicEngine() {
   return musicEnginePromise ??= (async () => {
+    const pages = globalThis._rostrumPages_;
+    if (pages) {
+      const [api, { Playback, PlaybackView }, wasmBinary, resources] = await Promise.all([
+        import(pages.url('mscz.js')), import(pages.url('playback.js')),
+        pages.bytes('mscz-engine.wasm'), pages.scoreResources(),
+      ]);
+      const engine = await api.load({ wasmBinary, resources, playbackAssets: {
+        wasmURL: pages.url('mscz-synth.wasm'), workerURL: pages.url('playback-worker.js'),
+      }});
+      return { engine, Playback, PlaybackView };
+    }
     const payload = globalThis._scoreEngineAssets_;
     if (!payload) throw new Error('Score engine assets are missing. Build the score engine first.');
     const decode = async s => new Uint8Array(await new Response(new Blob([
@@ -97,6 +108,7 @@ class MusicDocument {
   async pageImage(pn) {
     if (!this.svgs.has(pn)) this.svgs.set(pn, (async () => {
       const element = this.pageSvgElement(pn);
+      if (globalThis._rostrumPages_) await globalThis._rostrumPages_.fontsIn(element.outerHTML);
       let css = this.native.mscz.textFonts?.svgFontCss(element.outerHTML) || '';
       // Rostrum's editor fonts may also be explicitly named by a score.
       for (const [family, resource] of Object.entries(globalThis.fontData || {})) {

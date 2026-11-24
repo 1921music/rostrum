@@ -44,7 +44,7 @@ for (const url of ['/pod.html','/rostrum.html']) test(`Rostrum names survive PDF
         version:window._rostrumVersion_,oldVersion:typeof window._podiumVersion_ };
     } finally { await reopened.dispose(); }
   });
-  expect(result).toMatchObject({ db:'Rostrum',store:'rostrum',metadata:['rostrum'],type:'pen',stash:{ rgb:'red',alpha:1,width:3 },version:'1.0.0',oldVersion:'undefined' });
+  expect(result).toMatchObject({ db:'Rostrum',store:'rostrum',metadata:['rostrum'],type:'pen',stash:{ rgb:'red',alpha:1,width:3 },version:require('../package.json').version,oldVersion:'undefined' });
   expect(result.json).toContain('rostrumType');
   expect(result.json).not.toMatch(/podiumType|podiumStash/);
 });

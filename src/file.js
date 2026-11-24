@@ -82,6 +82,7 @@ let errDialog = (error, msg) => {
 
 
 let checkMergePdf = async (data) => {
+  if (globalThis._rostrumPages_) await globalThis._rostrumPages_.pdfWriter();
   // Try loading pdfData with pdf-lib before storing it for merge.
   // Returns data if loadable, null if rejected by user or unreadable.
   let { PDFDocument } = PDFLib;

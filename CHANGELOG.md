@@ -1,6 +1,6 @@
 # Changelog / 変更履歴
 
-## Unreleased — MSCZ support
+## 1.0.1 — MSCZ support
 
 - Treat MSCZ work titles `無題のスコア` and `Untitled score` as unset when
   importing songs, falling back to the visible title and then the filename.
@@ -14,9 +14,9 @@
 - Use bundled browser-fs-access for local Open/Save. Store reusable file handles
   for Recent, read externally edited files afresh, and distinguish same-name files.
   Disable Recent entries without a usable handle; remove the old stored copies.
-- Fetch HTML from the network on reload, bypassing stale HTTP/service-worker
-  caches and refreshing the offline copy. Keep offline and server-error fallbacks.
-  Precache only real Pages entry points and bypass HTTP cache during worker updates.
+- Publish a modular Pages build that loads the notation engine, synthesizer and
+  other optional assets on demand. Installed PWAs prepare all offline features
+  and fetch only changed files on update. Keep the standalone HTML on Releases.
 - Bundle the Japanese guide, media and music font beside local HTML and in the
   extension. App → Guide reads the bundled copy offline without file-URL probes
   or falling back to the external English guide.
