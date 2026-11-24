@@ -34,10 +34,13 @@ def main():
         path = (web / entry['url']).resolve()
         path.relative_to(web)
         resources.append({'name': entry['name'], 'data': pack(path.read_bytes())})
+    notice_lines = read('lilypond-tera-NOTICE.txt').splitlines()
+    lilypond_notice = ''.join(f'// {line}'.rstrip() + '\n' for line in notice_lines)
+    lilypond_module = lilypond_notice + read('lilypond.mjs')
     payload = {'module': pack(wrapper.encode()), 'wasm': pack((web / 'mscz-engine.wasm').read_bytes()),
         'resources': resources, 'playback': {'worker': pack(worker.encode()),
         'wasm': pack((web / 'mscz-synth.wasm').read_bytes())},
-        'openBook': {'module': pack((web / 'lilypond.mjs').read_bytes()),
+        'openBook': {'module': pack(lilypond_module.encode()),
                      'lilypond': pack((web / 'lilypond.wasm').read_bytes()),
                      'tera': pack((web / 'lilypond-tera.wasm').read_bytes())}}
     target = Path(__file__).parent / 'lib' / 'score-engine-data.js'
@@ -49,8 +52,9 @@ def main():
     # so an ordinary extension build needs no C++ compiler or WSL environment.
     extension_modules = target.parent / 'score-engine'
     extension_modules.mkdir(exist_ok=True)
-    for name in ('mscz.js', 'mscz-engine.js', 'text-fonts.js', 'playback.js', 'playback-worker.js', 'mscz-synth.js', 'lilypond.mjs'):
+    for name in ('mscz.js', 'mscz-engine.js', 'text-fonts.js', 'playback.js', 'playback-worker.js', 'mscz-synth.js'):
         shutil.copyfile(web / name, extension_modules / name)
+    (extension_modules / 'lilypond.mjs').write_text(lilypond_module, encoding='utf-8', newline='')
 
 
 if __name__ == '__main__':

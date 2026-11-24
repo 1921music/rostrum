@@ -1,5 +1,14 @@
 # Changelog / 変更履歴
 
+## 1.2.0 — Score engine update
+
+- Update the bundled score engine and LilyPond converter. The engine can
+  render additional percussion and rhythm notation, voices on the same
+  staff, and guitar fretboard diagrams.
+- Separate imported LilyPond headings from nearby notation based on the
+  laid-out text and staff shapes.
+- Verify byte-identical MusicXML conversion for all 1,635 OpenBook songs.
+
 ## 1.1.0 — OpenBook
 
 - Search OpenBook song titles and categories from Library → Songs. OpenBook is

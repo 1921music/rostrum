@@ -1,6 +1,6 @@
 # Rostrum
 
-**Version 1.1.0** · [Open Rostrum](https://1921music.github.io/rostrum/) · [Download standalone HTML](https://github.com/1921music/rostrum/releases/latest) · [Experimental wink page-turner](https://1921music.github.io/rostrum/wink-page-turn/)
+**Version 1.2.0** · [Open Rostrum](https://1921music.github.io/rostrum/) · [Download standalone HTML](https://github.com/1921music/rostrum/releases/latest) · [Experimental wink page-turner](https://1921music.github.io/rostrum/wink-page-turn/)
 
 > This is a fork of [studiop5/podium](https://github.com/studiop5/podium), branched
 > at v2.3.0 and rebased onto v2.3.1, for use as a music stand on an Android tablet. What it adds and why —
@@ -36,15 +36,15 @@ previews use GitHub.
 
 | Edition or action | Size |
 | --- | ---: |
-| GitHub Releases `rostrum.html`, open directly in a browser | 12.18 MB file |
+| GitHub Releases `rostrum.html`, open directly in a browser | 12.47 MB file |
 | GitHub Pages, first launch with an empty cache | about 0.66 MB |
-| First MSCZ / MusicXML open | about 2.70 MB additional |
+| First MSCZ / MusicXML open | about 2.87 MB additional |
 | First score playback | about 0.21 MB additional |
-| OpenBook conversion code, loaded on first use | about 0.36 MB additional |
-| Installed PWA, all offline features | about 7.64 MB total |
-| Installed PWA, including Japanese guide and images | about 10.09 MB total |
+| OpenBook conversion code, loaded on first use | about 0.40 MB additional |
+| Installed PWA, all offline features | about 7.85 MB total |
+| Installed PWA, including Japanese guide and images | about 10.30 MB total |
 
-Pages figures are compressed transfer estimates for version 1.1.0. The browser
+Pages figures are compressed transfer estimates for version 1.2.0. The browser
 loads optional features when first used. Installing the PWA starts offline
 preparation on supported browsers. On iPhone and iPad, open the installed app
 online once and wait for **Ready to use offline**. OpenBook catalog and source
@@ -100,7 +100,7 @@ save format, engine build and current limits.
 
 ## 日本語
 
-### Rostrum 1.1.0
+### Rostrum 1.2.0
 
 **[Rostrum を開く](https://1921music.github.io/rostrum/)** — インストールせず、ブラウザですぐ使えます。
 
@@ -122,9 +122,9 @@ Rostrum 独自のバージョンは **1.0.0**（タグ `v1.0.0`）から始ま�
 - **ウィンク版（開発中）**：[https://1921music.github.io/rostrum/wink-page-turn/](https://1921music.github.io/rostrum/wink-page-turn/)
 - **[日本語ガイドブック](https://1921music.github.io/rostrum/Guidebook.ja.html)**
 
-**[単一 HTML 版](https://github.com/1921music/rostrum/releases/latest)** の `rostrum.html` は **12.18 MB** です。ダウンロードしてブラウザで直接開けます。
+**[単一 HTML 版](https://github.com/1921music/rostrum/releases/latest)** の `rostrum.html` は **12.47 MB** です。ダウンロードしてブラウザで直接開けます。
 
-**Pages 版**の転送量の目安は、初回起動が **0.66 MB**、MSCZ / MusicXML を初めて開くときに **2.70 MB**、初回再生で **0.21 MB** の追加です。OpenBook の変換コードは初回利用時に **0.36 MB** 追加で取得します。PWA のオフライン準備は全機能で **合計 7.64 MB**、日本語ガイドの本文・画像込みで **合計 10.09 MB** です。OpenBook の曲一覧と曲原本、ガイド動画、クラウド同期はオンラインで利用します。
+**Pages 版**の転送量の目安は、初回起動が **0.66 MB**、MSCZ / MusicXML を初めて開くときに **2.87 MB**、初回再生で **0.21 MB** の追加です。OpenBook の変換コードは初回利用時に **0.40 MB** 追加で取得します。PWA のオフライン準備は全機能で **合計 7.85 MB**、日本語ガイドの本文・画像込みで **合計 10.30 MB** です。OpenBook の曲一覧と曲原本、ガイド動画、クラウド同期はオンラインで利用します。
 
 インストールした PWA はオフライン用のファイルを準備します。iPhone・iPad ではホーム画面から初回だけオンラインで開き、準備完了の表示を待ってください。更新時は変更されたファイルだけを取得します。`App → Reload` でその場で更新を確認できます。
 

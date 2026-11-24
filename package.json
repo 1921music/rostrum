@@ -1,7 +1,7 @@
 {
   "name": "rostrum",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.2.0",
   "scripts": {
     "pretest": "node build_browser_fs.mjs && python build.py --font && node --test tests/unit/library-schema.mjs tests/unit/library-model.mjs",
     "test:library-schema": "node --test tests/unit/library-schema.mjs",
