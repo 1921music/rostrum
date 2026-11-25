@@ -105,17 +105,17 @@ class PagesAssets:
         if not app:
             raise ValueError('Packaged application script not found')
         script = app[1].removesuffix('</script>')
-        stamps = re.findall(r'window\._rostrum(?:Build|Commit)_\s*=\s*"[^"]+"\s*;', script)
-        if len(stamps) != 2:
-            raise ValueError('Packaged build stamps not found')
+        stamps = list(re.finditer(r'window\._rostrum(Version|Build|Commit)_\s*=\s*"[^"]+"\s*;', script))
+        if sorted(stamp[1] for stamp in stamps) != ['Build', 'Commit', 'Version']:
+            raise ValueError('Expected one packaged stamp each for version, build date, and commit')
         for stamp in stamps:
-            script = script.replace(stamp, '')
+            script = script.replace(stamp[0], '')
         app_url = self.add('app.js', 'await window._rostrumPages_.loadCoreFonts();\n' + script +
                            '\nwindow.addEventListener("rostrum-offline-status", event => toast(event.detail));\n', core=True)
         runtime = self.copy('src/pages-runtime.js', core=True)
         manifest = self.add('asset-manifest.js', 'window._rostrumAssetURLs_ = ' + json.dumps(self.urls, separators=(',', ':')) + ';\n', core=True)
         scripts = [f'<script src="{url}"></script>' for url in (manifest, runtime, fabric, browser_fs, host)]
-        scripts.append('<script>' + ''.join(stamps) + '</script>')
+        scripts.append('<script>' + ''.join(stamp[0] for stamp in stamps) + '</script>')
         scripts.append(f'<script type="module" src="{app_url}"></script>')
         html = html[:app.start()] + '\n'.join(scripts) + html[app.end():]
         html, count = re.subn(r'    <script>\n      // PWA resources.*?    </script>\n', '', html, count=1, flags=re.S)

@@ -65,7 +65,16 @@ test("the static-host build references everything relatively", async () => {
   const html = fs.readFileSync(pageFile, "utf8");
   expect(html).toContain('<link rel="manifest" href="manifest.webmanifest" />');
   expect(html).toContain('<link rel="apple-touch-icon" href="icon192.png">');
-  expect(html).toMatch(/<script type="module" src="\.\/assets\/modules\/app\.[a-f0-9]+\.js"><\/script>/);
+  const app = html.match(/<script type="module" src="(\.\/assets\/modules\/app\.[a-f0-9]+\.js)"><\/script>/);
+  expect(app).not.toBeNull();
+  const inlineStamps = html.match(/<script>([^<]*window\._rostrumVersion_[^<]*)<\/script>/);
+  expect(inlineStamps).not.toBeNull();
+  const appScript = fs.readFileSync(path.join(pagesDir, app[1]), "utf8");
+  for (const key of ["Version", "Build", "Commit"]) {
+    const assignment = new RegExp(`window\\._rostrum${key}_\\s*=`);
+    expect(inlineStamps[1]).toMatch(assignment);
+    expect(appScript).not.toMatch(assignment);
+  }
   expect(html).not.toContain('globalThis._scoreEngineAssets_');
   // The deployment's own URL is not known at build time, so claiming another
   // site as canonical would be wrong.

@@ -1,5 +1,10 @@
 # Changelog / 変更履歴
 
+## 1.2.2 — Smaller PWA updates
+
+- Keep the release version with the build date and commit in the Pages HTML.
+  Future version bumps can reuse the cached app bundle when its code is unchanged.
+
 ## 1.2.1 — Local LilyPond files
 
 - Open local `.ly` scores directly from File → Open, including offline.

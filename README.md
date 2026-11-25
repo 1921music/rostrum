@@ -1,6 +1,6 @@
 # Rostrum
 
-**Version 1.2.1** · [Open Rostrum](https://1921music.github.io/rostrum/) · [Download standalone HTML](https://github.com/1921music/rostrum/releases/latest) · [Experimental wink page-turner](https://1921music.github.io/rostrum/wink-page-turn/)
+**Version 1.2.2** · [Open Rostrum](https://1921music.github.io/rostrum/) · [Download standalone HTML](https://github.com/1921music/rostrum/releases/latest) · [Experimental wink page-turner](https://1921music.github.io/rostrum/wink-page-turn/)
 
 > This is a fork of [studiop5/podium](https://github.com/studiop5/podium), branched
 > at v2.3.0 and rebased onto v2.3.1, for use as a music stand on an Android tablet. What it adds and why —
@@ -45,7 +45,7 @@ previews use GitHub.
 | Installed PWA, all offline features | about 7.80 MB total |
 | Installed PWA, including Japanese guide and images | about 10.24 MB total |
 
-Pages figures are compressed transfer estimates for version 1.2.1. The browser
+Pages figures are compressed transfer estimates for version 1.2.2. The browser
 loads optional features when first used. Installing the PWA starts offline
 preparation on supported browsers. On iPhone and iPad, open the installed app
 online once and wait for **Ready to use offline**. OpenBook catalog and source
@@ -101,7 +101,7 @@ save format, engine build and current limits.
 
 ## 日本語
 
-### Rostrum 1.2.1
+### Rostrum 1.2.2
 
 **[Rostrum を開く](https://1921music.github.io/rostrum/)** — インストールせず、ブラウザですぐ使えます。
 
