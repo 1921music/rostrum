@@ -1822,7 +1822,7 @@ class Score {
     } finally { this.musicBusy = false; document.dispatchEvent(new Event('musicPlayback')); }
   }
 
-  get saveName() { return this.music ? this.name.replace(/\.(mscz|mxl|musicxml|xml)$/i, '') + '.mscz' : this.name; }
+  get saveName() { return this.music ? this.name.replace(/\.(mscz|mxl|musicxml|xml|ly)$/i, '') + '.mscz' : this.name; }
 
   async toFile() {
     if (!this.music) return this.toPdf();

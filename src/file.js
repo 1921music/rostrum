@@ -519,7 +519,7 @@ class LocalSrc extends FileSrc {
     return mode === 'copy'
       ? [{ description: 'Images', mimeTypes: ['image/jpeg', 'image/png'], extensions: ['.jpg', '.jpeg', '.png'] }]
       : mode === 'merge' ? [{ description: 'PDF scores', mimeTypes: ['application/pdf'], extensions: ['.pdf'] }]
-      : [{ description: 'Scores', mimeTypes: ['application/pdf', 'application/octet-stream'], extensions: ['.pdf', '.mscz', '.mxl', '.musicxml', '.xml'] }];
+      : [{ description: 'Scores', mimeTypes: ['application/pdf', 'application/octet-stream', 'text/plain'], extensions: ['.pdf', '.mscz', '.mxl', '.musicxml', '.xml', '.ly'] }];
   }
 
   async pickFile(mode) {
@@ -2983,21 +2983,21 @@ class FileListView {
   // This method determines if a given filename should be shown to the user
   // based on its extension.  The set of allowable extensions is determined
   // by this.mode: when this is "copy", image files ending in .jpeg,.jpg,.png
-  // are accepted. Otherwise only files ending in .pdf are accepted. When
+  // are accepted. Open and save accept score formats. When
   // accepted, the extension (not including leading .) is returned, otherwise
   // null or undefined is returned.
   acceptExt(name) {
     let ext = this.extensionRegex.exec(name)[1];
     if (ext) {
       ext = ext.toLowerCase();
-      let exts = this.mode == "copy" ? { jpeg: 1, jpg: 1, png: 1 } : this.mode === 'merge' ? { pdf: 1 } : { pdf: 1, mscz: 1, mxl: 1, musicxml: 1, xml: 1 };
+      let exts = this.mode == "copy" ? { jpeg: 1, jpg: 1, png: 1 } : this.mode === 'merge' ? { pdf: 1 } : { pdf: 1, mscz: 1, mxl: 1, musicxml: 1, xml: 1, ly: 1 };
       if (exts[ext]) return ext;
     }
     return null;
   }
 
   async checkExt(name, ext = ".pdf") {
-    if (this.mode === 'save' && _score_?.music) return name.replace(/\.(mscz|mxl|musicxml|xml|pdf)$/i, '') + '.mscz';
+    if (this.mode === 'save' && _score_?.music) return name.replace(/\.(mscz|mxl|musicxml|xml|pdf|ly)$/i, '') + '.mscz';
     // ext should include the leading dot "."
     checkPath(name);
     if (name.toLowerCase().endsWith(ext)) return name;

@@ -2,7 +2,6 @@ const openBookRepository = "https://github.com/veltzer/book-openbook";
 const openBookCatalogUrl = "https://api.github.com/repos/veltzer/book-openbook/git/trees/master?recursive=1";
 const openBookSearchKey = text => text.normalize('NFKC').toLocaleLowerCase().replace(/[_-]+/g, ' ');
 let openBookCatalogRequest, openBookCatalogExpires = 0;
-let openBookConverterRequest;
 
 function openBookPathUrl(path) {
   return path.split('/').map(encodeURIComponent).join('/');
@@ -42,38 +41,20 @@ function openBookCatalog(retry = false) {
   return openBookCatalogRequest;
 }
 
-async function openBookConverter() {
-  return openBookConverterRequest ??= (async () => {
-    const pages = globalThis._rostrumPages_;
-    const payload = globalThis._scoreEngineAssets_?.openBook;
-    const extension = !!globalThis.chrome?.runtime?.id;
-    if (!pages && !payload) throw new Error('OpenBook converter assets are missing.');
-    const decode = async data => {
-      const compressed = Uint8Array.from(atob(data), character => character.charCodeAt(0));
-      return new Response(new Blob([compressed]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer();
-    };
-    const module = pages ? import(pages.url('lilypond.mjs')) : extension
-      ? import(new URL('./score-engine/lilypond.mjs', location.href).href)
-      : import('data:text/javascript;base64,' + btoa(new Uint8Array(await decode(payload.module)).reduce((text, byte) => text + String.fromCharCode(byte), '')));
-    const [api, lilypond, tera] = await Promise.all([module,
-      pages ? pages.bytes('lilypond.wasm.gz') : decode(payload.lilypond),
-      pages ? pages.bytes('lilypond-tera.wasm.gz') : decode(payload.tera)]);
-    const [toMusicXml, expandTemplate] = await Promise.all([api.loadLilyPond(lilypond), api.loadLilyPondTera(tera)]);
-    return { expandTemplate, toMusicXml };
-  })().catch(error => { openBookConverterRequest = null; throw error; });
-}
-
 async function openBookLoadSong(song) {
   const blobUrl = `https://api.github.com/repos/veltzer/book-openbook/git/blobs/${song.sha}`;
-  const [reply, converter] = await Promise.all([openBookFetch(blobUrl, 'score'), openBookConverter()]);
-  const blob = await reply.json();
-  if (blob.sha !== song.sha || blob.encoding !== 'base64' || typeof blob.content !== 'string')
-    throw new Error('OpenBook returned the wrong score revision.');
-  const source = Uint8Array.from(atob(blob.content), character => character.charCodeAt(0));
-  const lilypond = await converter.expandTemplate(source);
-  const musicXml = await converter.toMusicXml(lilypond, { measureNumbers: 'system' });
-  return { song, source, musicXml };
+  const source = openBookFetch(blobUrl, 'score').then(async reply => {
+    const blob = await reply.json();
+    if (blob.sha !== song.sha || blob.encoding !== 'base64' || typeof blob.content !== 'string')
+      throw new Error('OpenBook returned the wrong score revision.');
+    return Uint8Array.from(atob(blob.content), character => character.charCodeAt(0));
+  });
+  const musicXml = await convertLilyPond(source, { template: true });
+  return { song, source: await source, musicXml };
 }
 // +skip
 export { openBookCatalog, openBookLoadSong, openBookSearchKey, openBookSourceUrl };
+// -skip
+// +skip
+import { convertLilyPond } from './lilypond.js';
 // -skip

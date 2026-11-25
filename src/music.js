@@ -1,11 +1,12 @@
 // Score-engine integration. The editor remains Fabric; MSCZ contains standard
 // SVG Image elements plus versioned metadata for lossless editor restoration.
 // +skip
+import { convertLilyPond, isLilyPond } from './lilypond.js';
 export { MusicDocument, isMusicScore, ROSTRUM_SVG_NS };
 // -skip
 
 const ROSTRUM_SVG_NS = "https://1921music.github.io/rostrum/ns";
-const isMusicScore = name => /\.(mscz|mxl|musicxml|xml)$/i.test(name || '');
+const isMusicScore = name => /\.(mscz|mxl|musicxml|xml|ly)$/i.test(name || '');
 let musicEnginePromise;
 let musicSvgSequence = 0;
 async function musicEngine() {
@@ -50,9 +51,12 @@ async function musicEngine() {
 
 class MusicDocument {
   static async open(bytes, name) {
+    const lilyPondXml = isLilyPond(name) ? await convertLilyPond(bytes) : null;
     const { engine, Playback, PlaybackView } = await musicEngine();
     const document = new MusicDocument();
-    document.native = engine.open(new Uint8Array(bytes), name);
+    document.native = engine.open(lilyPondXml ?? new Uint8Array(bytes),
+      lilyPondXml ? name.replace(/\.ly$/i, '.musicxml') : name);
+    document.lilyPondXml = lilyPondXml;
     document.name = name;
     document.player = new Playback(engine, 'EAS', () => globalThis.document.dispatchEvent(new Event('musicPlayback')));
     document.autoScroll = true;

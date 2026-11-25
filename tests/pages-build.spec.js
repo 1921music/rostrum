@@ -84,7 +84,7 @@ test("the static-host build references everything relatively", async () => {
   const deployment = manifestForWorker();
   expect(deployment.core.every(url => url.startsWith('./'))).toBe(true);
   const converters = deployment.offline.filter(url => /lilypond(?:-tera)?\.wasm\.[a-f0-9]+\.gz$|lilypond\.[a-f0-9]+\.mjs$/.test(url));
-  expect(converters).toHaveLength(3);
+  expect(converters).toHaveLength(2);
   for (const converter of converters) expect(deployment.core).not.toContain(converter);
   expect(deployment.entry).toMatch(/^\.\/assets\/modules\/index\.[a-f0-9]+\.html$/);
   expect(fs.existsSync(path.join(pagesDir, "podauth.html"))).toBe(true);

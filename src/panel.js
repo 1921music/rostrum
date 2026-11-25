@@ -955,7 +955,7 @@ class DetailsPanel extends Panel {
       let nameInput = helm(
         `<input type="text" style="font-size:1.5em;text-align:center;margin-bottom:.5em;width:100%;box-sizing:border-box;border:none;border-radius:var(--borderRadius);background:var(--panel-bg);">`
       );
-      nameInput.value = score.name.replace(/\.(pdf|mscz|mxl|musicxml|xml)$/i, "");
+      nameInput.value = score.name.replace(/\.(pdf|mscz|mxl|musicxml|xml|ly)$/i, "");
       listen(nameInput, "change", () => {
         let newName = nameInput.value.trim();
         const extension = score.music ? '.mscz' : '.pdf';

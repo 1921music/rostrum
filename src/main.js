@@ -33,6 +33,7 @@ import "./font.js";
 import { Menu } from "./menu.js";
 import { Layout } from "./layout.js";
 import "./score.js";
+import "./lilypond.js";
 import "./music.js";
 import "./openbook.js";
 import { ScreenPanel } from "./panel.js";
@@ -57,6 +58,7 @@ window.pdfjsLib.GlobalWorkerOptions.workerPort = new Worker("pdf.worker.min.mjs"
 // #include src/common.js minified
 // #include src/menu.js minified
 // #include lib/score-engine-data.js
+// #include src/lilypond.js minified
 // #include src/music.js minified
 // #include src/openbook.js minified
 // #include src/icon.js minified

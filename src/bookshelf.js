@@ -297,7 +297,7 @@ class BookshelfView {
     this.resizeObserver = new ResizeObserver(this.resize);
     this.resizeObserver.observe(panel.panel);
     const input = document.createElement('input');
-    input.type = 'file'; input.multiple = true; input.accept = '.pdf,.mscz,.mxl,.musicxml,.xml';
+    input.type = 'file'; input.multiple = true; input.accept = '.pdf,.mscz,.mxl,.musicxml,.xml,.ly';
     input.setAttribute('aria-label', 'Import scores');
     const search = document.createElement('input');
     search.type = 'search'; search.placeholder = 'Search songs'; search.setAttribute('aria-label', 'Search songs');

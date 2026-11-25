@@ -14,6 +14,10 @@ const template = [
   '{% if part == "LyricsFake" %}\\lyricmode { one two three four }{% endif %}',
 ].join('\n');
 const songPath = 'src/pop/practice_tune.ly.tera';
+const localLilyPond = [
+  '\\header { title = "Local LilyPond" composer = "A Composer" }',
+  '\\score { \\new Staff { c4 d e f | } }',
+].join('\n');
 function blobHash(source) {
   return createHash('sha1').update('blob ' + Buffer.byteLength(source) + '\0').update(source).digest('hex');
 }
@@ -136,7 +140,44 @@ for (const url of ['/pod.html', '/rostrum.html', pathToFileURL(path.resolve('bui
   });
 }
 
-test('installed PWA can run both OpenBook WASMs offline', async ({ page, context }) => {
+test('standalone HTML opens a local .ly and imports its original bytes offline', async ({ page, context }) => {
+  const url = pathToFileURL(path.resolve('build/rostrum.html')).href;
+  const mock = await mockOpenBook(context, url);
+  await context.setOffline(true);
+  await page.goto(url);
+  await page.waitForFunction(() => !!window._menu_);
+  await page.evaluate(async () => {
+    await _bookshelf_.configure({ kind: 'indexeddb' });
+    _menu_.notify('score/open/up');
+  });
+  const panel = page.locator('[data-tag="OpenPanel"]');
+  await panel.getByText('Local', { exact: true }).click();
+  await page.evaluate(() => { _FileSrc_.get('Local').nativeUnavailable = true; });
+  const chooser = page.waitForEvent('filechooser');
+  await panel.locator('.Local').click();
+  await (await chooser).setFiles({ name: 'local.LY', mimeType: 'text/plain', buffer: Buffer.from(localLilyPond) });
+  await expect(page.getByRole('dialog', { name: 'Import opened score to Library' })).toBeVisible();
+  expect(await page.evaluate(() => ({
+    name: _score_.name,
+    saveName: _score_.saveName,
+    pages: _score_.music.numPages,
+    font: _score_.music.native.viewScoreFont,
+  }))).toEqual({ name: 'local.LY', saveName: 'local.mscz', pages: 1, font: 'original' });
+  await page.getByRole('button', { name: 'Import to Library', exact: true }).click();
+  await page.getByRole('button', { name: 'Import into library', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => !!_score_?.libraryDocumentId)).toBe(true);
+  const stored = await page.evaluate(async () => {
+    const { file } = await _bookshelf_.call('read', { id: _score_.libraryDocumentId });
+    const songs = await _bookshelf_.call('search', { query: 'local' });
+    return { raw: await file.text(), songs: songs.length };
+  });
+  expect(stored).toEqual({ raw: localLilyPond, songs: 1 });
+  expect(mock.external).toEqual([]);
+  expect(mock.catalogs).toBe(0);
+  expect(mock.blobs).toBe(0);
+});
+
+test('installed PWA can open local .ly and run the OpenBook converter offline', async ({ page, context }) => {
   test.skip(!fs.existsSync(path.resolve('build/pages/index.html')), 'Build the Pages edition first');
   test.setTimeout(60000);
   const mock = await mockOpenBook(context, '/pages/index.html');
@@ -147,11 +188,16 @@ test('installed PWA can run both OpenBook WASMs offline', async ({ page, context
   const xml = await page.evaluate(async source => {
     const pages = window._rostrumPages_;
     const api = await import(pages.url('lilypond.mjs'));
-    const convert = await api.loadLilyPond(await pages.bytes('lilypond.wasm.gz'));
-    const expand = await api.loadLilyPondTera(await pages.bytes('lilypond-tera.wasm.gz'));
-    return new TextDecoder().decode(convert(expand(new TextEncoder().encode(source))));
+    const { toMusicXml, expandTemplate } = await api.loadLilyPond(await pages.bytes('lilypond.wasm.gz'));
+    return new TextDecoder().decode(toMusicXml(expandTemplate(new TextEncoder().encode(source))));
   }, template);
   expect(xml).toContain('Practice Tune');
+  await page.waitForFunction(() => !!window._Score_ && !!window._menu_);
+  const loaded = await page.evaluate(async source => {
+    const score = await new _Score_().init(null, null, 'cached.ly', new TextEncoder().encode(source));
+    return { pages: score.music.numPages, name: score.name };
+  }, localLilyPond);
+  expect(loaded).toEqual({ pages: 1, name: 'cached.ly' });
   expect(mock.catalogs).toBe(0);
   expect(mock.blobs).toBe(0);
   expect(mock.external).toEqual([]);

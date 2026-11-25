@@ -1,4 +1,5 @@
 // +skip
+import { convertLilyPond, isLilyPond } from './lilypond.js';
 import { exchangeLibraryChanges, resolveLibraryGeneration, LibraryAutoSync } from './bookshelf-sync.js';
 import { libraryEntityId, hashLibraryBytes } from './bookshelf-format.js';
 import { LibraryTransferQueue } from './bookshelf-transfers.js';
@@ -615,9 +616,10 @@ class BookshelfStore extends EventTarget {
     return this.call('list',filters);
   }
   async analyze(file, previewScore = null) {
-    if (!/\.(pdf|mscz|mxl|musicxml|xml)$/i.test(file.name)) throw new Error('Unsupported score format');
+    if (!/\.(pdf|mscz|mxl|musicxml|xml|ly)$/i.test(file.name)) throw new Error('Unsupported score format');
     const entries = [];
-    const fileHash = await hashLibraryBytes(await file.arrayBuffer());
+    const bytes = await file.arrayBuffer();
+    const fileHash = await hashLibraryBytes(bytes);
     if (/\.pdf$/i.test(file.name)) {
       const analysis = previewScore || await this.scores.preview(file);
       const pdf = analysis.mozDoc;
@@ -645,7 +647,9 @@ class BookshelfStore extends EventTarget {
     if (!entries.length) {
       let title = file.name.replace(/\.[^.]+$/, ''), composer = '', source = 'filename';
       if (!/\.pdf$/i.test(file.name)) {
-        const files = await this.call('musicMetadataFiles', { file });
+        const files = isLilyPond(file.name)
+          ? { 'score.musicxml': new TextDecoder().decode(previewScore?.music?.lilyPondXml ?? await convertLilyPond(bytes)) }
+          : await this.call('musicMetadataFiles', { file });
         let names = Object.keys(files).filter(name => !name.startsWith('META-INF/'));
         if (files['META-INF/container.xml']) {
           const container = new DOMParser().parseFromString(files['META-INF/container.xml'], 'application/xml');

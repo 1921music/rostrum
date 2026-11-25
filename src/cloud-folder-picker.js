@@ -118,7 +118,7 @@ class CloudFolderPicker {
         button.innerHTML = iconSvg('Folder',{size:'22px'}); const label = document.createElement('span'); label.textContent = name; label.translate = false; button.append(label);
         button.onclick = () => this.navigate(pathJoin(path,name)); this.list.append(button);
       }
-      const files = this.pickFiles ? Object.keys(directory.files || {}).filter(name => /\.(pdf|mscz|mxl|musicxml|xml)$/i.test(name)).sort((a,b) => a.localeCompare(b)) : [];
+      const files = this.pickFiles ? Object.keys(directory.files || {}).filter(name => /\.(pdf|mscz|mxl|musicxml|xml|ly)$/i.test(name)).sort((a,b) => a.localeCompare(b)) : [];
       for (const name of files) {
         const key = JSON.stringify([path,name]), row = document.createElement('label'); row.className = 'CloudFolderPicker__file';
         const input = document.createElement('input'); input.type = 'checkbox'; input.checked = this.selectedFiles.has(key);

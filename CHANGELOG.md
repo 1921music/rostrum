@@ -1,5 +1,14 @@
 # Changelog / 変更履歴
 
+## 1.2.1 — Local LilyPond files
+
+- Open local `.ly` scores directly from File → Open, including offline.
+  Library imports keep the original LilyPond file. Standalone exports use MSCZ.
+- Use one LilyPond WASM for local scores and OpenBook template expansion and
+  conversion. The installed PWA caches the converter for offline use.
+- Update the score engine to use browser RegExp and position lyric separators
+  consistently.
+
 ## 1.2.0 — Score engine update
 
 - Update the bundled score engine and LilyPond converter. The engine can
