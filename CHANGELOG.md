@@ -1,5 +1,11 @@
 # Changelog / 変更履歴
 
+## 1.2.5 — Dropbox folder access
+
+- Request `files.metadata.read` so Rostrum can list Dropbox files and folders.
+- Read Dropbox, OneDrive, and Google Drive public OAuth identifiers from
+  `cloud-oauth.json` in development and distribution builds.
+
 ## 1.2.4 — Faster All scores search
 
 - Show All scores search results immediately using cached device and sync

@@ -373,6 +373,18 @@ mise exec -- python build.py --cert
 
 Navigate to `https://localhost:9876/pod.html` to use the application.
 
+### Cloud OAuth app registration
+
+`cloud-oauth.json` in the repository root holds the public OAuth identifiers.
+Set `dropboxAppKey` to the App key from the Dropbox Developer Console,
+`oneDriveClientId` to the Entra Application (client) ID, and
+`googleDriveClientId` to the Google OAuth client ID.
+
+Run `mise exec -- node build_browser_fs.mjs` after changing the file for the
+development server. The standalone, Pages, and extension builds read it when
+building. The generated JavaScript exposes these public identifiers to the
+browser. Keep app secrets, access tokens, and refresh tokens out of this file.
+
 ### Build System
 
 MSCZ/MusicXML integration and rebuilding its submodule-based WASM engine are described

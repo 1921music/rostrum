@@ -26,6 +26,7 @@ import { Score } from "./score.js";
 import { PdfRangeSource, pdfLoadingFor } from "./pdf-loading.js";
 import { panels } from "./panel.js";
 import { hashLibraryBytes, isVersionedLibraryName } from './bookshelf-format.js';
+import './oauth-config.js';
 // -skip
 
 let scoreFileMimeType = name => name.toLowerCase().endsWith('.sqlite') ? 'application/vnd.sqlite3'
@@ -1049,7 +1050,7 @@ class GDriveSrc (i.e. Google Drive);
 
 class GDriveSrc extends CachedSrc {
   source = Score.sources.gdrive;
-  clientId = "1049752786050-72rqerj64c1l1vqk26r28qtcahfd6i3v.apps.googleusercontent.com";
+  clientId = globalThis._rostrumOAuthConfig_.googleDriveClientId;
 
   filesUrl = "https://www.googleapis.com/drive/v3/files/";
   uploadUrl = "https://www.googleapis.com/upload/drive/v3/files/";
@@ -1456,8 +1457,8 @@ class DbxSrc extends CachedSrc {
   source = Score.sources.dbx;
   authUrl = "https://www.dropbox.com/oauth2/authorize";
   extraAuthParams = "&token_access_type=offline";
-  clientId = "erqcrdytyixn6h7";
-  scopes = "files.content.write files.content.read";
+  clientId = globalThis._rostrumOAuthConfig_.dropboxAppKey;
+  scopes = "files.content.write files.content.read files.metadata.read";
   tokenUrl = "https://api.dropbox.com/oauth2/token/";
 
   filesUrl = "https:/\/api.dropboxapi.com/2/files/";
@@ -1706,7 +1707,7 @@ class ODriveSrc (i.e. Microsoft OneDrive)
 **/
 class ODriveSrc extends CachedSrc {
   source = Score.sources.odrive;
-  clientId = "b81faf82-539b-4759-bcc9-8fdac6c7ceba";
+  clientId = globalThis._rostrumOAuthConfig_.oneDriveClientId;
   authUrl = "https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize";
   tokenUrl = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token";
   scopes = "Files.ReadWrite.All offline_access";

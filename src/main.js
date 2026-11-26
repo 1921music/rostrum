@@ -67,6 +67,7 @@ window.pdfjsLib.GlobalWorkerOptions.workerPort = new Worker("pdf.worker.min.mjs"
 // #include src/layout.js minified
 // #include src/smufl.js minified
 // #include src/panel.js minified
+// #include build/oauth-config.js
 // #include src/file.js minified
 // #include src/cloud-folder-picker.js minified
 // #include src/bookshelf-format.js minified
