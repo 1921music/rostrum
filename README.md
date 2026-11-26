@@ -1,6 +1,6 @@
 # Rostrum
 
-**Version 1.2.3** · [Open Rostrum](https://1921music.github.io/rostrum/) · [Download standalone HTML](https://github.com/1921music/rostrum/releases/latest) · [Experimental wink page-turner](https://1921music.github.io/rostrum/wink-page-turn/)
+**Version 1.2.4** · [Open Rostrum](https://1921music.github.io/rostrum/) · [Download standalone HTML](https://github.com/1921music/rostrum/releases/latest) · [Experimental wink page-turner](https://1921music.github.io/rostrum/wink-page-turn/)
 
 > This is a fork of [studiop5/podium](https://github.com/studiop5/podium), branched
 > at v2.3.0 and rebased onto v2.3.1, for use as a music stand on an Android tablet. What it adds and why —
@@ -101,7 +101,7 @@ save format, engine build and current limits.
 
 ## 日本語
 
-### Rostrum 1.2.3
+### Rostrum 1.2.4
 
 **[Rostrum を開く](https://1921music.github.io/rostrum/)** — インストールせず、ブラウザですぐ使えます。
 

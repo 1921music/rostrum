@@ -191,3 +191,70 @@ test('library mutations clear the saved search, while refresh and file status do
  await expect(search).toHaveValue('');await expect(rows).toHaveCount(3);
  await page.reload();await expect(search).toHaveValue('');await expect(rows).toHaveCount(3);
 });
+
+test('opening a score or song from Library parks the expanded ring menu', async ({ page }) => {
+  await page.setViewportSize({ width:390, height:844 });
+  await start(page, '/rostrum.html');
+  await importScores(page, 1);
+  const { selectLibraryView } = require('./library-ui-helpers');
+  await page.evaluate(async () => {
+    const playlist = await _bookshelf_.createCollection('playlists', 'Set list');
+    const [song] = await _bookshelf_.records('entries');
+    await _bookshelf_.addToCollection('entries', song.id, playlist.id);
+  });
+
+  for (const [view, title] of [['documents', 'Study 01.pdf'], ['entries', 'Study 1'], ['playlists', 'Study 1']]) {
+    await page.evaluate(() => { _menu_.center(); _menu_.showLibrary(); });
+    expect(await page.evaluate(() => _menu_.collapsed)).toBe(false);
+    await selectLibraryView(page, view);
+    if (view === 'playlists') await page.getByLabel('Collection', { exact:true }).selectOption({ label:'Set list' });
+    await page.getByRole('button', { name:title, exact:true }).click();
+    await page.getByRole('button', { name:'Open score', exact:true }).click();
+    await expect(surface(page)).toBeHidden();
+    await expect.poll(() => page.evaluate(() => {
+      const { left, top } = _menu_.elm.getBoundingClientRect();
+      return { collapsed:_menu_.collapsed, left, top };
+    })).toEqual({ collapsed:true, left:0, top:0 });
+  }
+});
+
+test('All scores searches use cached status and update existing rows after a library change',async({page})=>{
+ await page.setViewportSize({width:390,height:844});
+ await start(page); await importScores(page,3);
+ const {selectLibraryView}=require('./library-ui-helpers');
+ await selectLibraryView(page,'documents');
+ const search=page.getByPlaceholder('Search scores',{exact:true});
+ const rows=page.locator('.Bookshelf__row');
+ await expect(rows).toHaveCount(3);
+ await expect(rows.first().getByLabel('Local file status')).toContainText('On this device');
+ await page.evaluate(async()=>{
+  const state=await _bookshelf_.availability();
+  const original=_bookshelf_.availability;
+  window.stateChecks=0; window.referenceReads=0;
+  _bookshelf_.availability=()=>new Promise(resolve=>{
+   window.stateChecks++;
+   window.completeStateCheck=()=> {
+    _bookshelf_.availability=original;
+    resolve(new Map([...state].map(([id,file])=>[id,{...file,pinned:true}])));
+   };
+  });
+  const records=_bookshelf_.records.bind(_bookshelf_);
+  _bookshelf_.records=(...args)=>{window.referenceReads++; return records(...args);};
+ });
+ await search.fill('Study 02');
+ await expect(rows).toHaveCount(1);
+ await expect(rows.first().getByLabel('Local file status')).toContainText('On this device');
+ expect(await page.evaluate(()=>[stateChecks,referenceReads])).toEqual([0,0]);
+ await page.evaluate(()=>_bookshelf_.notifyData());
+ await expect.poll(()=>page.evaluate(()=>stateChecks)).toBe(1);
+ await search.fill('Study 03');
+ await expect(rows).toHaveCount(1);
+ await expect(rows.first()).toContainText('Study 03');
+ await expect(rows.first().getByLabel('Local file status')).not.toContainText('Kept offline');
+ await page.evaluate(()=>{
+  window.searchRow=document.querySelector('.Bookshelf__row');
+  completeStateCheck();
+ });
+ await expect(rows.first().getByLabel('Local file status')).toContainText('Kept offline');
+ expect(await page.evaluate(()=>[stateChecks,referenceReads,searchRow===document.querySelector('.Bookshelf__row')])).toEqual([1,0,true]);
+});

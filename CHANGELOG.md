@@ -1,5 +1,13 @@
 # Changelog / 変更履歴
 
+## 1.2.4 — Faster All scores search
+
+- Show All scores search results immediately using cached device and sync
+  status. Refresh the status labels and download controls in the background
+  when the library changes.
+- Reuse the library's tag and collection data between searches.
+- Park the ring menu in the upper-left corner when opening a score from Library.
+
 ## 1.2.3 — PDF loading and reading position
 
 - Choose PDF loading under Settings → PDF loading. Files on the device load in

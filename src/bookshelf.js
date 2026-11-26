@@ -322,6 +322,7 @@ class BookshelfView {
       this.refresh();
     };
     panel.listeners.push(listen(this.model,'contentchange',() => {
+      this.invalidateScoreReferences?.();
       search.value = ''; this.refresh?.();
     }));
     const status = document.createElement('div'); status.setAttribute('role', 'status');
@@ -350,7 +351,10 @@ class BookshelfView {
         this.refresh?.();
       },50);
     };
-    panel.listeners.push(listen(this.model,'datachange',refreshAfterChange));
+    panel.listeners.push(listen(this.model,'datachange',() => {
+      this.invalidateScoreAvailability?.();
+      if (mode.value !== 'documents' || this.model.storageDeleted) refreshAfterChange();
+    }));
     panel.listeners.push(listen(this.elm,'focusout',() => { if (this.refreshNeeded) { this.refreshNeeded = false; refreshAfterChange(); } }));
     panel.listeners.push(listen(document,'selectionchange',() => {
       if (this.refreshNeeded && window.getSelection().isCollapsed) { this.refreshNeeded = false; refreshAfterChange(); }
@@ -358,6 +362,7 @@ class BookshelfView {
     const updatePermission = () => {
       permission.hidden = !this.model.permissionRequired;
       permissionMessage.textContent = 'Access is required for library folder: ' + (this.model.storage?.directory?.name || '');
+      if (!this.model.permissionRequired) this.invalidateScoreAvailability?.();
     };
     panel.listeners.push(listen(this.model, 'permissionchange', updatePermission));
     updatePermission();
@@ -634,6 +639,66 @@ class BookshelfView {
       b.onclick = () => run(async () => { await task(); await this.refresh(); }); container.append(b); return b;
     };
     let references = {};
+    const referenceTables = ['tags', 'entry_tags', 'document_tags', 'bookshelves', 'playlists'];
+    let scoreReferences;
+    this.invalidateScoreReferences = () => { scoreReferences = null; };
+    const loadReferences = () => {
+      const loading = Promise.all(referenceTables.map(table => records(table)));
+      scoreReferences = loading;
+      loading.catch(() => { if (scoreReferences === loading) scoreReferences = null; });
+      return loading;
+    };
+    let scoreAvailability = new Map(), scoreRows = [], scoresRendered = false;
+    let stateStorage = this.model.storage, stateDestination = this.model.destinationId();
+    let stateRevision = 0, requestedRevision = -1, stateScheduled = false, stateLoading = false;
+    const visibleScores = () => mode.value === 'documents' && this.elm.isConnected && !panel.elm.hidden &&
+      !this.model.permissionRequired && !this.model.storageDeleted && !this.model.deletingStorage;
+    const updateScoreRows = () => {
+      for (const update of scoreRows) update(scoreAvailability);
+    };
+    const checkStateContext = () => {
+      const storage = this.model.storage, destination = this.model.destinationId();
+      if (storage === stateStorage && destination === stateDestination) return;
+      if (storage !== stateStorage) this.invalidateScoreReferences();
+      stateStorage = storage; stateDestination = destination;
+      scoreAvailability = new Map();
+      stateRevision++;
+    };
+    const scheduleScoreAvailability = () => {
+      if (!scoresRendered || !visibleScores() || stateLoading || stateScheduled || requestedRevision === stateRevision) return;
+      stateScheduled = true;
+      // Give the displayed results a paint before adding work to the SQLite worker.
+      requestAnimationFrame(() => requestAnimationFrame(async () => {
+        stateScheduled = false;
+        if (!scoresRendered || !visibleScores() || requestedRevision === stateRevision) return;
+        const revision = requestedRevision = stateRevision;
+        stateLoading = true;
+        try {
+          const states = await this.model.availability();
+          if (revision === stateRevision) {
+            scoreAvailability = states;
+            if (visibleScores()) updateScoreRows();
+          }
+        } catch {
+          // Keep the last known labels. A permission or library change can retry.
+        } finally {
+          stateLoading = false;
+          scheduleScoreAvailability();
+        }
+      }));
+    };
+    this.invalidateScoreAvailability = () => {
+      checkStateContext();
+      stateRevision++;
+      if (visibleScores()) updateScoreRows();
+      scheduleScoreAvailability();
+    };
+    panel.listeners.push(listen(this.model,'statuschange',() => {
+      const revision = stateRevision;
+      checkStateContext();
+      if (visibleScores()) updateScoreRows();
+      if (revision !== stateRevision) scheduleScoreAvailability();
+    }));
     const choose = (container, table, title, task) => {
       const options = references[table] || [];
       const select = document.createElement('select'); select.setAttribute('aria-label', title);
@@ -644,6 +709,7 @@ class BookshelfView {
     };
     let generation = 0;
     this.refresh = () => run(async () => {
+      scoresRendered = false;
       this.openBookFilter.hidden = mode.value !== 'entries';
       const openBookRequest = mode.value === 'entries' && includeOpenBook.checked
         ? openBookCatalog().then(songs => ({ songs }), error => ({ error })) : null;
@@ -653,8 +719,9 @@ class BookshelfView {
         this.rowViews?.clear(); this.closeRecord(); updateStatus(); return;
       }
       const current = ++generation;
-      const referenceTables = ['tags', 'entry_tags', 'document_tags', 'bookshelves', 'playlists'];
-      const referenceRows = await Promise.all(referenceTables.map(table => records(table)));
+      const allScores = mode.value === 'documents';
+      checkStateContext();
+      const referenceRows = await (allScores && scoreReferences || loadReferences());
       if (current !== generation) return;
       references = Object.fromEntries(referenceTables.map((table, i) => [table, referenceRows[i]]));
       updateStorageControls();
@@ -675,7 +742,7 @@ class BookshelfView {
       search.placeholder = ['documents','bookshelves'].includes(mode.value) ? 'Search scores' : 'Search songs';
       const rows = await this.model.query({mode:mode.value,collection:collection.value,filters});
       if (current !== generation) return;
-      const availability = await this.model.availability();
+      const availability = allScores ? scoreAvailability : await this.model.availability();
       updateStatus();
       if (current !== generation) return;
       const expanded = new Set([...this.elm.querySelectorAll('details[open][data-record]')].map(elm => elm.dataset.record));
@@ -683,6 +750,7 @@ class BookshelfView {
       if (!selection.isCollapsed && results.contains(selection.anchorNode)) { this.refreshNeeded = true; return; }
       results.replaceChildren();
       this.rowViews = new Map();
+      scoreRows = [];
       this.updateNavigation(mode.value, collection, rows.length, selectedTags.length);
       if (grouped && collection.value) {
         const group = groups.find(g => g.id === collection.value);
@@ -717,6 +785,7 @@ class BookshelfView {
           if (!await checkUnsaved()) return;
           await this.model.openDocument(row.document_id || row.id, row.anchor_json && JSON.parse(row.anchor_json));
           panel.hide();
+          _menu_.park();
         });
         const recordKey = (row.document_id ? 'entries:' : 'documents:') + row.id;
         openButton.onclick = () => { if (!window.getSelection().isCollapsed) return; return panel.fullView ? this.showRecord(recordKey, false) : openRecord(); };
@@ -730,25 +799,36 @@ class BookshelfView {
           if (!window.getSelection().isCollapsed) return;
           if (!event.target.closest('button,summary,details,input,select')) openButton.click();
         });
-        let downloadButton = null;
-        const local = availability.get(row.document_id || row.id);
-        if (local) {
-          const id = row.document_id || row.id;
-          const transfer = this.model.downloadState(id);
+        const id = row.document_id || row.id;
+        let downloadButton = null, updateFileStatus;
+        if (allScores || availability.has(id)) {
           const state = document.createElement('div');
           state.setAttribute('aria-label','Local file status');
-          state.textContent = [transfer.state ? transfer.state === 'running' ? 'Downloading' : 'Download queued' : local.present ? 'On this device' : local.remote ? 'Cloud only' : 'Not on this device',
-            local.pinned && (local.present ? 'Kept offline' : 'Offline download requested'),
-            this.model.hasSyncDestination() ? local.remote ? local.pending ? 'Cloud changes pending' : 'File uploaded' : 'File upload pending' : '', transfer.error].filter(Boolean).join(' · ');
           card.append(state);
-          if (!local.present && !row.unavailable) {
+          if (!row.unavailable && (allScores || !availability.get(id).present)) {
             const download = document.createElement('button'); download.type = 'button'; download.className = 'Bookshelf__download';
-            download.textContent = transfer?.state === 'running' ? 'Downloading…' : transfer?.state ? 'Download next' : transfer.error ? 'Retry download' : 'Download to this device';
-            download.disabled = transfer?.state === 'running' || navigator.onLine === false || !this.model.hasSyncDestination();
             download.onclick = () => run(async () => { await this.model.download(id); });
             downloadButton = download;
             card.append(download);
           }
+          updateFileStatus = states => {
+            const local = states.get(id), transfer = this.model.downloadState(id);
+            const connected = this.model.hasSyncDestination();
+            const text = local && [transfer.state ? transfer.state === 'running' ? 'Downloading' : 'Download queued' : local.present ? 'On this device' : local.remote ? 'Cloud only' : 'Not on this device',
+              local.pinned && (local.present ? 'Kept offline' : 'Offline download requested'),
+              connected ? local.remote ? local.pending ? 'Cloud changes pending' : 'File uploaded' : 'File upload pending' : '', transfer.error].filter(Boolean).join(' · ');
+            state.hidden = !local;
+            if (state.textContent !== (text || '')) state.textContent = text || '';
+            openButton.disabled = !!(row.unavailable || row.deleted_at || this.model.opening?.id === id);
+            if (downloadButton) {
+              const label = transfer.state === 'running' ? 'Downloading…' : transfer.state ? 'Download next' : transfer.error ? 'Retry download' : 'Download to this device';
+              if (downloadButton.textContent !== label) downloadButton.textContent = label;
+              downloadButton.hidden = !local || !!local.present;
+              downloadButton.disabled = transfer.state === 'running' || navigator.onLine === false || !connected;
+            }
+          };
+          updateFileStatus(availability);
+          if (allScores) scoreRows.push(updateFileStatus);
         }
         if (mode.value === 'history') {
           const info = document.createElement('div'); info.textContent = row.deleted_at ? 'Deleted score' : row.replaced_by_id ? 'Previous version' : 'Current version'; card.append(info);
@@ -836,9 +916,21 @@ class BookshelfView {
           button(card, 'Save song details', () => this.model.saveSong(row,{composer:composer.value,aliases:aliases.value,pageIndex:Number(page.value) - 1}));
         } else {
           recordSection('Offline storage');
-          if (local?.pinned) button(card,'Stop keeping offline',() => this.model.pinFile(row.id,false));
-          else button(card,'Keep offline',() => this.model.keepOffline([row.id]));
-          if (local?.present) button(card,'Release download',() => this.model.releaseDownload(row.id)).disabled = !!local.pinned;
+          const pin = button(card,'Keep offline',() => {
+            const local = (allScores ? scoreAvailability : availability).get(row.id);
+            return local?.pinned ? this.model.pinFile(row.id,false) : this.model.keepOffline([row.id]);
+          });
+          const release = button(card,'Release download',() => this.model.releaseDownload(row.id));
+          const updateOffline = states => {
+            const local = states.get(row.id);
+            const text = local?.pinned ? 'Stop keeping offline' : 'Keep offline';
+            if (pin.textContent !== text) pin.textContent = text;
+            pin.disabled = allScores && !local;
+            release.hidden = !local?.present;
+            release.disabled = !!local?.pinned;
+          };
+          updateOffline(availability);
+          if (allScores) scoreRows.push(updateOffline);
           recordSection('Songs');
           button(card, 'Edit songs', () => this.model.editSongs(row.id));
           button(card, 'Rebuild song index', () => this.model.reindex(row.id));
@@ -871,6 +963,8 @@ class BookshelfView {
       }
       if (this.selectedRecord && this.rowViews.has(this.selectedRecord)) this.showRecord(this.selectedRecord, expanded.has(this.selectedRecord));
       else this.closeRecord();
+      scoresRendered = allScores;
+      if (allScores) scheduleScoreAvailability();
       if (showOpenBook) {
         const external = document.createElement('section');
         external.setAttribute('aria-label', 'OpenBook results');
@@ -936,6 +1030,7 @@ class BookshelfView {
                   await score.init(null, null, song.filename.replace(/\.ly\.tera$/, '.musicxml'), preview.musicXml);
                 }
                 panel.hide();
+                _menu_.park();
               } catch (error) {
                 const link = document.createElement('a'); link.href = openBookSourceUrl(song);
                 link.target = '_blank'; link.rel = 'noopener noreferrer'; link.textContent = 'Open on GitHub';

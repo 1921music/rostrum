@@ -78,8 +78,10 @@ for (const url of ['/pod.html', '/rostrum.html', pathToFileURL(path.resolve('bui
     await expect(external.getByRole('button', { name: 'Practice Tune' })).toBeVisible();
     expect(mock.catalogs).toBe(1);
     expect(mock.blobs).toBe(0);
+    await page.evaluate(() => { if (_menu_.collapsed) _menu_.center(); });
     await external.getByRole('button', { name: 'Practice Tune' }).click();
     await expect.poll(() => page.evaluate(() => _score_?.music?.native.viewScoreFont)).toBe('musejazz');
+    await expect.poll(() => page.evaluate(() => _menu_.collapsed)).toBe(true);
     expect(await page.evaluate(() => _score_.music.native.viewShowLyrics)).toBe(true);
     expect(await page.evaluate(async () => (await _bookshelf_.call('list')).length)).toBe(0);
 
