@@ -62,6 +62,7 @@ import { Layout } from "./layout.js";
 import { Score } from "./score.js";
 import { smuflTable } from "./smufl.js";
 import { Clock, Metronome, Piano, Review, Stopwatch, Volume } from "./tool.js";
+import { pdfCloudServices, pdfLoadingUnits } from "./pdf-loading.js";
 export { Panel, panels, EditPanel, ScreenPanel, CurtainPanel };
 
 // -skip
@@ -4298,6 +4299,62 @@ class ScoreDisplayControls {
   }
 }
 
+class PdfLoadingPanel extends MenuGroupPanel {
+  constructor(cell) {
+    super(cell);
+    const view = window._viewState_;
+    const controls = (section, name, read, write, inherit = false) => {
+      const mode = document.createElement('select');
+      mode.setAttribute('aria-label', name + ' PDF loading');
+      if (inherit) mode.add(new Option('Use cloud default', ''));
+      mode.add(new Option('Read whole file', 'whole'));
+      mode.add(new Option('Selected page first', 'page'));
+      const units = document.createElement('select');
+      units.setAttribute('aria-label', name + ' PDF read size');
+      for (const size of pdfLoadingUnits) units.add(new Option(size + ' KiB', size));
+      const unitLabel = document.createElement('label');
+      unitLabel.append(document.createTextNode('Read size '), units);
+      unitLabel.style.marginInlineStart = '.5em';
+      const refresh = () => {
+        const saved = read();
+        mode.value = saved?.mode || '';
+        units.value = saved?.chunkKiB ?? view.pdfLoading.cloud.chunkKiB;
+        unitLabel.hidden = mode.value !== 'page';
+      };
+      const change = () => {
+        write(mode.value ? {mode:mode.value, chunkKiB:Number(units.value)} : null);
+        view.save();
+        for (const update of this.refreshControls) update();
+      };
+      mode.onchange = units.onchange = change;
+      section.append(mode, unitLabel);
+      this.refreshControls.push(refresh);
+      refresh();
+    };
+    this.refreshControls = [];
+    const resume = document.createElement('input');
+    resume.type = 'checkbox';
+    const resumeLabel = document.createElement('label');
+    resumeLabel.append(resume, document.createTextNode(' Open at the last-read page'));
+    this.body.append(resumeLabel);
+    this.refreshControls.push(() => {resume.checked = view.pdfLoading.resumePage;});
+    resume.onchange = () => {view.pdfLoading.resumePage = resume.checked; view.save();};
+    controls(this.section('Local files'), 'Local', () => view.pdfLoading.local, value => {view.pdfLoading.local = value;});
+    controls(this.section('Cloud default'), 'Cloud default', () => view.pdfLoading.cloud, value => {view.pdfLoading.cloud = value;});
+    for (const name of pdfCloudServices) {
+      const label = name === 'Drive' ? 'Google Drive' : name;
+      controls(this.section(label), label, () => view.pdfLoading.services[name], value => {
+        if (value) view.pdfLoading.services[name] = value;
+        else delete view.pdfLoading.services[name];
+      }, true);
+    }
+  }
+  show() {
+    for (const refresh of this.refreshControls) refresh();
+    return super.show();
+  }
+}
+
 class DisplaySettingsPanel extends MenuGroupPanel {
   constructor(cell) {
     super(cell);
@@ -4410,6 +4467,7 @@ class NavigationPanel extends MenuGroupPanel {
 
 let panels = window._panels_ = {
   LibraryPanel,
+  PdfLoadingPanel,
   DisplaySettingsPanel,
   TransferPanel,
   PageAdvancedPanel,

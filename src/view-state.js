@@ -1,6 +1,7 @@
 // +skip
 import { toast } from './common.js';
 import { Layout } from './layout.js';
+import { normalizePdfLoading } from './pdf-loading.js';
 export { DeviceViewState, sharedViewSettings };
 // -skip
 
@@ -20,6 +21,7 @@ class DeviceViewState {
   constructor(menu) {
     this.menu = menu; this.state = null; this.loading = 0; this.writes = Promise.resolve();
     this.openBook = { include: true, showLyrics: true, font: 'musejazz' };
+    this.pdfLoading = normalizePdfLoading();
     this.journalKey = 'rostrum-device-view-pending';
     this.viewport = {w:innerWidth,h:innerHeight};
     this.defaults = JSON.parse(menu.stashDefaults);
@@ -77,6 +79,7 @@ class DeviceViewState {
       showLyrics: raw.openBook?.showLyrics !== false,
       font: choice(raw.openBook?.font, ['musejazz', 'original'], 'musejazz'),
     };
+    state.pdfLoading = normalizePdfLoading(raw.pdfLoading);
     return state;
   }
   async load() {
@@ -89,6 +92,7 @@ class DeviceViewState {
     catch { /* IndexedDB still works if localStorage is unavailable. */ }
     if (pending) this.state = pending;
     if (this.state) this.openBook = { ...this.state.openBook };
+    if (this.state) this.pdfLoading = this.state.pdfLoading;
     this.apply();
     // Final interactions commit on the next task, after click/change handlers;
     // continuous slider/wheel input is coalesced. Keep the DB open so pagehide
@@ -145,7 +149,7 @@ class DeviceViewState {
     }
     return this.normalize({version:1,active:rings.layout.stash.active,
       layouts:Object.fromEntries(Object.entries(rings.layout.cells).filter(([key])=>['book','horizontal','vertical','table'].includes(key)).map(([key,cell])=>[key,cell.stash])),
-      display:rings.score.cells.details.stash,magnify:rings.page.cells.magnify.stash,menu,openBook:this.openBook});
+      display:rings.score.cells.details.stash,magnify:rings.page.cells.magnify.stash,menu,openBook:this.openBook,pdfLoading:this.pdfLoading});
   }
   schedule(delay = 100) {
     if (this.loading) return;

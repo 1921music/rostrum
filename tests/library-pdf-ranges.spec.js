@@ -73,6 +73,7 @@ for (const [url,storage] of [['/pod.html',null],['/rostrum.html','indexeddb'],[p
     await page.reload();
     await page.waitForFunction(() => window._bookshelf_ && window._menu_);
     await page.evaluate(() => {
+       _viewState_.pdfLoading.local = {mode:'page',chunkKiB:64};
       window.pdfProbe = {reads:[],pages:[],renders:[]};
       const read = Blob.prototype.arrayBuffer;
       Blob.prototype.arrayBuffer = function (...args) {
@@ -152,6 +153,7 @@ test('a local range read failure rejects opening and permits retry', async ({pag
   const result = await page.evaluate(async () => {
     const pdf = await PDFLib.PDFDocument.create(); pdf.addPage([300,400]);
     const doc = await _bookshelf_.import(new File([await pdf.save()],'Retry.pdf'));
+    _viewState_.pdfLoading.local.mode = 'page';
     const read = Blob.prototype.arrayBuffer;
     Blob.prototype.arrayBuffer = async function () {throw new Error('Local read failed');};
     let error;

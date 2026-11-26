@@ -847,6 +847,10 @@ class Layout {
       _score_.numbers.pn = pn;
       _body_.dispatchEvent(new CustomEvent("NUMBERS", { detail: {sender:this} }));
     }
+    if (_score_ === this.score) {
+      if (this.score.pdfForeground && this.score.pgs[pn-1]?.mozPn !== this.score.pdfTarget) this.score.finishPdfForeground();
+      this.score.recordRecentPdfPage();
+    }
   }
 
   pagerClaim(e) {
@@ -1632,7 +1636,7 @@ class BookLayout extends Layout {
       let fadeMs = 250, fade = "";
       try {
         const visible = pn === pn0 + 3 ? [3,2] : [2,3];
-        for (let [slot, nonblocking] of [...visible.map(slot => [slot,false]), [0, true], [1, true], [4, true], [5, true]])
+        for (let [slot, nonblocking] of [...visible.map((slot,index) => [slot,!!this.score.pdfForeground && index > 0]), [0, true], [1, true], [4, true], [5, true]])
           await this.pgMount(pn0 + slot, slot, nonblocking);
         // (after layoutSlots: it re-appends the slots, which would cancel a transition under way)
         this.layoutSlots();
@@ -2437,6 +2441,7 @@ class TableLayout extends Layout {
     // rows are added. This works fine for initial builds, but is too much if
     // we're rebuilding after a cut or paste.
     this.animated = animated;
+    this.pdfThumbnailBuild = null;
     if(this.active) {
       this.active.classList.remove("TableLayout__pg-active");
       this.active.querySelector(".canvas-container")?.remove();
@@ -2474,6 +2479,21 @@ class TableLayout extends Layout {
 
     // position layout for start of pg generation animation (a noop if this.animated == false)
     this.toXY(Layout.margin, Layout.margin + gridMargin + pgHeight / 2);
+
+    if (score.pdfForeground) {
+      const build = this.pdfThumbnailBuild = Symbol();
+      grid.style.height = toEm(this.gridCoords.at(-1).top + pgHeight);
+      for (const {pn} of this.gridCoords) {
+        const page = await this.buildPg(pn,{placeholder:true});
+        if (this.destroyed || this.pdfThumbnailBuild !== build) return;
+        grid.append(page);
+      }
+      this.buildAux();
+      this.fillPdfThumbnails(build).catch(error => {
+        if (!this.destroyed) console.warn('Could not build PDF thumbnails',error);
+      });
+      return;
+    }
 
     // Now add all pages
     if(this.score.pgs.find((pg) => pg.thumbElm == null)) { 
@@ -2559,11 +2579,24 @@ class TableLayout extends Layout {
     }
   }
 
-  async buildPg(pn)
+  async fillPdfThumbnails(build) {
+    if (this.score.pdfPaint) await this.score.pdfPaint.promise;
+    for (const {pn} of this.gridCoords) {
+      if (this.destroyed || this.pdfThumbnailBuild !== build) return;
+      const old = this.grid.children.item(pn - 1);
+      if (!old || old === this.active || pn === Number(this.score.numbers.pn)) continue;
+      const thumbnail = await this.buildPg(pn,{activate:false});
+      if (thumbnail && this.pdfThumbnailBuild === build && old === this.grid.children.item(pn - 1) &&
+          old !== this.active && pn !== Number(this.score.numbers.pn)) old.replaceWith(thumbnail);
+    }
+  }
+
+  async buildPg(pn, {placeholder = false, activate = true} = {})
   {  // build elm to hold thumbnail
     let {left, top} = this.gridCoords[pn-1];
     let pg = this.score.pgs[pn - 1];
-    let elm = await this.whileAlive(pg.getThumbElm(false, () => this.destroyed));
+    let elm = placeholder ? helm('<div class="TableLayout__pg"></div>') :
+      await this.whileAlive(pg.getThumbElm(false, () => this.destroyed));
     if(!elm) return;
     elm.classList.remove("TableLayout__pg-active");
     elm.pn = pn;
@@ -2590,9 +2623,9 @@ class TableLayout extends Layout {
     }
     else
       clearChildren(elm);
-    if (pn == _score_.numbers.pn) 
+    if (activate && pn == _score_.numbers.pn)
        await this.buildPgActive(pn, elm) 
-    else this.score.pgUnuse(pg);
+    else if (!placeholder && pn !== Number(this.score.numbers.pn)) this.score.pgUnuse(pg);
     return elm;
   }
 

@@ -96,13 +96,24 @@ class LibraryCloudTransport {
     await this.ensureFormat();
     return listStoredScores({directory:path => this.directory(path)});
   }
-  async readPath(path) {
+  async findFile(path) {
     const parts = path.split('/'), name = parts.pop(), parent = parts.join('/');
     const dir = await this.directory(parent), file = dir?.files[name];
     if (!file) throw Object.assign(new Error('Cloud file is missing: ' + path),{name:'NotFoundError'});
-    return new Blob([await this.source.getFileSrc(this.full(parent),name,dir,file)]);
+    return {path:this.full(parent),name,dir,file};
+  }
+  async readPath(path) {
+    const item = await this.findFile(path);
+    return new Blob([await this.source.getFileSrc(item.path,item.name,item.dir,item.file)]);
   }
   async readScore(doc) { await this.ensureFormat(); return this.readPath(this.scorePath(doc)); }
+  async readScoreRange(doc) {
+    if (!this.source.getPdfRange) return null;
+    await this.ensureFormat();
+    const {file} = await this.findFile(this.scorePath(doc));
+    if (Number(file.size) !== doc.size_bytes) return null;
+    return this.source.getPdfRange(file);
+  }
   async publish(path, file) {
     await this.ensureFormat({create:true});
     return this.publishRaw(path,file,true);

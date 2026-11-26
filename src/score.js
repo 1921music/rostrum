@@ -26,6 +26,7 @@ import { Layout } from "./layout.js";
 import { MusicDocument, isMusicScore, ROSTRUM_SVG_NS } from "./music.js";
 import { Panel, panels, EditPanel } from "./panel.js";
 import { sharedViewSettings } from "./view-state.js";
+import { PdfRangeSource, pdfLoadingFor } from "./pdf-loading.js";
 export { Grid, Pg, Score };
 
 // -skip
@@ -216,6 +217,8 @@ class Pg {
 
   async ensureDimensions() {
     if (this.width != null && this.height != null) return;
+    if (this.score.pdfForeground && this.mozPn !== this.score.pdfTarget) await this.score.pdfForeground.promise;
+    if (this.score.disposed) throw new DOMException("Score disposed", "AbortError");
     const page = await this.score.mozDoc.getPage(this.mozPn);
     const { width, height } = page.getViewport({ scale: 1 });
     this.width = width;
@@ -307,6 +310,7 @@ class Pg {
 
     this.rendering = false;
     this.setZoom(this.zoom);
+    this.score.pdfPageRendered(this);
   }
 
   async inflate(render = true, nonblocking = true) {
@@ -351,6 +355,7 @@ class Pg {
     }
     let pending = this.inflateAux(render).catch(err => {
       if(err.name == 'AbortError') return; // expected when navigation cancels inflation
+      if (this.score.pdfPaint && this.mozPn === this.score.pdfTarget) this.score.finishPdfForeground(false);
       if(nonblocking) console.warn(`Failed to background load/render page ${this.mozPn}:`, err);
       else throw err;
     }).finally(() => {
@@ -1320,6 +1325,7 @@ class Score {
     for (let i = 0; i < recent.length; i++) {
       let entry = recent[i];
       if (entry.source == score.source && (
+          (score.recentFileId && entry.fileId === score.recentFileId) ||
           (entry.path == score.path && (entry.name == score.name || (score.source === Score.sources.local && score.path))) ||
           (score.source === Score.sources.local && score.path && !entry.path && entry.name == score.name))) {
         prev = recent.splice(i, 1)[0];
@@ -1327,6 +1333,8 @@ class Score {
       }
     }
     if (updates) {
+      const fileId = score.recentFileId ?? prev?.fileId;
+      const pageIndex = prev?.fileId === fileId ? prev?.pageIndex : undefined;
       recent.unshift({
         name: score.name,
         source: score.source,
@@ -1334,10 +1342,36 @@ class Score {
         size: updates.size || prev?.size || "?",
         created: "created" in updates ? updates.created : prev?.size || "?",
         modified: "modified" in updates ? updates.modified : prev?.modified || "?",
+        fileId,
+        pageIndex,
       });
     }
     if(recent.length > 20) recent.length = 20; // limit to 20 most recent
     localStorage.setItem("recent", JSON.stringify(recent));
+    score.recordRecentPdfPage?.();
+  }
+
+  static recentPdfPage(source, fileId) {
+    if (!fileId || window._viewState_?.pdfLoading.resumePage === false) return 0;
+    try {
+      const recent = JSON.parse(localStorage.getItem('recent') || '[]');
+      const page = recent.find(entry => entry.source === source && entry.fileId === fileId)?.pageIndex;
+      return Number.isSafeInteger(page) && page >= 0 ? page : 0;
+    } catch { return 0; }
+  }
+
+  recordRecentPdfPage() {
+    if (!this.recentFileId || Score.activeScore !== this) return;
+    const pg = this.pgs[Number(this.numbers?.pn) - 1];
+    if (!pg?.mozPn || !pg.mozCanvas || pg.renderTask) return;
+    try {
+      const recent = JSON.parse(localStorage.getItem('recent') || '[]');
+      const entry = recent.find(item => item.source === this.source && item.fileId === this.recentFileId);
+      if (entry && entry.pageIndex !== pg.mozPn - 1) {
+        entry.pageIndex = pg.mozPn - 1;
+        localStorage.setItem('recent', JSON.stringify(recent));
+      }
+    } catch { /* Reading position is optional when device storage is unavailable. */ }
   }
 
   // meta-info about the score
@@ -1379,11 +1413,11 @@ class Score {
     // @clear if true (default), pasteBuffer is cleared.
   }
 
-  async init(source, path, name, pdfData=null, activate=true, libraryState=null) {
+  async init(source, path, name, pdfData=null, activate=true, libraryState=null, options={}) {
     const view = activate ? window._viewState_ : null;
     await view?.beginLoad();
     try {
-      return await this.initAux(source, path, name, pdfData, activate, libraryState);
+      return await this.initAux(source, path, name, pdfData, activate, libraryState, options);
     } catch(error) {
       await this.dispose();
       view?.apply();
@@ -1393,7 +1427,7 @@ class Score {
     }
   }
 
-  async initAux(source, path, name, pdfData, activate, libraryState) {
+  async initAux(source, path, name, pdfData, activate, libraryState, options) {
     // Initialize a new Score, always called as part of the constructor, ex. await new Score().init(...)
     // @source one of Score.sources, identifies the data source that provides the score's data.
     //  For new scores (no external data sources), this is just null.
@@ -1402,8 +1436,12 @@ class Score {
     // @pdfData PDF bytes, a local library PDF Blob, or null for new scores.
     // @activate make this score the "active" score
 
-    Object.assign(this, { source, path, name });
-    const lazyPdf = pdfData instanceof Blob && libraryState;
+    Object.assign(this, { source, path, name, recentFileId:options.recentFileId });
+    const localPolicy = pdfLoadingFor();
+    const rangeSource = pdfData instanceof PdfRangeSource ? pdfData :
+      pdfData instanceof Blob && localPolicy.mode === 'page' ? PdfRangeSource.local(pdfData,localPolicy.chunkKiB) : null;
+    const lazyPdf = !!(libraryState || rangeSource);
+    const initialPage = (libraryState?.anchor?.type === 'pdf' ? libraryState.anchor.pageIndex : null) ?? options.pageIndex;
     // Reset quality to default; will be overridden by scoreJson if stored in the PDF
     this.quality = 2;
     // Initialize page undo stack
@@ -1467,27 +1505,28 @@ class Score {
       });
       let loadingTask;
       let readFailure;
-      let input = { data: pdfData };
-      if (lazyPdf) {
-        // PDF.js owns the byte cache and requests only missing ranges. Do not
-        // turn the local Blob into a full in-memory buffer or auto-fetch it.
+      let input;
+      if (rangeSource) {
         let rejectRead;
         readFailure = new Promise((resolve,reject) => { rejectRead = reject; });
         const range = new class extends window.pdfjsLib.PDFDataRangeTransport {
-          constructor() { super(pdfData.size, new Uint8Array(), true); }
+          constructor() { super(rangeSource.size, rangeSource.initialData, true); }
           requestDataRange(begin, end) {
-            pdfData.slice(begin,end).arrayBuffer().then(bytes => {
+            rangeSource.read(begin,end).then(bytes => {
               if (!this.aborted) this.onDataRange(begin,new Uint8Array(bytes));
             }).catch(error => {
               if (this.aborted) return;
+              if (rangeSource.abort) error = Object.assign(new Error(error.message,{cause:error}),{name:'PdfRangeError'});
               rejectRead(error);
               loadingTask.destroy().catch(() => {});
             });
           }
-          abort() { this.aborted = true; }
+          abort() { this.aborted = true; rangeSource.abort?.(); }
         }();
-        input = { range, length:pdfData.size, disableAutoFetch:true, disableStream:true };
-      }
+        const target = Number.isSafeInteger(initialPage) && initialPage >= 0 ? initialPage : 0;
+        input = { range, length:rangeSource.size, rangeChunkSize:rangeSource.chunkSize,
+          disableAutoFetch:true, disableStream:true, rostrumInitialPage:target };
+      } else input = { data:pdfData instanceof Blob ? await pdfData.arrayBuffer() : pdfData };
       this.loadingTask = loadingTask = window.pdfjsLib.getDocument({ ...input, worker: Score.pdfWorker });
 
       // detect non-standard or missing features (fonts, non-standard compression, etc)
@@ -1559,10 +1598,19 @@ class Score {
         Object.assign(score.cells.details.stash, defaults.score?.cells?.details);
         this.quality = score.cells.details.stash.quality ?? this.quality;
       }
-      if (lazyPdf) {
+      this.pdfTarget = (Number.isSafeInteger(initialPage) && initialPage >= 0 && initialPage < this.mozDoc.numPages ? initialPage : 0) + 1;
+      if (activate && rangeSource) {
+        this.pdfPaint = Promise.withResolvers();
+        if (this.mozDoc.rostrumPageFirst)
+          this.pdfForeground = Promise.withResolvers();
+      }
+      if (libraryState) {
         this.maxWidth = libraryState.settings.maxWidth;
         this.maxHeight = libraryState.settings.maxHeight;
         if (!(this.maxWidth > 0 && this.maxHeight > 0)) throw new Error('PDF maximum dimensions are missing. Reimport this score.');
+      } else if (rangeSource) {
+        const target = await this.mozDoc.getPage(this.pdfTarget);
+        ({width:this.maxWidth,height:this.maxHeight} = target.getViewport({scale:1}));
       }
       // Local library PDFs already have a common layout size. Individual page
       // dimensions are resolved only when a page is inflated for use.
@@ -1594,9 +1642,50 @@ class Score {
     }
 
     if (libraryState) await this.restoreLibraryState(libraryState, activate);
-    if (activate) await this.goToLibraryAnchor(libraryState?.anchor);
+    if (activate) await this.goToLibraryAnchor(libraryState?.anchor ||
+      (options.pageIndex != null && this.pdfTarget ? {type:'pdf',pageIndex:this.pdfTarget-1} : null));
+    if (this.pdfPaint && this.pgs[Number(_menu_.rings.page.cells.numbers.stash.pn || 1) - 1]?.mozPn !== this.pdfTarget)
+      this.finishPdfForeground();
     if(activate) await this.activate();
+    if (activate && rangeSource && !libraryState) this.pdfDimensions = this.completePdfDimensions().catch(error => {
+      if (!this.disposed && error.name !== 'AbortError') console.warn('Could not measure remaining PDF pages',error);
+    });
     return this;
+  }
+
+  pdfPageRendered(pg) {
+    if (this.pgs[Number(this.numbers?.pn) - 1] === pg) this.recordRecentPdfPage();
+    if (pg.mozPn === this.pdfTarget && this.pdfPaint && !this.pdfPaintPending) {
+      this.pdfPaintPending = true;
+      requestAnimationFrame(() => requestAnimationFrame(() => this.finishPdfForeground()));
+    }
+  }
+
+  finishPdfForeground(shown = true) {
+    if (!this.pdfPaint) return;
+    const paint = this.pdfPaint;
+    this.pdfPaint = null;
+    this.pdfForeground?.resolve();
+    this.pdfForeground = null;
+    paint.resolve(shown && !this.disposed);
+    if (!this.disposed && this.mozDoc?.rostrumPageFirst) this.mozDoc.finishRostrumPageFirst().catch(error => {
+      if (!this.disposed) console.warn('Could not verify the remaining PDF pages',error);
+    });
+  }
+
+  async completePdfDimensions() {
+    if (this.pdfPaint) await this.pdfPaint.promise;
+    for (const page of this.pgs) {
+      if (this.disposed) return;
+      await page.ensureDimensions();
+    }
+    const {maxWidth,maxHeight} = this;
+    this.pgRefresh();
+    const layout = Layout.activeLayout;
+    if (layout?.score === this && (maxWidth !== this.maxWidth || maxHeight !== this.maxHeight)) {
+      await layout.build(false);
+      if (Layout.activeLayout === layout) layout.place();
+    }
   }
 
   async goToLibraryAnchor(anchor) {
@@ -1864,8 +1953,10 @@ class Score {
 
   async disposeAux() {
     if (this.libraryDocumentId && !this.libraryRestoring) await window._bookshelf_.flush(this);
+    this.pdfForeground?.resolve();
     await Promise.allSettled([...this.pendingExports]);
     this.disposed = true;
+    this.finishPdfForeground();
     if(Layout.activeLayout?.score === this) {
       Layout.activeLayout.destructor();
       Layout.activeLayout = null;

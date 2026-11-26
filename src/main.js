@@ -62,6 +62,7 @@ window.pdfjsLib.GlobalWorkerOptions.workerPort = new Worker("pdf.worker.min.mjs"
 // #include src/music.js minified
 // #include src/openbook.js minified
 // #include src/icon.js minified
+// #include src/pdf-loading.js minified
 // #include src/score.js minified
 // #include src/layout.js minified
 // #include src/smufl.js minified

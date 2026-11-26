@@ -1,5 +1,6 @@
 // +skip
 import { Score } from './score.js';
+import { PdfRangeSource, pdfLoadingFor } from './pdf-loading.js';
 import { checkUnsaved, FileSrc } from './file.js';
 import { toast, css, dialog, listen, iconSvg } from './common.js';
 import { openBookCatalog, openBookLoadSong, openBookSearchKey, openBookSourceUrl } from './openbook.js';
@@ -24,6 +25,18 @@ const bookshelfStore = new BookshelfStore({
     preview: async file => new Score().init(null,null,file.name,await file.arrayBuffer(),false),
     review: reviewScoreImport,
     navigate: (score,anchor) => score.goToLibraryAnchor(anchor),
+    async remotePdf(transport, state) {
+      if (!transport.readScoreRange || pdfLoadingFor(transport.source?.source).mode !== 'page' ||
+          !/\.pdf$/i.test(JSON.parse(state.document.metadata_json).originalFilename)) return null;
+      const load = async () => { await transport.connect?.(); return transport.readScoreRange?.(state.document); };
+      const data = await (transport.background ? transport.background(load) : load());
+      if (data instanceof PdfRangeSource) return {range:data};
+      if (data) return {file:new Blob([data],{type:'application/pdf'})};
+      return null;
+    },
+    async readRemotePdf(score) {
+      return new Blob([await score.mozDoc.getData()],{type:'application/pdf'});
+    },
     async open(state,anchor) {
       const settings = JSON.parse(state.document.settings_json);
       const metadata = JSON.parse(state.document.metadata_json);

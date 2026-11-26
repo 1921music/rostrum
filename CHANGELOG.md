@@ -1,5 +1,14 @@
 # Changelog / 変更履歴
 
+## 1.2.3 — PDF loading and reading position
+
+- Choose PDF loading under Settings → PDF loading. Files on the device load in
+  one read by default. Cloud PDFs use page-first loading with 256 KiB blocks
+  where the provider supports verified byte ranges.
+- Override the loading method and block size per cloud service. Cloud Open and
+  Recent resume the last page read on this device by default. Library Songs
+  always open at the selected song's start page.
+
 ## 1.2.2 — Smaller PWA updates
 
 - Keep the release version with the build date and commit in the Pages HTML.

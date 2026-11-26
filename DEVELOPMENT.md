@@ -62,13 +62,19 @@ restore**, and **History and conflicts**. **Sync library now** stays beside the
 save/sync status. Record **⋯** menus group metadata, tags/collections, offline
 storage, songs, replacement and deletion.
 
-Local library PDFs use PDF.js range loading over `Blob.slice()`. Import scans
-page dimensions once and stores only the maximum width and height in document
-settings. Opening a song builds the existing common-size layout from those
-maxima, starts at the song's page, and resolves individual dimensions as pages
-are used. Source PDF page dimensions are not persisted; added blank pages keep
-their explicit dimensions. Saving/exporting may read the whole PDF. Cloud-only
-scores still download and verify the complete file before opening.
+**Settings → PDF loading** stores the device's local and cloud defaults, cloud
+service overrides, and whether to resume the last-read page. The last page for
+cloud Open and Recent is keyed by the service's file ID in local Recent data.
+Songs use their own start page. Local PDF data is read in one pass by default;
+page-first loading can read a local Blob or use validated cloud ranges. A cloud
+response without usable byte ranges uses the full-file download path.
+
+The vendored PDF.js worker supports direct initial lookup for flat page trees.
+`patch_pdfjs.py` documents and reapplies the changes to PDF.js 4.10.38. Page-first
+library loads can display the target before completing and verifying the file
+for offline storage. Library import stores common layout dimensions; individual
+source page dimensions are resolved as needed. Added blank pages retain their
+dimensions. Saving and exporting can load the whole PDF.
 
 Library schema 5 / record format 4 requires a newly imported library; there is
 no migration from earlier versions. `tests/library-pdf-ranges.spec.js` checks

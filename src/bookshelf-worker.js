@@ -676,10 +676,10 @@ const actions = {
       return textMatch && (!tagIds.length || (matchAll ? tagIds.every(t => tags.has(t)) : tagIds.some(t => tags.has(t))));
     });
   },
-  async read({ id }) {
+  async read({ id, allowMissing = false }) {
     const document = sql('SELECT * FROM documents WHERE id=? AND deleted_at IS NULL', [id])[0];
     if (!document) throw new Error('Score not found');
-    return { document, file: await files.read(document.storage_path), annotations:
+    return { document, file: allowMissing ? await localFile(document) : await files.read(document.storage_path), annotations:
       sql('SELECT * FROM annotations WHERE document_id=? AND deleted_at IS NULL', [id]) };
   },
   saveState({ documentId, settings, annotations }) {

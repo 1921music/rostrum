@@ -271,7 +271,7 @@ class BookshelfStore extends EventTarget {
     try { await this.checkingCloud; }
     finally { this.checkingCloud = null; this.notifyStatus(); }
   }
-  async ensureFile(id, transport = this.transport, {priority = 0,front = false,group = '',document = null} = {}) {
+  async ensureFile(id, transport = this.transport, {priority = 0,front = false,group = '',document = null,readFile = null} = {}) {
     if (this.releases.has(id)) throw new Error('Wait for this download to be released.');
     const key = this.transferKey(id,'download',transport);
     if (this.downloads.has(id)) { this.transfers.promote(key,{priority,front}); return this.downloads.get(id); }
@@ -288,7 +288,7 @@ class BookshelfStore extends EventTarget {
         if (!this.cloudSelection?.source) throw new Error('Connect the library cloud to download this score.');
         transport = this.makeCloudTransport(this.cloudSelection.source,this.cloudSelection.path);
       }
-      const transfer = async () => { await transport.connect?.(); return transport.readScore(info.document); };
+      const transfer = async () => { await transport.connect?.(); return readFile ? readFile() : transport.readScore(info.document); };
       const file = await (transport.background ? transport.background(transfer) : transfer());
       this.transport = transport;
       await this.call('installFile',{ id,file }); this.fileErrors.delete(id);
@@ -402,6 +402,40 @@ class BookshelfStore extends EventTarget {
     if (active?.libraryDocumentId === id && !active.disposed && this.scores.navigate) {
       await this.scores.navigate(active,anchor);
       return active;
+    }
+    if (this.scores.remotePdf) {
+      if (this.releases.has(id)) throw new Error('Wait for this download to be released.');
+      const state = await this.call('read', {id,allowMissing:true});
+      if (state.file) return this.scores.open(state,anchor);
+      const transport = this.transport || (this.cloudSelection?.source &&
+        this.makeCloudTransport(this.cloudSelection.source,this.cloudSelection.path));
+      if (transport && navigator.onLine !== false && !this.downloads.has(id)) {
+        const remote = await this.scores.remotePdf(transport,state);
+        if (remote?.file) {
+          await this.ensureFile(id,transport,{priority:100,front:true,document:state.document,readFile:() => remote.file});
+          return this.scores.open(await this.call('read',{id}),anchor);
+        }
+        if (remote?.range) {
+          let score;
+          try { score = await this.scores.open({...state,file:remote.range},anchor); }
+          catch (error) {
+            if (error.name !== 'PdfRangeError') throw error;
+          }
+          if (score) {
+            const cache = async () => {
+              if (score.pdfPaint && !await score.pdfPaint.promise) return;
+              if (score.disposed) return;
+              await this.ensureFile(id,transport,{priority:100,front:true,document:state.document,readFile:async () => {
+                try { if (!score.disposed) return await this.scores.readRemotePdf(score); }
+                catch (error) { if (!score.disposed) throw error; }
+                return transport.readScore(state.document);
+              }});
+            };
+            cache().catch(error => this.warn('Score download could not be saved: ' + error.message));
+            return score;
+          }
+        }
+      }
     }
     await this.ensureFile(id,undefined,{priority:100,front:true});
     const state = await this.call('read', { id });

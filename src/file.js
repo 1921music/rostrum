@@ -23,6 +23,7 @@
 export { checkUnsaved, escapeHtml, pathJoin, FileSrc, FileListView, FileSystemView, LocalFileView };
 import { css, ButtonGroup, clamp, clearChildren, dataIndex, delay, Drag, getBox, helm, iconSvg, listen, dialog, noTranslate, Schedule, strToHash, toast, unlisten } from "./common.js";
 import { Score } from "./score.js";
+import { PdfRangeSource, pdfLoadingFor } from "./pdf-loading.js";
 import { panels } from "./panel.js";
 import { hashLibraryBytes, isVersionedLibraryName } from './bookshelf-format.js';
 // -skip
@@ -287,7 +288,7 @@ class FileSrc {
     const library = window._bookshelf_;
     if (!library) return;
     const importFile = await new Promise(resolve => {
-      const prompt = dialog(`Import <span translate="no">${escapeHtml(file.name)}</span> to Library?<br><br>You can also view it without importing.`,
+      const prompt = dialog(`Import <span translate="no">${escapeHtml(file?.name || score.name)}</span> to Library?<br><br>You can also view it without importing.`,
         { 'Import to Library': { svg:'Open' }, 'View only': { svg:'Open' } }, (_e,_prop,tag,args) => {
           resolve(tag === 'Import to Library'); args.close();
         });
@@ -297,6 +298,9 @@ class FileSrc {
     });
     if (!importFile) return;
     try {
+      await score.pdfDimensions;
+      file ||= new File([await score.mozDoc.getData()],score.name,{type:'application/pdf'});
+      const pdfPage = !score.music && score.pgs[Number(score.numbers?.pn) - 1]?.mozPn;
       const imported = await library.importReviewed(file,{originalLocation:{
         source:score.source,path:score.source === Score.sources.local ? null : score.path ?? null,name:file.name,
       }},score);
@@ -304,7 +308,7 @@ class FileSrc {
       if (imported.deleted_at || imported.replaced_by_id) {
         toast('Score already exists in Library history.'); return;
       }
-      await library.openDocument(imported.id);
+      await library.openDocument(imported.id,pdfPage && !imported.alreadyImported ? {type:'pdf',pageIndex:pdfPage-1} : undefined);
       toast(imported.alreadyImported ? 'Opened existing Library score.' : 'Score imported to Library.');
     } catch (error) { errDialog(error,'Could not import or open the Library copy.'); }
   }
@@ -550,7 +554,7 @@ class LocalSrc extends FileSrc {
     }
     await checkFileSize(file.name, file.size);
     const id = await this.remember(file, handle);
-    return { path: id, name: file.name, data: await file.arrayBuffer(), size: file.size,
+    return { path: id, name: file.name, data: mode === 'open' && /\.pdf$/i.test(file.name) ? file : await file.arrayBuffer(), size: file.size,
       modified: file.lastModified, fileHandle: handle || null };
   }
 
@@ -972,7 +976,7 @@ class CachedSrc extends FileSrc {
         await this.trashDirSrc(path, name, parentDir, dir);
     }
 
-    async getFile(path, name) {
+    async getFile(path, name, mode) {
         checkPath(path,name);
         await this.auth();
         let dir = await this.getDir(path);
@@ -984,7 +988,18 @@ class CachedSrc extends FileSrc {
         await checkFileSize(name, file.size);
 
         // the "name" and "path" vars are are here passed back intact. For a LocalSrc, however, the name may have changed, and the path is unknown.
-        return { path: path, name: name, data: await this.getFileSrc(path, name, dir, file), size: file.size, created: file.created, modified: file.modified };
+        const range = mode === 'open' && /\.pdf$/i.test(name) ? await this.getPdfRange(file) : null;
+        const data = range ?? await this.getFileSrc(path, name, dir, file);
+        return {path,name,data,size:file.size,created:file.created,modified:file.modified,
+          fileId:file.id == null ? null : String(file.id)};
+    }
+
+    async getPdfRange(file) {
+      await window._viewState_?.ready;
+      const policy = pdfLoadingFor(this.source);
+      if (policy.mode !== 'page' || !this.pdfRangeRequest) return null;
+      const request = await this.pdfRangeRequest(file).catch(() => null);
+      return request ? PdfRangeSource.remote(request.fetch,Number(file.size),policy.chunkKiB,request.pinned) : null;
     }
 
     async putFile(path, name, data) {
@@ -1319,6 +1334,11 @@ class GDriveSrc extends CachedSrc {
     if (!response.ok) err(`getFileSrc(${path},${name},...) failed: ${await response.text()}`);
   }
 
+  async pdfRangeRequest(file) {
+    const url = this.filesUrl + file.id + '?q=trashed=false&alt=media';
+    return {fetch:(Range,signal) => fetch(url,{signal,headers:{Range,Authorization:'Bearer ' + this.tokens.access_token}})};
+  }
+
   async renameFileSrc(path, name, newName, srcDir, srcFile) {
     let url = this.filesUrl + srcFile.id;
     let fetchPromise = await fetch(url, {
@@ -1472,6 +1492,7 @@ class DbxSrc extends CachedSrc {
           created: Date.parse(obj.client_modified),
           modified: Date.parse(obj.server_modified),
           size: obj.size,
+          rev: obj.rev,
         };
     }
     return cache[path];
@@ -1578,6 +1599,13 @@ class DbxSrc extends CachedSrc {
     let response = await fetchPromise;
     if (!response.ok) err(`GetFileSrc(${path},${name},...)`, await response.text());
     return await response.arrayBuffer();
+  }
+
+  async pdfRangeRequest(file) {
+    if (!file.rev) return null;
+    return {pinned:true,fetch:(Range,signal) => fetch(this.contentUrl + 'download',{signal,headers:{
+      Range, Authorization:'Bearer ' + this.tokens.access_token, 'Dropbox-API-Arg':dropboxApiArg({path:'rev:' + file.rev}),
+    }})};
   }
 
   async putFileSrc(path, name, data, dir, file, condition = null) {
@@ -1715,6 +1743,7 @@ class ODriveSrc extends CachedSrc {
           created: Date.parse(obj.createdDateTime),
           modified: Date.parse(obj.lastModifiedDateTime),
           size: obj.size,
+          downloadUrl:obj['@microsoft.graph.downloadUrl'],
         };
     };
     return cache[path];
@@ -1829,6 +1858,18 @@ class ODriveSrc extends CachedSrc {
     let response = await fetchPromise;
     if (response.ok) return await response.arrayBuffer();
     err(`getFileSrc(${path},${name},...) failed: ${await response.text()}`);
+  }
+
+  async pdfRangeRequest(file) {
+    let url = file.downloadUrl;
+    if (!url) {
+      const response = await fetch(this.filesUrl + 'items/' + file.id + '?$select=id,@microsoft.graph.downloadUrl',
+        {headers:{Authorization:'Bearer ' + this.tokens.access_token}});
+      if (!response.ok) return null;
+      url = (await response.json())['@microsoft.graph.downloadUrl'];
+    }
+    if (!url || new URL(url).protocol !== 'https:') return null;
+    return {fetch:(Range,signal) => fetch(url,{signal,headers:{Range},referrerPolicy:'no-referrer'})};
   }
 
   async putFileSrc(path, name, data, dir, file) {
@@ -2604,11 +2645,21 @@ class PCloudSrc extends CachedSrc {
      host_permissions.
   **/
   async getFileFromContentHost(file) {
-    let link = await this.request("getfilelink", { fileid: file.id, contenttype: 'application/octet-stream' });
-    if (!link.hosts?.length || !link.path) srcErr("pCloud returned no download location.");
-    let response = await fetch(`https://${link.hosts[0]}${link.path}`, { referrerPolicy: "no-referrer" });
+    let response = await fetch(await this.contentUrlFor(file), { referrerPolicy: "no-referrer" });
     if (!response.ok) srcErr(`pCloud download failed with HTTP ${response.status}.`);
     return await response.arrayBuffer();
+  }
+
+  async contentUrlFor(file) {
+    const link = await this.request('getfilelink',{fileid:file.id,contenttype:'application/octet-stream'});
+    if (!link.hosts?.length || !link.path) srcErr('pCloud returned no download location.');
+    return `https://${link.hosts[0]}${link.path}`;
+  }
+
+  async pdfRangeRequest(file) {
+    if (this.authProvider.contentAccess !== 'link') return null;
+    const url = await this.contentUrlFor(file);
+    return {fetch:(Range,signal) => fetch(url,{signal,headers:{Range},referrerPolicy:'no-referrer'})};
   }
 
   async putFileSrc(_path, name, data, dir, _file) {
@@ -2742,7 +2793,8 @@ class LocalFileView {
     } else {
       if (!await checkUnsaved()) return;
       const path = await this.src.remember(file);
-      const score = await new Score().init(this.source, path, file.name, await file.arrayBuffer());
+      const score = await new Score().init(this.source, path, file.name,
+        /\.pdf$/i.test(file.name) ? file : await file.arrayBuffer());
       score.fileHandle = file.handle || null;
       Score.visit(score, visitUpdate);
       toast('File opened');
@@ -3225,7 +3277,7 @@ class FileListView {
     return new Promise(async (accept, reject) => {
       try {
         let src = FileSrc.get(source);
-        let { path, name, data, size, created, modified, fileHandle } = await src.getFile(requestedPath, requestedName, this.panel.mode);
+        let { path, name, data, size, created, modified, fileHandle, fileId } = await src.getFile(requestedPath, requestedName, this.panel.mode);
         let visitUpdate = { path, size, created, modified };
         if (this.panel.mode == "copy") {
           let ext = this.acceptExt(requestedName);
@@ -3243,14 +3295,23 @@ class FileListView {
         } else {
           // Preserve the original bytes before PDF.js can transfer the buffer
           // to its worker. Import the source file rather than an exported copy.
-          const file = new File([data],name);
-          let score = await new Score().init(source, path, name, data);
+          let file = data instanceof PdfRangeSource ? null : data instanceof File ? data : new File([data],name);
+          const options = fileId && /\.pdf$/i.test(name) ? {recentFileId:fileId,pageIndex:Score.recentPdfPage(source,fileId)} : {};
+          const open = bytes => new Score().init(source,path,name,bytes,true,null,options);
+          let score;
+          try { score = await open(data); }
+          catch (error) {
+            if (!(data instanceof PdfRangeSource) || error.name !== 'PdfRangeError') throw error;
+            const full = await src.getFile(requestedPath,requestedName);
+            file = new File([full.data],name,{type:'application/pdf'});
+            score = await open(full.data);
+          }
           if (fileHandle) score.fileHandle = fileHandle;
           Score.visit(score, visitUpdate);
-          toast("File downloaded");
+          toast("File opened");
           _shade_.hide();
           this.panel.hide();
-          await FileSrc.offerLibraryImport(score,file);
+          if ((!score.pdfPaint || await score.pdfPaint.promise) && !score.disposed) await FileSrc.offerLibraryImport(score,file);
         }
       } catch (error) {
         if (!error.handled) errDialog(error, source === Score.sources.local ? 'Error opening local Recent file.' : 'Error: failed to download file from cloud server.');

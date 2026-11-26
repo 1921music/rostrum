@@ -910,6 +910,7 @@ class Menu {
     add('page', 'transfer', 'Between scores', 'Import Page', 'TransferPanel');
     add('page', 'advanced', 'Advanced', 'Flatten', 'PageAdvancedPanel');
     add('app', 'navigation', 'Page turning', 'Numbers', 'NavigationPanel');
+    add('app', 'pdfLoading', 'PDF loading', 'Pdf', 'PdfLoadingPanel');
     add('app', 'position', 'Position and zoom', 'Full Screen', 'ScreenPanel');
     // Screen has a fullscreen tap action; position opens only the adjustment panel.
     rings.more.svgPath = iconPaths['Metronome'];
@@ -934,7 +935,7 @@ class Menu {
       ink: ['Annotate', ['ink/pencil', 'ink/pen', 'ink/rastrum', 'ink/text', 'ink/symbols', 'ink/edit', 'ink/undo']],
       page: ['Pages', ['page/add', 'page/cut', 'page/copy', 'page/paste', 'page/undo', 'page/merge', 'page/transfer', 'page/advanced']],
       more: ['Practice', ['score/playback', 'score/transpose', 'more/metronome', 'more/piano', 'more/review', 'more/stopwatch', 'more/clock', 'more/volume']],
-      app: ['Settings', ['app/theme', 'app/navigation', 'more/keyboard', 'app/storage', 'app/guide', 'app/about']],
+      app: ['Settings', ['app/theme', 'app/navigation', 'app/pdfLoading', 'more/keyboard', 'app/storage', 'app/guide', 'app/about']],
     };
     // Preserve the six disk sectors in the documented order.
     this.rings = Object.fromEntries(Object.keys(navigation).map(key => [key, rings[key]]));
@@ -946,7 +947,7 @@ class Menu {
     }
     const show = cell => cell.key === 'library' ? this.showLibrary()
       : cell.key === 'position' ? this.showPanel(rings.app.cells.screen) : this.showPanel(cell);
-    for (const path of ['score/library', 'layout/display', 'page/transfer', 'page/advanced', 'app/navigation', 'app/position', 'app/theme']) {
+    for (const path of ['score/library', 'layout/display', 'page/transfer', 'page/advanced', 'app/navigation', 'app/pdfLoading', 'app/position', 'app/theme']) {
       this.listen(path + '/up', show);
       this.listen(path + '/out', cell => cell.key === 'position' ? this.openPanel(rings.app.cells.screen) : this.openPanel(cell));
     }
